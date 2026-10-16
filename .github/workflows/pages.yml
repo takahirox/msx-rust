@@ -29,6 +29,15 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint the emulator
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test the emulator
+        run: cargo test --workspace --locked
+
       - name: Build the static browser application
         run: ./scripts/build.sh
 
@@ -43,6 +52,13 @@ jobs:
 
       - name: Smoke-test the browser app and project-site prefix
         run: npm test
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: test-results/
 
       - name: Upload production website
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

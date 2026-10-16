@@ -151,6 +151,37 @@ fn psg_tone_frequency_noise_and_envelopes() {
         );
     }
 }
+#[test]
+fn psg_volume_zero_settles_to_silence() {
+    // Exercise each channel independently through the register interface.
+    for channel in 0..3 {
+        let mut p = Psg::default();
+        for (register, value) in [
+            (channel * 2, 254),
+            (7, 0x3f & !(1 << channel)),
+            (8 + channel, 15),
+        ] {
+            p.select(register);
+            p.write(value);
+        }
+        p.tick(CPU_HZ / 5);
+        assert!(p.samples.iter().any(|sample| sample.abs() > 0.05));
+        p.select(8 + channel);
+        p.write(0);
+        // Allow at most 250 ms for the AC-coupling filter to decay. Discard
+        // these and all earlier tone samples; check a fresh 100 ms window.
+        p.tick(CPU_HZ / 4);
+        p.samples.clear();
+        p.tick(CPU_HZ / 10);
+        assert!((p.samples.len() as i32 - (SAMPLE_RATE / 10) as i32).abs() <= 1);
+        assert!(
+            p.samples
+                .iter()
+                .all(|sample| sample.is_finite() && sample.abs() < 0.0001),
+            "channel {channel} did not settle below the 0.0001 silence threshold"
+        );
+    }
+}
 fn enter(m: &mut Machine, line: &str) {
     for b in line.bytes().chain([13]) {
         m.text_key(b);

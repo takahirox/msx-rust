@@ -149,8 +149,9 @@ intentionally refuse to reuse an unrelated service. On Linux CI, use
 `npx playwright install --with-deps chromium` to install browser system libraries.
 The browser suite types through keyboard events, verifies BASIC digits directly in
 Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
-waveforms connected to a running AudioContext, and uses real file inputs for ROMs.
-Screenshots go to the local `test-results/` directory.
+waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
+AudioContext, and uses real file inputs for ROMs.
+Screenshots go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
@@ -162,7 +163,7 @@ and the [manual smoke flow and actual results](docs/validation.md).
 ## Deployment
 
 [The Pages workflow](.github/workflows/pages.yml) builds the static site with the
-pinned Rust compiler, validates its exact asset inventory, runs browser tests
+pinned Rust compiler, runs Rust checks, validates its exact asset inventory, runs browser tests
 including real static hosting at `/msx-rust/`, and uploads only `dist/` as the
 Pages artifact. Pushes to `main` deploy only after verification; pull requests
 only verify. All URLs are relative so project-subpath hosting works.

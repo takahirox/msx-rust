@@ -19,7 +19,7 @@ Prefer the smallest coherent design that fully satisfies the Issue. Added comple
 
 Verify correctness, consistency with the repository, and documentation affected by the change. Choose validation appropriate to the changed files and actual tooling. Check that reported results accurately distinguish passed, failed, skipped, and unperformed checks.
 
-There are currently no configured build/test commands. For templates and documentation, inspect Markdown syntax, Issue-template YAML front matter, links and anchors, whitespace, and consistency as described in the [validation guidance](development-flow.md#validation-in-this-repository). Do not require invented Cargo commands, new tooling, unrelated runtime suites, hardware checks, or deployed-site verification for documentation-only work.
+For emulator implementation changes, use the [documented Rust and browser checks](../README.md#development-and-verification). For templates and documentation, inspect Markdown syntax, Issue-template YAML front matter, links and anchors, whitespace, and consistency as described in the [validation guidance](development-flow.md#validation-in-this-repository). Do not require invented Cargo commands, new tooling, unrelated runtime suites, hardware checks, or deployed-site verification for documentation-only work.
 
 ## Separate pre-merge acceptance from later verification
 

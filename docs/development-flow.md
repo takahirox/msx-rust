@@ -30,7 +30,7 @@ Simplicity must not excuse omitted requirements or necessary validation. Added c
 
 ### Validation in this repository
 
-The repository currently has no application files, build/test tooling, or configured build/test commands. Do not assume Cargo or other runtime commands exist, or initialize a crate, dependencies, CI, or tooling merely to document a process.
+The Rust/Wasm emulator and browser test tooling have build and validation commands documented in [README.md](../README.md#development-and-verification). Run the checks relevant to implementation changes. Do not add unrelated tooling merely to document a process.
 
 Choose checks appropriate to the changed files and actual repository tooling. For templates and documentation:
 
@@ -38,7 +38,7 @@ Choose checks appropriate to the changed files and actual repository tooling. Fo
 - Run `git diff --check` for whitespace errors on tracked changes; inspect newly added files as well.
 - Verify that only the intended files changed with `git status --short` and review the diff.
 
-Documentation-only changes do not require unrelated runtime suites, new runtime tests, hardware/device checks, or deployed-site verification. If tooling is added for an actual future Issue, use its documented checks where relevant.
+Documentation-only changes do not require unrelated runtime suites, new runtime tests, hardware/device checks, or deployed-site verification. Use the documented runtime checks when implementation files change.
 
 ## 3. Open a PR for the Issue
 
