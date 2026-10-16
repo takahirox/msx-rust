@@ -170,6 +170,52 @@ fn reset_slots_replacement_ejection_and_system_rom() {
     }
 }
 #[test]
+fn cartridge_installation_clears_previous_hardware_state() {
+    let mut m = Machine::default();
+    m.frame(); // Populate video, audio and BASIC state before replacing it.
+    m.hardware.ram.fill(0x5a);
+    m.hardware.slots = 0xff;
+    m.hardware.ppi_c = 8;
+    m.hardware.ppi_control = 0x80;
+    m.hardware.key(8, 0, true);
+    m.hardware.joystick = 0;
+    m.hardware.psg.select(8);
+    m.hardware.psg.write(15);
+    m.hardware.psg.tick(10000);
+    m.hardware.vdp.control(0x55); // Leave a pending control-port latch.
+    m.text_key(b'X');
+    m.hardware.output(0xf1, b'Y');
+
+    m.load_cartridge_owned(image(2 * 1024 * 1024), Mapper::Ascii8)
+        .unwrap();
+    assert!(m.hardware.ram.iter().all(|&b| b == 0));
+    assert_eq!(m.hardware.slots, 0xd4);
+    assert_eq!(m.hardware.ppi_c, 0);
+    assert_eq!(m.hardware.ppi_control, 0x82);
+    assert_eq!(m.hardware.keyboard, [255; 11]);
+    assert_eq!(m.hardware.joystick, 0x3f);
+    assert_eq!(m.hardware.input(0xf0), 0);
+    assert_eq!(m.hardware.vdp.vram, [0; 16384]);
+    assert_eq!(m.hardware.vdp.registers, [0; 8]);
+    assert!(m.hardware.vdp.pixels.iter().all(|&b| b == 0));
+    assert_eq!(m.hardware.vdp.line, 0);
+    assert_eq!(m.hardware.vdp.frames, 0);
+    m.hardware.vdp.control(7);
+    m.hardware.vdp.control(0x87);
+    assert_eq!(m.hardware.vdp.registers[7], 7);
+    assert_eq!(m.hardware.vdp.read_status(), 0x1f);
+    assert_eq!(m.hardware.psg.registers, [0; 16]);
+    assert_eq!(m.hardware.psg.selected, 0);
+    assert!(m.hardware.psg.samples.is_empty());
+    let mut fresh_psg = msx_core::psg::Psg::default();
+    fresh_psg.tick(10000);
+    m.hardware.psg.tick(10000);
+    assert_eq!(m.hardware.psg.samples, fresh_psg.samples);
+    assert!(m.basic.console.transcript.is_empty());
+    m.step(); // No stale firmware service may execute after installation.
+    assert!(m.basic.console.transcript.is_empty());
+}
+#[test]
 fn large_images_reach_last_bank_without_truncation() {
     for size in [64, 128, 256, 512, 1024, 2048, 4096] {
         let kind = if size <= 2048 {

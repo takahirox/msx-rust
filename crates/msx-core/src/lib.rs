@@ -51,6 +51,24 @@ impl Default for Hardware {
     }
 }
 impl Hardware {
+    /// Reset in place so installing an already reserved cartridge cannot run out
+    /// of memory while allocating replacement RAM, firmware or video buffers.
+    fn reset(&mut self) {
+        self.ram.fill(0);
+        self.mapping = Mapping::new(self.mapping.kind);
+        self.slots = 0xf0;
+        self.ppi_c = 0;
+        self.ppi_control = 0x82;
+        self.release_keys();
+        self.vdp.reset();
+        self.psg.reset();
+        self.keys.clear();
+        self.services.clear();
+        // A real BIOS probes slots itself. Our firmware boots AB cartridges in their initial banks.
+        if self.builtin && !self.cartridge.is_empty() {
+            self.slots = 0xd4;
+        }
+    }
     pub fn key(&mut self, row: usize, bit: u8, down: bool) {
         if row < 11 && bit < 8 {
             if down {
@@ -156,19 +174,7 @@ impl Default for Machine {
 }
 impl Machine {
     pub fn reset(&mut self) {
-        let bios = std::mem::take(&mut self.hardware.bios);
-        let cart = std::mem::take(&mut self.hardware.cartridge);
-        let mapper = self.hardware.mapping.kind;
-        let builtin = self.hardware.builtin;
-        self.hardware = Hardware::default();
-        self.hardware.bios = bios;
-        self.hardware.cartridge = cart;
-        self.hardware.mapping = Mapping::new(mapper);
-        self.hardware.builtin = builtin;
-        // A real BIOS probes slots itself. Our small firmware boots AB cartridges in their initial banks.
-        if builtin && !self.hardware.cartridge.is_empty() {
-            self.hardware.slots = 0xd4;
-        }
+        self.hardware.reset();
         self.cpu = Cpu::new();
         self.basic = Basic::default();
         self.frame_debt = 0;

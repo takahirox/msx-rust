@@ -42,6 +42,12 @@ impl Default for Psg {
     }
 }
 impl Psg {
+    pub(crate) fn reset(&mut self) {
+        let mut samples = std::mem::take(&mut self.samples);
+        samples.clear();
+        *self = Self::default();
+        self.samples = samples;
+    }
     pub fn select(&mut self, value: u8) {
         self.selected = value & 15;
     }

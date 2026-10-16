@@ -407,6 +407,42 @@ function boundedMemoryWasm(bytes, maxPages) {
   throw new Error('Missing Wasm memory section');
 }
 
+test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
+  // 3.5 MiB permits the upload but not the old reset's replacement framebuffer.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 56);
+  await page.addInitScript(base64 => {
+    const instantiate = WebAssembly.instantiate.bind(WebAssembly);
+    WebAssembly.instantiate = async (...args) => {
+      args[0] = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      const result = await instantiate(...args);
+      const exports = result.instance.exports;
+      return { ...result, instance: { exports: { ...exports, msx_upload(length) {
+        const pointer = exports.msx_upload(length);
+        window.lastUpload = { length, reserved: pointer !== 0 };
+        return pointer;
+      } } } };
+    };
+  }, bounded.toString('base64'));
+  const errors = await boot(page);
+  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#mapper').selectOption('2');
+  const fixture = megaRom(2048, '2');
+  await page.locator('#cartridge').setInputFiles(fixture);
+  await expect.poll(() => page.evaluate(() => window.lastUpload)).toEqual({ length: 2 * 1024 * 1024, reserved: true });
+  await expect(page.locator('#status')).toHaveText(`Running · Weave BASIC · ${fixture.name} (ASCII8)`);
+  await backdrop(page, '212,193,84');
+  await page.locator('#screen').focus();
+  await page.keyboard.down('Space');
+  await backdrop(page, '212,82,77');
+  await page.keyboard.up('Space');
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await backdrop(page, '212,193,84');
+  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await enter(page, 'PRINT 42');
+  await expect(page.locator('#transcript')).toContainText('42\nREADY');
+  expect(errors).toEqual([]);
+});
+
 test('resource failures and canceled asynchronous reads preserve the active cartridge', async ({ page }) => {
   // Limit this instance to 4 MiB; a redirected 8 MiB reservation must fail in
   // try_reserve_exact, while the active 64 KiB cartridge keeps running.
