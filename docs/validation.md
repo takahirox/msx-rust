@@ -3,6 +3,7 @@
 Source: [Implement the complete initial browser-playable MSX1 emulator](https://github.com/takahirox/msx-rust/issues/3).
 Local validation date: 2026-10-17. This is a pre-merge worktree record, not a claim
 that GitHub Actions ran or a public site was published.
+For the current UI controls and Issue #7 results, see [UI validation](ui-validation.md).
 The original application results below are retained for provenance. For the Pages
 scaffold's integration results, see [deployment validation](deployment.md#pre-merge-validation).
 
@@ -125,16 +126,16 @@ MSX_TEST_BIOS=target/validation/cbios_main_msx1.rom npm test
 2. Type `10 FOR I=1 TO 5 : PRINT I : NEXT I`, Enter, `LIST`, Enter, `RUN`, Enter.
    Confirm visible lines 1–5. Replace line 10 with `10 PRINT 42` and run again.
    Enter `10` alone and `LIST` to verify deletion. Exercise arrow/Home/End editing.
-3. Click **Try graphics** and confirm a yellow curve appears. Press Enter to return.
+3. Click **Graphics demo** and confirm a yellow curve appears. Press Enter to return.
    Optionally run the numbered graphics example from README.
 4. Click **Enable audio**; type `BEEP` and listen for a steady tone. Type `SOUND 8,0`
    and confirm silence. Audio should remain silent before user activation.
-5. Download/select `test-cartridge.rom`. Confirm title and yellow sprite. Click the
-   display and hold Space: hear the tone, then release to silence. Check that focus
+5. Expand **ROMs & advanced system options**, download `test-cartridge.rom`, then
+   choose it with **Open ROM**. Confirm title and yellow sprite. Click the display and hold Space: hear the tone, then release to silence. Check that focus
    loss releases held keys. Reset should boot the cartridge again; Eject returns to BASIC.
 6. Optionally select your lawfully obtained 32 KiB system ROM, then a compatible
    plain cartridge. Files must stay local. **Built-in BASIC** unloads both inputs.
-7. Pause, confirm video execution stops, and Start again. Reload to verify the
+7. Pause, confirm video execution stops, and Resume again. Reload to verify the
    original BASIC prompt returns without retaining user ROM data.
 
 ## Limitations and unperformed checks
