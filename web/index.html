@@ -64,7 +64,9 @@
       <summary>ROMs &amp; advanced system options</summary>
       <div class="detail-body">
         <h2>Cartridges</h2>
-        <p>Use <strong>Open ROM</strong> above for a plain 8, 16, 32 or 48 KiB MSX1 cartridge with an AB header. Loading resets the machine; Eject removes the cartridge. MegaROMs, disks and MSX2 are unsupported. Many commercial cartridges require a compatible system BIOS.</p>
+        <label class="file" for="mapper">Cartridge mapper</label>
+        <select id="mapper" disabled><option value="0">Auto (plain images)</option><option value="1">Plain</option><option value="2">ASCII8</option><option value="3">ASCII16</option><option value="4">Konami</option><option value="5">Konami SCC (no SCC sound)</option></select>
+        <p>Choose the mapper, then use <strong>Open ROM</strong> above for a local .rom or .bin cartridge. Auto recognizes plain AB images; for a MegaROM choose its documented mapper. No fixed upload size cap; available browser/Wasm memory and mapper address range apply. SRAM variants, SCC sound, disks and MSX2 are unsupported. Loading resets the machine; Eject removes the cartridge. Many commercial cartridges require a compatible system BIOS.</p>
         <p><a href="test-cartridge.rom" download>Download our original test cartridge</a>, then open it above. Hold Space to hear its PSG tone after enabling audio.</p>
         <h2>Local system BIOS / BASIC</h2>
         <p>Load a lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM to execute it from reset. Built-in BASIC unloads both system and cartridge ROMs and returns to Weave BASIC.</p>

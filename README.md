@@ -65,7 +65,7 @@ interpreter, not original Microsoft MSX BASIC.
 | Component | Initial implementation |
 | --- | --- |
 | Z80 | Main/alternate registers, flags, base/CB/ED/DD/FD/indexed-CB instruction families, stack, I/O, HALT, EI delay, IRQ/NMI, IM 0/1/2 and instruction T-states |
-| Memory | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain cartridge in slot 1 |
+| Memory | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain/MegaROM cartridge in slot 1 |
 | TMS9918A | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, PSG joystick 1 input; arrows + Z/X are directions/triggers |
@@ -75,8 +75,9 @@ This is an initial implementation, not a claim of universal MSX software compati
 Instruction-level timing is used; individual bus phases, MSX M1 wait states, analog
 video/overscan, VDP access contention, and undocumented CPU silicon quirks are not
 accurately modeled. Sprite status at raster/off-screen edges and unusual combined
-VDP modes are not compatibility guarantees. There are no expanded slots, MegaROM
-mappers, disk/tape drives, SCC, MSX2 hardware, or advanced peripherals.
+VDP modes are not compatibility guarantees. There are no expanded slots, disk/tape
+drives, SCC audio, MSX2 hardware, or advanced peripherals. ROM-only ASCII8, ASCII16, Konami and Konami SCC banking is supported;
+SRAM and other mapper variants are not.
 
 ## Weave BASIC and firmware
 
@@ -131,10 +132,69 @@ Expand **ROMs & advanced system options** to download the original **test cartri
 then choose it with **Open ROM** in the toolbar. It displays a title and sprite;
 hold Space to play a roughly 440 Hz PSG tone.
 This cartridge runs Z80 code against standard hardware ports, with no native BASIC
-service calls. Plain 8, 16, 32 and 48 KiB ROMs with an AB header at 4000h or 8000h are accepted. Small ROMs
-mirror in the 4000h–BFFFh window; 48 KiB ROMs start at 0000h. Loading resets the
-machine. The small built-in boot ROM initializes self-contained cartridges; many
-commercial cartridges need a compatible system BIOS and will not work with it.
+service calls. Select `.rom` or `.bin` cartridge files locally. There is **no fixed
+upload size limit**: available browser/Wasm memory and the selected mapper's hardware
+address range apply. No image is truncated to fit.
+
+Choose **Cartridge mapper** under **ROMs & advanced system options** before selecting the file with **Open ROM**:
+
+- **Auto** recognizes only plain 8, 16, 32 and 48 KiB images with an AB header
+  visible at CPU address 4000h or 8000h. It does not guess bank-switching hardware
+  from a file's length or scan arbitrary bytes for instruction patterns. Larger
+  images receive a request to select the documented mapper. A small bank-switched
+  image can also need manual selection. An AB header is format validation, not a
+  guarantee of software compatibility.
+- **Plain** uses the same header validation. Small images mirror in 4000h–BFFFh;
+  48 KiB images start at 0000h. These lengths describe a mapping format, not an
+  upload cap.
+- **ASCII8**, **ASCII16**, **Konami**, and **Konami SCC** explicitly select ROM-only
+  MegaROM hardware. Use the ROM author's documentation to choose; arbitrary or
+  ambiguous images cannot be identified reliably. Change the mapper and select
+  the same file again to retry. Changing the picker alone leaves the running
+  cartridge unchanged.
+
+| Mapper | CPU bank windows | Bank-register write ranges (inclusive) | Reset banks | Hardware address range |
+| --- | --- | --- | --- | --- |
+| ASCII8 | Four 8 KiB banks at 4000h–BFFFh | 6000h–67FFh, 6800h–6FFFh, 7000h–77FFh, 7800h–7FFFh | 0, 0, 0, 0 | 2 MiB (8 bank bits) |
+| ASCII16 | Two 16 KiB banks at 4000h–BFFFh | 6000h–67FFh, 7000h–77FFh | 0, 0 | 4 MiB (8 bank bits) |
+| Konami | Four 8 KiB banks; first fixed at 0 | 6000h–7FFFh, 8000h–9FFFh, A000h–BFFFh | 0, 1, 2, 3 | 256 KiB (5 bank bits) |
+| Konami SCC | Four 8 KiB banks at 4000h–BFFFh | 5000h–57FFh, 7000h–77FFh, 9000h–97FFh, B000h–B7FFh | 0, 1, 2, 3 | 512 KiB (6 bank bits) |
+
+MegaROM images must have a power-of-two byte length of at least one mapper bank,
+with an AB header visible in the initial banks. Unconnected bank address bits
+mirror smaller ROMs. Images beyond the hardware address range need a different
+or extended mapper; they are rejected with an explanation. ASCII mappings are
+unmapped outside 4000h–BFFFh. Konami mirrors page 1 into page 0 and page 2 into
+page 3; SCC swaps those mirrors. Only writes through the selected cartridge slot
+change banks. **SCC sound/register hardware is not implemented**: selecting bank
+3Fh in the third SCC window hides ROM at 9800h–9FFFh, which reads FFh and ignores
+SCC writes. This supports SCC mapper address decoding, not full SCC-game compatibility.
+SRAM/save hardware, SCC+, reversed ASCII registers and other mapper variants are
+unsupported; manual selection cannot establish that an unknown image uses none
+of these features.
+
+Loading a valid image resets the machine and banks. Reset retains selected ROMs
+and restores initial banks; Eject removes the cartridge; Built-in BASIC removes
+both cartridge and system ROM. Failed imports leave the running machine and its
+bank selections intact. The Wasm transfer reserves memory before JavaScript creates
+a writable view, then moves that buffer into the core without another cartridge
+copy. Empty files, malformed dumps, unsupported mapping and resource failures are
+reported as nonfatal errors. Extremely large files remain subject to browser
+ArrayBuffer limits and the 32-bit Wasm address space.
+
+The small built-in boot ROM initializes self-contained cartridges using their AB
+init pointer; many commercial cartridges need a compatible system BIOS and will
+not work with it. No commercial-game compatibility or manual copyrighted-game
+play-testing is required or claimed.
+
+All mapper fixtures are generated, original MIT-licensed code in
+[`cartridge.rs`](crates/msx-core/tests/cartridge.rs) and
+[`browser.spec.js`](tests/browser.spec.js). Run the verification commands below to
+test legally distributable images: browser fixtures of 64, 128, 256, 512 and
+1024 KiB actually switch to code in the last bank, display a backdrop and respond
+to Space through the real file picker and Wasm. Rust tests also cover 2/4 MiB
+images, register boundaries, reset, slot effects and invalid-load preservation.
+No fixture downloads or proprietary ROMs are required.
 
 Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
 lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM. **Built-in BASIC** in that section
@@ -178,9 +238,9 @@ Automated audio checks verify the browser signal path, not physical speakers.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
 interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelopes,
-slots/PPI, actual cartridge execution, BASIC syntax/runtime tests, and supplied-ROM
-boot tests. See [test methodology and hardware references](docs/architecture.md)
-and the [manual smoke flow and original results](docs/validation.md).
+slots/PPI, plain and bank-switched cartridge execution, BASIC syntax/runtime tests,
+and supplied-ROM boot tests. See [test methodology and hardware references](docs/architecture.md)
+and the [manual smoke flow and actual results](docs/validation.md).
 See the [UI redesign validation and screenshots](docs/ui-validation.md) for Issue #7.
 
 ## Deployment

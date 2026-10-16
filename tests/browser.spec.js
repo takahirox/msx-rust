@@ -178,7 +178,7 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
   // Select an invalid ROM and ensure the running cartridge survives.
   await page.locator('#cartridge').setInputFiles({ name: 'invalid.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(17) });
-  await expect(page.locator('#status')).toContainText('plain 8, 16, 32 or 48');
+  await expect(page.locator('#status')).toContainText('select its documented mapper');
   await page.getByRole('button', { name: 'Eject cartridge' }).click();
   await expect(page.locator('#transcript')).toContainText('READY');
   await expect(page.locator('#example')).toBeEnabled();
@@ -252,8 +252,246 @@ test('boots with all assets beneath a GitHub Pages project prefix', async ({ pag
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
   for (const file of ['app.js', 'style.css', 'msx_wasm.wasm']) expect(requests).toContain(`/msx-rust/${file}`);
+  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#mapper').selectOption('3');
+  await page.locator('#cartridge').setInputFiles(megaRom(128, '3'));
+  await backdrop(page, '212,193,84');
   expect(requests.every(path => path.startsWith('/msx-rust/'))).toBe(true);
   expect(failures).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+// Original MIT-licensed Z80 fixtures. The reset entry switches the final bank into
+// 8000h and jumps there. Only that bank contains the display/keyboard routine.
+function megaRom(sizeKiB, mapper) {
+  const rom = Buffer.alloc(sizeKiB * 1024);
+  rom.set([0x41, 0x42, 0x10, 0x40]);
+  const bankSize = mapper === '3' ? 16384 : 8192;
+  const lastBank = rom.length / bankSize - 1;
+  const register = { '2': 0x7000, '3': 0x7000, '4': 0x8000, '5': 0x9000 }[mapper];
+  rom.set([0x3e, lastBank, 0x32, register & 255, register >> 8, 0xc3, 0x00, 0x80], 0x10);
+  // Select keyboard row 8; while Space is held, change the backdrop A to 6.
+  rom.set([0x3e,8,0xd3,0xaa, 0xdb,0xa9,0xe6,1,0x3e,0x0a,0x20,2,0x3e,6,
+    0xd3,0x99,0x3e,0x87,0xd3,0x99,0xc3,0x04,0x80], lastBank * bankSize);
+  return { name: `authored-${sizeKiB}-${mapper}.rom`, mimeType: 'application/octet-stream', buffer: rom };
+}
+async function backdrop(page, rgb) {
+  await expect.poll(async () => (await colors(page))[rgb] || 0).toBe(256 * 192);
+}
+for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [1024, '2']]) {
+  test(`real file input executes ${size} KiB bank-switched mapper ${mapper} and survives failed imports`, async ({ page }) => {
+    const errors = await boot(page);
+    const requests = [];
+    page.on('request', r => requests.push({ method: r.method(), url: r.url() }));
+    const fixture = megaRom(size, mapper);
+    await page.locator('#advanced-panel > summary').click();
+    // Auto refuses to guess a mapper. It gives an actionable message without a size cap.
+    await page.locator('#cartridge').setInputFiles(fixture);
+    await expect(page.locator('#status')).toContainText('select its documented mapper');
+    await expect(page.locator('#status')).not.toContainText('too large');
+    await page.locator('#mapper').selectOption(mapper);
+    await page.locator('#cartridge').setInputFiles(fixture);
+    await expect(page.locator('#status')).toContainText(fixture.name);
+    await backdrop(page, '212,193,84');
+    await page.locator('#screen').focus();
+    await page.keyboard.down('Space');
+    await backdrop(page, '212,82,77');
+    await page.keyboard.up('Space');
+    await backdrop(page, '212,193,84');
+    await page.getByRole('button', { name: 'Reset', exact: true }).click();
+    await backdrop(page, '212,193,84');
+    for (const bad of [
+      { name: 'bad-header.rom', buffer: Buffer.alloc(65536) },
+      { name: 'partial.bin', buffer: fixture.buffer.subarray(0, 65535) },
+      { name: 'wrong-extension.txt', buffer: fixture.buffer },
+    ]) {
+      await page.locator('#cartridge').setInputFiles({ mimeType: 'application/octet-stream', ...bad });
+      await expect(page.locator('#status')).toContainText('ROM import failed');
+      await page.locator('#screen').focus();
+      await page.keyboard.down('Space');
+      await backdrop(page, '212,82,77');
+      await page.keyboard.up('Space');
+      await backdrop(page, '212,193,84');
+    }
+    await page.locator('#bios').setInputFiles({ name: 'large-system.rom', mimeType: 'application/octet-stream', buffer: fixture.buffer });
+    await expect(page.locator('#status')).toContainText('32 KiB');
+    await backdrop(page, '212,193,84');
+    // Replace with a different bank-switched mapping, then a plain image.
+    const replacementMapper = mapper === '3' ? '2' : '3';
+    await page.locator('#mapper').selectOption(replacementMapper);
+    await page.locator('#cartridge').setInputFiles(megaRom(128, replacementMapper));
+    await expect(page.locator('#status')).toContainText(`authored-128-${replacementMapper}.rom`);
+    await backdrop(page, '212,193,84');
+    await page.locator('#mapper').selectOption('0');
+    await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
+    await expect(page.locator('#status')).toContainText('test-cartridge.rom');
+    await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeLessThan(256 * 192);
+    await page.getByRole('button', { name: 'Eject cartridge' }).click();
+    await expect(page.locator('#transcript')).toContainText('READY');
+    await enter(page, 'PRINT 42');
+    await expect(page.locator('#transcript')).toContainText('42\nREADY');
+    await page.locator('#mapper').selectOption(mapper);
+    await page.locator('#cartridge').setInputFiles(fixture);
+    await backdrop(page, '212,193,84');
+    await page.getByRole('button', { name: 'Built-in BASIC', exact: true }).click();
+    await expect(page.locator('#transcript')).toContainText('READY');
+    expect(requests.every(r => r.method === 'GET' && r.url.startsWith('http://127.0.0.1:41873/'))).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('Wasm transfer grows memory before creating a view and rejects invalid ABI calls safely', async ({ page }) => {
+  await boot(page);
+  const result = await page.evaluate(async () => {
+    const { instance: { exports: w } } = await WebAssembly.instantiate(await (await fetch('msx_wasm.wasm')).arrayBuffer(), {});
+    w.msx_frame();
+    const error = () => new TextDecoder().decode(new Uint8Array(w.memory.buffer, w.msx_error(), w.msx_error_len()));
+    const initialBuffer = w.memory.buffer;
+    const initialSize = initialBuffer.byteLength;
+    const size = initialSize + 65536;
+    const pointer = w.msx_upload(size);
+    const grown = w.memory.buffer !== initialBuffer && w.memory.buffer.byteLength > initialSize;
+    // Construct the view after reservation; write the last byte as well as the header.
+    const view = new Uint8Array(w.memory.buffer, pointer >>> 0, size);
+    view[view.length - 1] = 0x5a;
+    const invalidLength = w.msx_load(size - 1, 0, 2);
+    const lengthError = error();
+    const oversized = w.msx_upload(0xffffffff);
+    const resourceError = error();
+    const empty = w.msx_upload(0);
+    const p = w.msx_upload(8192);
+    new Uint8Array(w.memory.buffer, p, 4).set([0x41, 0x42, 0x10, 0x40]);
+    const invalidMapper = w.msx_load(8192, 0, 99);
+    const mapperError = error();
+    const p2 = w.msx_upload(8192);
+    new Uint8Array(w.memory.buffer, p2, 4).set([0x41, 0x42, 0x10, 0x40]);
+    const valid = w.msx_load(8192, 0, 1);
+    return { pointer: !!pointer, grown, invalidLength, lengthError, oversized, resourceError, empty, invalidMapper, mapperError, valid };
+  });
+  expect(result).toMatchObject({ pointer: true, grown: true, invalidLength: 0, oversized: 0, empty: 0, invalidMapper: 0, valid: 1 });
+  expect(result.lengthError).toContain('transfer length');
+  expect(result.resourceError).toContain('memory');
+  expect(result.mapperError).toContain('Unsupported cartridge mapper');
+});
+
+// Restrict only the test instance's linear-memory maximum, so allocation failure
+// is deterministic without exhausting host memory or changing the shipped module.
+function boundedMemoryWasm(bytes, maxPages) {
+  let cursor = 8;
+  function leb() {
+    let value = 0, shift = 0, byte;
+    do { byte = bytes[cursor++]; value += (byte & 127) * 2 ** shift; shift += 7; } while (byte & 128);
+    return value;
+  }
+  function encoded(value) {
+    const result = [];
+    do { const byte = value & 127; value >>>= 7; result.push(byte | (value ? 128 : 0)); } while (value);
+    return Buffer.from(result);
+  }
+  while (cursor < bytes.length) {
+    const start = cursor;
+    const section = bytes[cursor++];
+    const length = leb();
+    const end = cursor + length;
+    if (section === 5) {
+      expect(leb()).toBe(1); // one import-free, 32-bit linear memory
+      const flags = leb();
+      expect([0, 1]).toContain(flags);
+      const minimum = leb();
+      expect(minimum).toBeLessThan(maxPages);
+      const payload = Buffer.concat([Buffer.from([1, 1]), encoded(minimum), encoded(maxPages)]);
+      return Buffer.concat([bytes.subarray(0, start), Buffer.from([5]), encoded(payload.length), payload, bytes.subarray(end)]);
+    }
+    cursor = end;
+  }
+  throw new Error('Missing Wasm memory section');
+}
+
+test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
+  // 3.5 MiB permits the upload but not the old reset's replacement framebuffer.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 56);
+  await page.addInitScript(base64 => {
+    const instantiate = WebAssembly.instantiate.bind(WebAssembly);
+    WebAssembly.instantiate = async (...args) => {
+      args[0] = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      const result = await instantiate(...args);
+      const exports = result.instance.exports;
+      return { ...result, instance: { exports: { ...exports, msx_upload(length) {
+        const pointer = exports.msx_upload(length);
+        window.lastUpload = { length, reserved: pointer !== 0 };
+        return pointer;
+      } } } };
+    };
+  }, bounded.toString('base64'));
+  const errors = await boot(page);
+  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#mapper').selectOption('2');
+  const fixture = megaRom(2048, '2');
+  await page.locator('#cartridge').setInputFiles(fixture);
+  await expect.poll(() => page.evaluate(() => window.lastUpload)).toEqual({ length: 2 * 1024 * 1024, reserved: true });
+  await expect(page.locator('#status')).toHaveText(`Running · Weave BASIC · ${fixture.name} (ASCII8)`);
+  await backdrop(page, '212,193,84');
+  await page.locator('#screen').focus();
+  await page.keyboard.down('Space');
+  await backdrop(page, '212,82,77');
+  await page.keyboard.up('Space');
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await backdrop(page, '212,193,84');
+  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await enter(page, 'PRINT 42');
+  await expect(page.locator('#transcript')).toContainText('42\nREADY');
+  expect(errors).toEqual([]);
+});
+
+test('resource failures and canceled asynchronous reads preserve the active cartridge', async ({ page }) => {
+  // Limit this instance to 4 MiB; a redirected 8 MiB reservation must fail in
+  // try_reserve_exact, while the active 64 KiB cartridge keeps running.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 64);
+  await page.addInitScript(base64 => {
+    const instantiate = WebAssembly.instantiate.bind(WebAssembly);
+    WebAssembly.instantiate = async (...args) => {
+      args[0] = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      const result = await instantiate(...args);
+      const exports = result.instance.exports;
+      return { ...result, instance: { exports: { ...exports, msx_upload(length) {
+        if (window.failReservation) { window.failReservation = false; return exports.msx_upload(8 * 1024 * 1024); }
+        return exports.msx_upload(length);
+      } } } };
+    };
+    const arrayBuffer = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = async function () {
+      if (window.failFileRead) { window.failFileRead = false; throw new RangeError('Test browser allocation failure'); }
+      if (window.deferFileRead) {
+        window.deferFileRead = false;
+        await new Promise(resolve => { window.finishFileRead = resolve; });
+      }
+      return arrayBuffer.call(this);
+    };
+  }, bounded.toString('base64'));
+  const errors = await boot(page);
+  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#mapper').selectOption('2');
+  await page.locator('#cartridge').setInputFiles(megaRom(64, '2'));
+  await backdrop(page, '212,193,84');
+  for (const flag of ['failReservation', 'failFileRead']) {
+    await page.evaluate(flag => { window[flag] = true; }, flag);
+    await page.locator('#cartridge').setInputFiles(megaRom(128, '2'));
+    await expect(page.locator('#status')).toContainText('memory');
+    await page.locator('#screen').focus();
+    await page.keyboard.down('Space');
+    await backdrop(page, '212,82,77');
+    await page.keyboard.up('Space');
+    await backdrop(page, '212,193,84');
+  }
+  // Eject while File.arrayBuffer is pending: its later completion cannot reload it.
+  await page.evaluate(() => { window.deferFileRead = true; });
+  await page.locator('#cartridge').setInputFiles(megaRom(128, '2'));
+  await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
+  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await page.evaluate(() => window.finishFileRead());
+  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await enter(page, 'PRINT 42');
+  await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect(errors).toEqual([]);
 });
 
@@ -393,10 +631,10 @@ for (const failure of ['http', 'invalid-wasm']) {
   });
 }
 
-test('invalid and oversized ROMs keep the selected machine and explain how to recover', async ({ page }) => {
+test('unrecognized ROMs keep the selected machine and explain how to recover', async ({ page }) => {
   await boot(page);
   await page.locator('#cartridge').setInputFiles({ name: 'large.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(49153) });
-  await expect(page.locator('#status')).toContainText('ROM too large');
+  await expect(page.locator('#status')).toContainText('select its documented mapper');
   await expect(page.locator('#eject')).toBeDisabled();
   await expect(page.locator('#example')).toBeEnabled();
   await page.locator('#advanced-panel > summary').click();

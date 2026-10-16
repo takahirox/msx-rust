@@ -33,10 +33,15 @@ pub struct Vdp {
 }
 impl Default for Vdp {
     fn default() -> Self {
+        Self::with_pixels(vec![0; WIDTH * HEIGHT * 4])
+    }
+}
+impl Vdp {
+    fn with_pixels(pixels: Vec<u8>) -> Self {
         Self {
             vram: [0; 16384],
             registers: [0; 8],
-            pixels: vec![0; WIDTH * HEIGHT * 4],
+            pixels,
             status: 0x1f,
             address: 0,
             latch: None,
@@ -46,8 +51,11 @@ impl Default for Vdp {
             frames: 0,
         }
     }
-}
-impl Vdp {
+    pub(crate) fn reset(&mut self) {
+        let mut pixels = std::mem::take(&mut self.pixels);
+        pixels.fill(0);
+        *self = Self::with_pixels(pixels);
+    }
     pub fn irq(&self) -> bool {
         self.status & 0x80 != 0 && self.registers[1] & 0x20 != 0
     }

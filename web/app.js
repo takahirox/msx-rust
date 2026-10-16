@@ -13,6 +13,7 @@ let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
 let cartridge = '';
+let importGeneration = 0;
 let previousTime;
 let accumulator = 0;
 const FRAME_MS = 1000 * 228 * 262 / 3579545;
@@ -25,9 +26,9 @@ function status(message, kind = 'info') {
 }
 function updateControls() {
   const native = system === 'Weave BASIC' && !cartridge;
-  for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'focus-screen']) $(id).disabled = !ready || loading;
+  for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen']) $(id).disabled = !ready || loading;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
-  $('eject').disabled = !ready || loading || !cartridge;
+  $('eject').disabled = !ready || !cartridge;
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
@@ -155,6 +156,8 @@ function updateStatus() {
   status(`${paused ? 'Paused' : 'Running'} · ${system}${cartridge ? ` · ${cartridge}` : ''}`);
 }
 function restart(action) {
+  importGeneration++;
+  loading = false;
   releaseKeys();
   flushAudio();
   pendingText = [];
@@ -168,22 +171,34 @@ function restart(action) {
 }
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
+  const generation = ++importGeneration;
+  const mapper = Number($('mapper').value);
   loading = true;
   updateControls();
   status(`Loading ${file.name}…`);
   try {
-    if (file.size > 49152) throw new Error('ROM too large. Plain cartridges only, up to 48 KiB; system ROMs must be 32 KiB.');
+    if (!/\.(rom|bin)$/i.test(file.name)) throw new Error('Select a .rom or .bin ROM image.');
+    if (isSystem && file.size !== 32768) throw new Error('Select a 32 KiB MSX1 BIOS/BASIC system ROM.');
+    // u32 is the raw Wasm ABI length type, not a cartridge size policy.
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 0xffffffff) throw new Error('The image is empty or exceeds this browser/Wasm address space.');
     const bytes = new Uint8Array(await file.arrayBuffer());
-    new Uint8Array(wasm.memory.buffer, wasm.msx_upload(), bytes.length).set(bytes);
-    if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    if (isSystem) system = file.name; else cartridge = file.name;
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    // Obtain the buffer only AFTER reservation: memory growth detaches old views.
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0, mapper)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    if (isSystem) system = file.name; else cartridge = `${file.name} (${['Auto / Plain', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][mapper]})`;
     restart(() => {});
   } catch (error) {
-    status(`${error.message} Selected ROMs are unchanged: ${system}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    const message = error instanceof RangeError ? 'Not enough browser/Wasm memory to import this image. Close other tabs or try a smaller image.' : `ROM import failed: ${error.message}`;
+    status(`${message} Selected ROMs are unchanged: ${system}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
     $(isSystem ? 'bios' : 'cartridge').value = '';
   } finally {
-    loading = false;
-    updateControls();
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
 // International MSX keyboard matrix (US key placement). Matrix keys continue

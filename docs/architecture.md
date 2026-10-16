@@ -20,8 +20,10 @@ reads its vector through the memory map. RESET reconstructs CPU/peripherals/RAM,
 retaining selected ROMs and resetting the native interpreter's program.
 
 Slots 0/1/2/3 are respectively system ROM/cartridge/empty/RAM. A8h selects a slot
-per 16 KiB page. Empty space reads FFh; only RAM accepts memory writes. In built-in
-mode the boot ROM maps a cartridge into pages 1/2 and jumps to its AB init pointer.
+per 16 KiB page. Empty space reads FFh; RAM accepts memory writes and the cartridge
+slot decodes mapper registers. In built-in mode the boot ROM maps a cartridge into
+pages 1/2 and calls its AB init pointer. Reset restores mapper power-on banks.
+See the [mapper table and selection rules](../README.md#rom-loading-and-legal-guidance).
 With an external system ROM, normal reset mapping is restored and that ROM probes
 slots itself. A9h reads the active-low keyboard row selected by AAh; ABh handles
 PPI control and port-C bit set/reset. PSG registers 14/15 integrate joystick input.
@@ -36,7 +38,7 @@ in the UI, README, assembly listing, and license inventory.
 ## CPU tests and vectors
 
 All implementation and tests were independently written for this repository.
-No existing emulator source was used. The decoder follows the bit fields of the
+No existing CPU emulator source was used. The decoder follows the bit fields of the
 Zilog opcode tables. The tests in `crates/msx-core/tests/cpu.rs` are executable
 vectors, specifying exact instruction bytes, initial state, final state and T-states.
 They are not a claim of exhaustive Z80 conformance.
@@ -93,3 +95,23 @@ programs or ROM bytes were copied from them.
 - ASCII, [MSX Technical Data Book](https://www.msxarchive.nl/pub/msx/docs/manuals/msxtech.pdf): MSX memory/I/O architecture (archive may restrict access).
 - [MSX I/O ports overview](https://map.grauw.nl/resources/msx_io_ports.php) and [international keyboard matrices](https://www.msx.org/wiki/Keyboard_Matrices): supplementary MSX wiring references.
 - C-BIOS Association, [project description and license](https://cbios.sourceforge.net/): optional, externally supplied BIOS test input; no BASIC, not distributed by this project.
+
+## Cartridge mapper references and tests
+
+The mapper module and generated tests are original code. Register ranges, power-on
+banks and Konami mirror wiring were cross-checked against the openMSX project's
+[ASCII8](https://github.com/openMSX/openMSX/blob/master/src/memory/RomAscii8kB.cc),
+[ASCII16](https://github.com/openMSX/openMSX/blob/master/src/memory/RomAscii16kB.cc),
+[Konami](https://github.com/openMSX/openMSX/blob/master/src/memory/RomKonami.cc) and
+[Konami SCC](https://github.com/openMSX/openMSX/blob/master/src/memory/RomKonamiSCC.cc)
+implementations. No implementation source or ROM bytes were copied.
+
+`tests/cartridge.rs` checks both ends of register ranges, ignored writes, bank
+masking, mirrored reads, SCC enable decoding, slot selection, reset, replacement,
+ejection and failed-load preservation. Generated Z80 code switches a bank and
+executes from it on every supported mapper. Browser tests generate larger images
+in memory and select them through the real file input, verify pixels and Space
+responses after successful and failed imports, and restore plain cartridges and
+BASIC. A separate raw Wasm test verifies memory growth and invalid transfer lengths,
+mapper IDs and unrepresentable allocation sizes. SCC registers/audio and SRAM are
+explicitly outside this implementation.

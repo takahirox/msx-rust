@@ -1,6 +1,9 @@
 //! Platform-independent, original MSX1 implementation. No browser dependencies.
 pub mod basic;
+pub mod cartridge;
 pub mod cpu;
+pub use cartridge::Mapper;
+use cartridge::Mapping;
 pub mod firmware;
 pub mod font;
 pub mod psg;
@@ -15,6 +18,7 @@ pub struct Hardware {
     pub ram: Vec<u8>,
     pub bios: Vec<u8>,
     pub cartridge: Vec<u8>,
+    mapping: Mapping,
     pub slots: u8,
     pub ppi_c: u8,
     pub ppi_control: u8,
@@ -32,6 +36,7 @@ impl Default for Hardware {
             ram: vec![0; 65536],
             bios: firmware::bios(),
             cartridge: Vec::new(),
+            mapping: Mapping::default(),
             slots: 0xf0,
             ppi_c: 0,
             ppi_control: 0x82,
@@ -46,6 +51,24 @@ impl Default for Hardware {
     }
 }
 impl Hardware {
+    /// Reset in place so installing an already reserved cartridge cannot run out
+    /// of memory while allocating replacement RAM, firmware or video buffers.
+    fn reset(&mut self) {
+        self.ram.fill(0);
+        self.mapping = Mapping::new(self.mapping.kind);
+        self.slots = 0xf0;
+        self.ppi_c = 0;
+        self.ppi_control = 0x82;
+        self.release_keys();
+        self.vdp.reset();
+        self.psg.reset();
+        self.keys.clear();
+        self.services.clear();
+        // A real BIOS probes slots itself. Our firmware boots AB cartridges in their initial banks.
+        if self.builtin && !self.cartridge.is_empty() {
+            self.slots = 0xd4;
+        }
+    }
     pub fn key(&mut self, row: usize, bit: u8, down: bool) {
         if row < 11 && bit < 8 {
             if down {
@@ -66,23 +89,16 @@ impl Bus for Hardware {
         let a = address as usize;
         match slot {
             0 => self.bios.get(a).copied().unwrap_or(255),
-            1 => {
-                let len = self.cartridge.len();
-                if len == 49152 {
-                    self.cartridge.get(a).copied().unwrap_or(255)
-                } else if (0x4000..0xc000).contains(&a) && len != 0 {
-                    self.cartridge[(a - 0x4000) % len]
-                } else {
-                    255
-                }
-            }
+            1 => self.mapping.read(&self.cartridge, address),
             3 => self.ram[a],
             _ => 255,
         }
     }
     fn write(&mut self, address: u16, value: u8) {
-        if (self.slots >> ((address >> 14) * 2)) & 3 == 3 {
-            self.ram[address as usize] = value;
+        match (self.slots >> ((address >> 14) * 2)) & 3 {
+            1 => self.mapping.write(address, value),
+            3 => self.ram[address as usize] = value,
+            _ => {}
         }
     }
     fn input(&mut self, port: u16) -> u8 {
@@ -158,44 +174,36 @@ impl Default for Machine {
 }
 impl Machine {
     pub fn reset(&mut self) {
-        let bios = std::mem::take(&mut self.hardware.bios);
-        let cart = std::mem::take(&mut self.hardware.cartridge);
-        let builtin = self.hardware.builtin;
-        self.hardware = Hardware::default();
-        self.hardware.bios = bios;
-        self.hardware.cartridge = cart;
-        self.hardware.builtin = builtin;
-        // A real BIOS probes slots itself. Our small firmware boots plain AB cartridges.
-        if builtin && !self.hardware.cartridge.is_empty() {
-            self.hardware.slots = 0xd4;
-        }
+        self.hardware.reset();
         self.cpu = Cpu::new();
         self.basic = Basic::default();
         self.frame_debt = 0;
     }
     pub fn load_cartridge(&mut self, rom: &[u8]) -> Result<(), String> {
-        if ![8192, 16384, 32768, 49152].contains(&rom.len()) {
-            return Err(
-                "Use a plain 8, 16, 32 or 48 KiB MSX ROM; MegaROM mappers are unsupported.".into(),
-            );
-        }
-        let first = if rom.len() == 49152 { 0x4000 } else { 0 };
-        let second = if rom.len() == 49152 {
-            0x8000
-        } else {
-            0x4000 % rom.len()
-        };
-        if rom[first..first + 2] != *b"AB" && rom[second..second + 2] != *b"AB" {
-            return Err(
-                "This plain cartridge needs an AB header at CPU address 4000h or 8000h.".into(),
-            );
-        }
-        self.hardware.cartridge = rom.to_vec();
+        self.load_cartridge_with_mapper(rom, Mapper::Auto)
+    }
+    pub fn load_cartridge_with_mapper(&mut self, rom: &[u8], mapper: Mapper) -> Result<(), String> {
+        Mapping::validate(rom, mapper)?;
+        let mut owned = Vec::new();
+        owned.try_reserve_exact(rom.len()).map_err(|_| {
+            "Not enough memory for this cartridge. Close other tabs or try a smaller image."
+                .to_string()
+        })?;
+        owned.extend_from_slice(rom);
+        self.load_cartridge_owned(owned, mapper)
+    }
+    /// Takes ownership of a staged upload, avoiding another full MegaROM copy.
+    /// Validation finishes before the running machine is changed.
+    pub fn load_cartridge_owned(&mut self, rom: Vec<u8>, mapper: Mapper) -> Result<(), String> {
+        let mapping = Mapping::validate(&rom, mapper)?;
+        self.hardware.cartridge = rom;
+        self.hardware.mapping = mapping;
         self.reset();
         Ok(())
     }
     pub fn unload_cartridge(&mut self) {
-        self.hardware.cartridge.clear();
+        self.hardware.cartridge = Vec::new();
+        self.hardware.mapping = Mapping::default();
         self.reset();
     }
     pub fn load_bios(&mut self, rom: &[u8]) -> Result<(), String> {
@@ -210,7 +218,8 @@ impl Machine {
     pub fn use_builtin(&mut self) {
         self.hardware.bios = firmware::bios();
         self.hardware.builtin = true;
-        self.hardware.cartridge.clear();
+        self.hardware.cartridge = Vec::new();
+        self.hardware.mapping = Mapping::default();
         self.reset();
     }
     pub fn text_key(&mut self, key: u8) {
