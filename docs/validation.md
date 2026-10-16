@@ -3,8 +3,49 @@
 Source: [Implement the complete initial browser-playable MSX1 emulator](https://github.com/takahirox/msx-rust/issues/3).
 Local validation date: 2026-10-17. This is a pre-merge worktree record, not a claim
 that GitHub Actions ran or a public site was published.
+The original application results below are retained for provenance. For the Pages
+scaffold's integration results, see [deployment validation](deployment.md#pre-merge-validation).
 
-## Environment and completed checks
+## Review fixes and revalidation
+
+On 2026-10-17, integrated `main` at `618911c8eeabd4ab0f653a35f0ec43d19da0637a`
+and resolved all seven conflicting files. Retained the pinned Rust compiler,
+clean `dist/` build, actual project-prefix static server, deployment guide and
+main-only Pages deployment. The combined workflow also retains Rust formatting,
+Clippy and tests, plus the `browser-evidence` upload.
+
+Added a deterministic PSG muting regression for each of the three channels:
+first require tone samples above 0.05, then write zero amplitude, allow 250 ms
+of emulated filter decay, and check every fresh sample over 100 ms is finite
+and below 0.0001 absolute amplitude. Earlier samples are discarded.
+
+The browser test activates Web Audio and verifies `BEEP` produces a peak above
+0.05 and more than ten positive zero crossings. After `SOUND 8,0`, it allows
+500 ms for queued playback (at most approximately 150 ms), filter decay and frame
+margin. It then requires at least twelve newly scheduled buffers (about 200 ms)
+to finish playback in a running AudioContext, with every sample finite and below
+0.0001 absolute amplitude. Per-buffer peaks and completion events prevent stale
+tone counters or a stopped scheduler from being mistaken for successful muting.
+
+Revalidated on the macOS/Rust/Node/Chromium environment listed below:
+
+| Command / check | Actual result after conflict resolution |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | All 26 integration tests passed: 7 CPU, 13 hardware/machine, 6 BASIC |
+| `./scripts/build.sh` | Initial macOS linker load failed; passed using the documented local wrapper in [deployment.md](deployment.md#pre-merge-validation) with `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` |
+| `node scripts/check-dist.mjs` | Passed; eight-file deployment inventory and Wasm/ROM checks |
+| `npm ci`; `npx playwright install chromium`; `npm test` | All seven Chromium tests passed, including tone/muting and actual `/msx-rust/` hosting |
+| `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/pages.yml` | Passed |
+| Build fingerprints | All three hashes match the original application build below |
+
+The optional external C-BIOS tests and human listening were not repeated. No
+push, GitHub merge or deployment was performed. Production verification remains
+pending; the automated audio checks establish signal generation and muting,
+without claiming a physical-speaker listening result.
+
+## Original application environment and completed checks
 
 macOS arm64; rustup Rust 1.99.0 (`b940084d7`), wasm32-unknown-unknown;
 Node 24.12.0; Python 3.13.13; Playwright 1.64.1; headless Chromium 156.0.8078.4.

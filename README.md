@@ -11,10 +11,10 @@ verification are pending; this URL is a deployment target, not a claim of a live
 
 Install [Rust through rustup](https://rustup.rs/), Python 3, and Node.js 22 or newer
 (Node is only needed for browser tests). The checked-in toolchain configuration requests
-stable Rust, rustfmt, Clippy, and `wasm32-unknown-unknown`.
+Rust 1.99.0, rustfmt, Clippy, and `wasm32-unknown-unknown`.
 
 ```sh
-rustup target add wasm32-unknown-unknown
+rustup show
 ./scripts/build.sh
 python3 -m http.server 41873 --bind 127.0.0.1 --directory dist
 ```
@@ -24,7 +24,7 @@ not allow Wasm fetching. If a separate system/Homebrew Rust shadows rustup, put
 the rustup toolchain first in `PATH` so Cargo, rustc, and rustdoc use the same toolchain:
 
 ```sh
-export PATH="$(rustup run stable rustc --print sysroot)/bin:$PATH"
+export PATH="$(rustup run 1.99.0 rustc --print sysroot)/bin:$PATH"
 ```
 
 Click the screen and enter:
@@ -144,12 +144,13 @@ npx playwright install chromium
 npm test
 ```
 
-Stop the manual server first: browser tests start their own server on 41873 and
+Stop the manual server first: browser tests start their own servers on 41873/41874 and
 intentionally refuse to reuse an unrelated service. On Linux CI, use
 `npx playwright install --with-deps chromium` to install browser system libraries.
 The browser suite types through keyboard events, verifies BASIC digits directly in
 Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
-waveforms connected to a running AudioContext, and uses real file inputs for ROMs.
+waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
+AudioContext, and uses real file inputs for ROMs.
 Screenshots go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
 
@@ -161,10 +162,13 @@ and the [manual smoke flow and actual results](docs/validation.md).
 
 ## Deployment
 
-[The Pages workflow](.github/workflows/pages.yml) runs Rust checks, builds the
-static site, validates its exact asset inventory, runs browser tests, and uploads
-the Pages artifact. Pushes to `main` deploy only after verification; pull requests
+[The Pages workflow](.github/workflows/pages.yml) builds the static site with the
+pinned Rust compiler, runs Rust checks, validates its exact asset inventory, runs browser tests
+including real static hosting at `/msx-rust/`, and uploads only `dist/` as the
+Pages artifact. Pushes to `main` deploy only after verification; pull requests
 only verify. All URLs are relative so project-subpath hosting works.
+See the [deployment guide](docs/deployment.md) for reproducible commands, owner
+setup, failure inspection and pending production checks.
 
 One-time repository prerequisite: set **Settings → Pages → Build and deployment →
 Source → GitHub Actions**, and allow deployment to the `github-pages` environment.

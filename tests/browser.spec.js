@@ -91,13 +91,14 @@ test('graphics uses the VDP and Escape interrupts an infinite BASIC program', as
   await enter(page, 'PRINT 6*7');
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
 });
-test('Web Audio activation schedules audible PSG waveform buffers', async ({ page }) => {
+test('Web Audio plays a PSG tone and fresh buffers settle to silence after muting', async ({ page }) => {
   await page.addInitScript(() => {
-    window.audioEvidence = { state: '', buffers: 0, maximum: 0, zeroCrossings: 0, connections: 0 };
+    window.audioEvidence = { state: '', buffers: 0, maximum: 0, zeroCrossings: 0, connections: 0, recent: [] };
     const NativeContext = window.AudioContext;
     window.AudioContext = class extends NativeContext {
       constructor(...args) {
         super(...args);
+        window.audioClock = this;
         const create = this.createBufferSource.bind(this);
         this.createBufferSource = () => {
           const source = create();
@@ -106,12 +107,18 @@ test('Web Audio activation schedules audible PSG waveform buffers', async ({ pag
           source.connect = (...args) => { window.audioEvidence.connections++; return connect(...args); };
           source.start = (...args) => {
             const d = source.buffer.getChannelData(0);
+            const startTime = Math.max(this.currentTime, args[0] || 0);
+            const record = { startTime, endTime: startTime + source.buffer.duration, maximum: 0, ended: false };
+            source.addEventListener('ended', () => { record.ended = true; });
             window.audioEvidence.buffers++;
             window.audioEvidence.state = this.state;
-            for (let i = 1; i < d.length; i++) {
+            for (let i = 0; i < d.length; i++) {
+              record.maximum = Math.max(record.maximum, Math.abs(d[i]));
               window.audioEvidence.maximum = Math.max(window.audioEvidence.maximum, Math.abs(d[i]));
-              if (d[i-1] <= 0 && d[i] > 0) window.audioEvidence.zeroCrossings++;
+              if (i && d[i-1] <= 0 && d[i] > 0) window.audioEvidence.zeroCrossings++;
             }
+            window.audioEvidence.recent.push(record);
+            if (window.audioEvidence.recent.length > 180) window.audioEvidence.recent.shift();
             return start(...args);
           };
           return source;
@@ -129,6 +136,19 @@ test('Web Audio activation schedules audible PSG waveform buffers', async ({ pag
   expect(evidence.state).toBe('running');
   expect(evidence.connections).toBeGreaterThan(0);
   await enter(page, 'SOUND 8,0');
+  // Bound settling to 500 ms: the app queues at most 150 ms of playback,
+  // and the PSG DC filter gets 250 ms to decay, plus frame/command margin.
+  const settledAfter = await page.evaluate(() => window.audioClock.currentTime + 0.5);
+  const completedFreshBuffers = () => page.evaluate(after => {
+    const now = window.audioClock.currentTime;
+    return window.audioEvidence.recent.filter(buffer => buffer.startTime >= after && buffer.endTime <= now && buffer.ended);
+  }, settledAfter);
+  // Require at least 12 new, completed buffers (about 200 ms), so neither
+  // stale tone statistics nor a stopped audio scheduler can pass as silence.
+  await expect.poll(async () => (await completedFreshBuffers()).length).toBeGreaterThanOrEqual(12);
+  const muted = await completedFreshBuffers();
+  expect(muted.every(buffer => Number.isFinite(buffer.maximum) && buffer.maximum < 0.0001)).toBe(true);
+  expect(await page.evaluate(() => window.audioClock.state)).toBe('running');
 });
 test('file picker boots original cartridge, handles bad ROMs, ejects and loads local system ROM', async ({ page }) => {
   const errors = await boot(page);
@@ -193,14 +213,18 @@ test('multiline paste is delivered across frames without truncating the program'
 });
 
 test('boots with all assets beneath a GitHub Pages project prefix', async ({ page }) => {
-  // Serve the same artifact beneath /msx-rust/ without rewriting its contents.
-  await page.route('**/msx-rust/**', async route => {
-    const url = route.request().url().replace('/msx-rust/', '/');
-    await route.fulfill({ response: await route.fetch({ url }) });
-  });
-  const errors = await boot(page, '/msx-rust/');
+  // A real static server exposes the unchanged artifact at the project prefix.
+  const requests = [];
+  const failures = [];
+  page.on('request', request => requests.push(new URL(request.url()).pathname));
+  page.on('requestfailed', request => failures.push(request.url()));
+  page.on('response', response => { if (response.status() >= 400) failures.push(response.url()); });
+  const errors = await boot(page, 'http://127.0.0.1:41874/msx-rust/');
   await enter(page, 'PRINT 42');
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
+  for (const file of ['app.js', 'style.css', 'msx_wasm.wasm']) expect(requests).toContain(`/msx-rust/${file}`);
+  expect(requests.every(path => path.startsWith('/msx-rust/'))).toBe(true);
+  expect(failures).toEqual([]);
   expect(errors).toEqual([]);
 });
