@@ -3,64 +3,103 @@
 The target project site is <https://takahirox.github.io/msx-rust/>.
 This is a target URL, not a verified working deployment.
 
-## Current integration status
+## Application integration and reproducible build
 
-Issue #4 establishes the deployment workflow in parallel with [Issue #3](https://github.com/takahirox/msx-rust/issues/3).
-The current checkout and GitHub `main` contain no application, Rust manifest,
-browser build tooling, or configured build commands. No application branch or PR
-was available when this workflow was added.
+Issue #4 integrates the existing application from [Issue #3](https://github.com/takahirox/msx-rust/issues/3)'s
+`issue-3-browser-msx1` branch at commit
+`7b0890f76fe62f47e4ac7841495812c933b3e635`, without waiting for its merge.
+The core, browser UI and firmware sources are carried over unchanged; emulator
+feature review remains in #3. Deployment integration pins the compiler, cleans
+the output directory, and tests actual project-prefix hosting.
 
-The **Build integration required (Issue #3)** step deliberately fails with an
-Actions error. This prevents a green build or a placeholder deployment from
-being mistaken for a working emulator. Issue #4 remains incomplete until the
-real application is integrated and its required pre-merge checks pass.
+Install rustup, Node.js 22 or newer and Python 3. The workflow uses Node.js 22;
+`rust-toolchain.toml` pins Rust 1.99.0 and installs `wasm32-unknown-unknown`.
+Cargo and npm use the checked-in lockfiles. No wasm-bindgen, wasm-pack, Trunk or
+frontend bundler is needed: the browser's `app.js` calls the exported Wasm API.
 
-## Complete the application integration
+```sh
+rustup show
+# Keep Cargo/rustc/rustdoc consistent if a system Rust shadows rustup.
+export PATH="$(rustup run 1.99.0 rustc --print sysroot)/bin:$PATH"
+./scripts/build.sh
+node scripts/check-dist.mjs
+npm ci
+npx playwright install chromium
+npm test
+```
 
-Coordinate through #3's PR when its build tooling becomes available; #3 does not
-need to merge before this integration can be implemented and tested. Keep emulator
-implementation and feature validation in #3.
+On Linux CI, use `npx playwright install --with-deps chromium` to install browser
+system libraries. GitHub's Ubuntu runner provides rustup and Python 3; `rustup show`
+installs the toolchain specified by the repository before the build runs.
 
-1. Replace the explicit failing step in
-   [the workflow](../.github/workflows/pages.yml) with #3's actual dependency setup
-   and build command. Pin the Rust toolchain, Wasm/browser tools and dependencies
-   according to that implementation, use its lockfiles, and document the exact
-   local command here. No Cargo, wasm-pack, Trunk or Node build command has been
-   selected or assumed by this deployment scaffold.
-2. Stage only the generated static website in `_site/`, the deployment staging
-   directory chosen here. This is not an assertion about #3's output layout:
-   either explicitly copy its website output or update the artifact path to its
-   actual clean output directory. Start from clean output and include entry HTML,
-   JavaScript bindings, Wasm and required lawful assets. Never copy the repository
-   root, source, tests, user ROMs or proprietary BIOS/BASIC/game ROMs. Review the
-   provenance and redistribution permission for every bundled asset.
-3. Use relative asset/module/Wasm URLs or configure the actual build tool's public
-   base as `/msx-rust/`. Configure any router for that prefix. A leading `/pkg/`
-   or `/app.js` would resolve at the domain root and break project hosting.
-4. Run the real build locally. Inspect the complete output inventory and ensure
-   the entry HTML, JS and Wasm are present and nonempty. Serve the output at
-   `/msx-rust/` on a local static server, open it in a current desktop browser,
-   and check that the UI boots and HTML, JS, Wasm and required assets load without
-   console or network errors. Serving only at `/` does not validate the prefix.
-   Record actual commands and results in the integration PR. Compilation alone
-   does not prove that the browser app works.
+The build script compiles `msx-wasm` in release mode with `--locked`, recreates
+`dist/`, copies only the web entry files and license notices, then generates the
+original boot/test ROMs from Rust source. The complete deployable inventory is:
 
-The exact build command, dependency setup, generated artifact checks and local
-browser smoke test remain pending; they cannot be validated against absent
-application files. Do not remove the failing step until these are implemented.
+- `index.html`, `style.css`, `app.js`
+- `msx_wasm.wasm`
+- `weave-boot.rom`, `test-cartridge.rom`
+- `LICENSE`, `ROM-LICENSE.txt`
 
-## Scaffold validation
+The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the
+original MIT-licensed firmware, glyphs and cartridge; no proprietary BIOS/BASIC,
+games, third-party ROMs, source, test fixtures or npm packages are shipped.
+`scripts/check-dist.mjs` rejects missing, empty or unexpected output files and
+checks Wasm exports, ROM headers/sizes and relative HTML links. Only `dist/` is
+uploaded by the Pages workflow.
 
-- Passed workflow linting with
-  `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/pages.yml`.
-- Checked parsed workflow triggers, permissions, production-only upload/deploy
-  conditions, build dependency, environment, concurrency and staging path.
-- Executed the current build step locally: it emitted the expected Actions error
-  and exited with status 1; no website output was produced.
-- Checked local documentation links and `git diff --check`.
+All module, stylesheet and Wasm URLs are relative; there is no client-side router.
+Browser tests start two isolated Python static servers: the ordinary local site
+on port 41873 and the unchanged `dist/` artifact at
+`http://127.0.0.1:41874/msx-rust/`. The prefix test uses real HTTP requests, verifies
+HTML/JS/CSS/Wasm loading beneath the prefix, boots BASIC, types `PRINT 42` and
+checks the transcript and Canvas with no failed requests or page errors.
 
-These checks validate only the deployment scaffold. Actual application build,
-artifact generation and static-server/browser checks are still pending.
+## Pre-merge validation
+
+Validated locally on 2026-10-17, macOS arm64, Rust 1.99.0, Node.js 24.12.0 and
+Playwright 1.64.1 / Chromium 156.0.8078.4:
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 25 integration tests passed |
+| `./scripts/build.sh` | Passed with the local macOS linker workaround below |
+| `node scripts/check-dist.mjs` | Exact eight-file inventory, relative HTML links, Wasm API and ROM checks passed |
+| `npm ci`; `npx playwright install chromium`; `npm test` | Seven browser tests passed, including the real `/msx-rust/` static-server test |
+| `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/pages.yml` | Passed |
+| Local documentation links; `git diff --cached --check` | 18 local link targets exist; no whitespace errors |
+
+The BASIC screenshot was inspected and shows the entered program and visible
+output 1–5. Wasm is 181,055 bytes with SHA256
+`3d41eb3a179434b0369614716d5446634ef3bc40647267bbb8c654f40998779e`;
+both generated ROM hashes also match #3's [validation record](validation.md).
+The optional external C-BIOS test was not rerun for this deployment integration.
+
+The initial macOS build failed because the freshly installed `rust-lld` could not
+locate its own `libLLVM.dylib`. Exporting `DYLD_LIBRARY_PATH` before the shell build
+did not fix that loader failure. The successful build used an ignored local
+wrapper to set the library path immediately before executing the same pinned
+Rust linker; no compiler, source or system installation was changed:
+
+```sh
+mkdir -p target
+cat > target/pages-linker.sh <<'SH'
+#!/bin/sh
+toolchain_root="$(rustc --print sysroot)"
+export DYLD_LIBRARY_PATH="$toolchain_root/lib"
+exec "$toolchain_root/lib/rustlib/aarch64-apple-darwin/bin/rust-lld" "$@"
+SH
+chmod +x target/pages-linker.sh
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER="$PWD/target/pages-linker.sh" ./scripts/build.sh
+```
+
+Run this only after selecting the pinned toolchain in `PATH` as above. The Ubuntu
+workflow uses the normal Rust linker. GitHub CI has not been rerun in this local
+fix node; no push, repository setting change or production deployment was made.
+Local builds and browser tests do not establish that production publishing works;
+the live checks below remain pending.
 
 ## One-time repository owner setup
 
@@ -82,8 +121,8 @@ are unconfirmed and must be recorded by an owner or subsequent verifier.
 
 ## Triggers and failure inspection
 
-Once build integration and owner setup are complete, every push to `main` builds
-and uploads `_site/` using `actions/upload-pages-artifact`. Only after the build
+After owner setup, every push to `main` builds, validates and uploads `dist/`
+using `actions/upload-pages-artifact`. Only after the build and browser checks
 succeeds does the deployment job run `actions/configure-pages` and
 `actions/deploy-pages`, targeting the `github-pages` environment. Production
 deployments share a concurrency group and do not cancel an active deployment.
@@ -99,7 +138,7 @@ the Pages publishing source, environment rules and deployment job logs. The
 
 ## Required post-merge verification (pending)
 
-After the real build integration is reviewed and merged:
+After this integration is reviewed and merged:
 
 - Record that Pages uses **GitHub Actions**, including any completed owner action.
 - Observe a `main` push build and successful deployment; record its run URL and
