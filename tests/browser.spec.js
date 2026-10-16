@@ -72,14 +72,14 @@ test('boots, edits, lists and runs a BASIC program with visible output', async (
   await expect(page.locator('#transcript')).toContainText('>PRINT 43\n43\nREADY');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(page.locator('#status')).toContainText('Paused');
-  await page.getByRole('button', { name: 'Start', exact: true }).click();
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
   await expect(page.locator('#transcript')).not.toContainText('PRINT 43');
   expect(errors).toEqual([]);
 });
 test('graphics uses the VDP and Escape interrupts an infinite BASIC program', async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Try graphics' }).click();
+  await page.getByRole('button', { name: 'Graphics demo' }).click();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(200);
   await page.screenshot({ path: 'test-results/graphics.png', fullPage: true });
   await page.keyboard.press('Escape');
@@ -128,14 +128,18 @@ test('Web Audio plays a PSG tone and fresh buffers settle to silence after mutin
   });
   await boot(page);
   await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
-  await expect(page.locator('#audio')).toHaveText('Audio enabled');
-  await enter(page, 'BEEP');
+  await expect(page.locator('#audio')).toHaveText('Mute audio');
+  await page.getByRole('button', { name: 'Sound demo', exact: true }).click();
+  await expect(page.locator('#tone')).toHaveText('Stop tone');
+  await expect(page.locator('#screen')).toBeFocused();
+  await expect(page.locator('#transcript')).toContainText('>BEEP');
   await expect.poll(() => page.evaluate(() => window.audioEvidence.maximum)).toBeGreaterThan(0.05);
   await expect.poll(() => page.evaluate(() => window.audioEvidence.zeroCrossings)).toBeGreaterThan(10);
   const evidence = await page.evaluate(() => window.audioEvidence);
   expect(evidence.state).toBe('running');
   expect(evidence.connections).toBeGreaterThan(0);
-  await enter(page, 'SOUND 8,0');
+  await page.getByRole('button', { name: 'Stop tone', exact: true }).click();
+  await expect(page.locator('#tone')).toHaveText('Sound demo');
   // Bound settling to 500 ms: the app queues at most 150 ms of playback,
   // and the PSG DC filter gets 250 ms to decay, plus frame/command margin.
   const settledAfter = await page.evaluate(() => window.audioClock.currentTime + 0.5);
@@ -149,24 +153,41 @@ test('Web Audio plays a PSG tone and fresh buffers settle to silence after mutin
   const muted = await completedFreshBuffers();
   expect(muted.every(buffer => Number.isFinite(buffer.maximum) && buffer.maximum < 0.0001)).toBe(true);
   expect(await page.evaluate(() => window.audioClock.state)).toBe('running');
+  await page.getByRole('button', { name: 'Mute audio', exact: true }).click();
+  await expect(page.locator('#audio-state')).toContainText('Audio off');
+  await expect.poll(() => page.evaluate(() => window.audioClock.state)).toBe('suspended');
+  await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
+  await expect(page.locator('#audio')).toHaveText('Mute audio');
+  await page.evaluate(() => window.audioClock.suspend());
+  await expect(page.locator('#audio')).toHaveText('Resume audio');
+  await page.getByRole('button', { name: 'Resume audio', exact: true }).click();
+  await expect(page.locator('#audio-state')).toHaveText('Audio on');
 });
 test('file picker boots original cartridge, handles bad ROMs, ejects and loads local system ROM', async ({ page }) => {
   const errors = await boot(page);
   const requests = [];
   page.on('request', request => requests.push({ method: request.method(), url: request.url() }));
-  await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Open ROM', exact: true }).click();
+  await (await chooser).setFiles('dist/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('test-cartridge.rom');
+  await expect(page.locator('#example')).toBeDisabled();
+  await expect(page.locator('#starter-help')).toContainText('Built-in BASIC');
+  await expect(page.locator('#eject')).toBeEnabled();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(20);
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
   // Select an invalid ROM and ensure the running cartridge survives.
   await page.locator('#cartridge').setInputFiles({ name: 'invalid.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(17) });
-  await expect(page.locator('#status')).toContainText('plain 8, 16, 32 or 48');
+  await expect(page.locator('#status')).toContainText('select its documented mapper');
   await page.getByRole('button', { name: 'Eject cartridge' }).click();
   await expect(page.locator('#transcript')).toContainText('READY');
+  await expect(page.locator('#example')).toBeEnabled();
+  await expect(page.locator('#screen')).toBeFocused();
   // Authored fixture fills the screen with VDP backdrop color A, then HALTs.
   // Its OUT F1 is deliberately ignored: native services must be disabled.
   const bios = Buffer.alloc(32768);
   bios.set([0x3e,0x0a,0xd3,0x99,0x3e,0x87,0xd3,0x99,0xaf,0xd3,0xf1,0x76]);
+  await page.locator('#advanced-panel > summary').click();
   await page.locator('#bios').setInputFiles({ name: 'authored-system.rom', mimeType: 'application/octet-stream', buffer: bios });
   await expect(page.locator('#status')).toContainText('authored-system.rom');
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBe(256*192);
@@ -201,6 +222,13 @@ if (process.env.MSX_TEST_BIOS) {
 
 test('multiline paste is delivered across frames without truncating the program', async ({ page }) => {
   await boot(page);
+  // Ctrl+V must reach the browser's paste action, rather than being canceled
+  // by the MSX key matrix handler. The paste event below avoids OS clipboard use.
+  expect(await page.locator('#screen').evaluate(canvas => {
+    const event = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, cancelable: true, bubbles: true });
+    canvas.dispatchEvent(event);
+    return event.defaultPrevented;
+  })).toBe(false);
   const source = Array.from({ length: 30 }, (_, i) => `${(i+1)*10} PRINT ${i+1}`).join('\n') + '\nRUN\n';
   expect(source.length).toBeGreaterThan(256);
   await page.locator('#screen').evaluate((canvas, text) => {
@@ -224,6 +252,7 @@ test('boots with all assets beneath a GitHub Pages project prefix', async ({ pag
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
   for (const file of ['app.js', 'style.css', 'msx_wasm.wasm']) expect(requests).toContain(`/msx-rust/${file}`);
+  await page.locator('#advanced-panel > summary').click();
   await page.locator('#mapper').selectOption('3');
   await page.locator('#cartridge').setInputFiles(megaRom(128, '3'));
   await backdrop(page, '212,193,84');
@@ -255,6 +284,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     const requests = [];
     page.on('request', r => requests.push({ method: r.method(), url: r.url() }));
     const fixture = megaRom(size, mapper);
+    await page.locator('#advanced-panel > summary').click();
     // Auto refuses to guess a mapper. It gives an actionable message without a size cap.
     await page.locator('#cartridge').setInputFiles(fixture);
     await expect(page.locator('#status')).toContainText('select its documented mapper');
@@ -403,6 +433,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
     };
   }, bounded.toString('base64'));
   const errors = await boot(page);
+  await page.locator('#advanced-panel > summary').click();
   await page.locator('#mapper').selectOption('2');
   await page.locator('#cartridge').setInputFiles(megaRom(64, '2'));
   await backdrop(page, '212,193,84');
@@ -426,4 +457,164 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   await enter(page, 'PRINT 42');
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect(errors).toEqual([]);
+});
+
+async function expectScreenFits(page) {
+  const bounds = await page.locator('#screen').boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds.width).toBeGreaterThan(180);
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(Math.abs(bounds.width / bounds.height - 4 / 3)).toBeLessThan(0.01);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
+for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [320, 640]]) {
+  test(`screen, toolbar and disclosures fit at ${width}×${height}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height });
+    await boot(page);
+    await expectScreenFits(page);
+    const bounds = await page.locator('#screen').boundingBox();
+    expect(bounds.y + bounds.height).toBeLessThan(height);
+    await expect(page.locator('#cartridge')).toBeHidden();
+    if (width >= 768) expect((await page.locator('.toolbar').boundingBox()).height).toBeLessThanOrEqual(70);
+    const buttons = await page.locator('.toolbar button').all();
+    const boxes = [];
+    for (const button of buttons) {
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      for (const other of boxes) {
+        expect(box.x >= other.x + other.width - 1 || other.x >= box.x + box.width - 1 || box.y >= other.y + other.height - 1 || other.y >= box.y + box.height - 1).toBe(true);
+      }
+      boxes.push(box);
+    }
+    for (const id of ['help-panel', 'advanced-panel', 'transcript-panel']) {
+      await expect(page.locator(`#${id}`)).not.toHaveAttribute('open');
+    }
+    await page.screenshot({ path: `test-results/ui-${width}.png`, fullPage: true });
+    await testInfo.attach(`emulator-${width}`, { path: `test-results/ui-${width}.png`, contentType: 'image/png' });
+    await page.locator('#help-panel > summary').click();
+    await expect(page.getByText('Touch typing and an on-screen keyboard are not supported.', { exact: false })).toBeVisible();
+    await page.locator('#advanced-panel > summary').click();
+    await expect(page.getByLabel('Local system ROM (32 KiB)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Built-in BASIC', exact: true })).toBeVisible();
+    await page.locator('#transcript-panel > summary').click();
+    await expect(page.locator('#transcript')).toBeVisible();
+    await expectScreenFits(page);
+    await page.screenshot({ path: `test-results/details-${width}.png`, fullPage: true });
+  });
+}
+
+test('focus is visible, Tab leaves the display, and samples resume paused BASIC', async ({ page }) => {
+  await boot(page);
+  await expect(page.locator('#focus-screen')).toHaveText('Keyboard active');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#focus-screen')).toBeFocused();
+  await expect(page.locator('#focus-screen')).toHaveText('Click / tap to type');
+  await page.keyboard.type('PRINT 99');
+  await expect(page.locator('#transcript')).not.toContainText('PRINT 99');
+  await page.locator('#focus-screen').click();
+  await expect(page.locator('#screen')).toBeFocused();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(page.locator('#screen')).toBeFocused();
+  await page.getByRole('button', { name: 'BASIC example', exact: true }).click();
+  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await expect(page.locator('#screen')).toBeFocused();
+  await expect(page.locator('#transcript')).toContainText('1\n2\n3\n4\n5\nREADY');
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await expect(page.locator('#screen')).toBeFocused();
+  await expect(page.locator('#transcript')).not.toContainText('>RUN');
+});
+
+for (const mode of ['native', 'unavailable', 'rejected']) {
+  test(`fullscreen keeps controls and a 4:3 screen with ${mode} API`, async ({ page }) => {
+    if (mode !== 'native') await page.addInitScript(reject => {
+      Element.prototype.requestFullscreen = reject ? () => Promise.reject(new Error('Denied')) : undefined;
+    }, mode === 'rejected');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await boot(page);
+    await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen');
+    if (mode === 'native') expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('emulator');
+    else await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
+    await expectScreenFits(page);
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 812 }, { width: 812, height: 375 }]) {
+      // Chromium cannot resize a window while it is in native fullscreen.
+      if (mode === 'native') await page.locator('#fullscreen').click();
+      await page.setViewportSize(viewport);
+      if (mode === 'native') {
+        await page.locator('#fullscreen').click();
+        await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen');
+      }
+      await expectScreenFits(page);
+      const screen = await page.locator('#screen').boundingBox();
+      const exit = await page.locator('#fullscreen').boundingBox();
+      expect(screen.y + screen.height).toBeLessThanOrEqual(viewport.height);
+      expect(exit.y).toBeGreaterThanOrEqual(0);
+      expect(exit.y + exit.height).toBeLessThanOrEqual(viewport.height);
+    }
+    await page.screenshot({ path: `test-results/fullscreen-${mode}.png` });
+    await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+    await expect(page.locator('#fullscreen')).toHaveText('Fullscreen');
+    await expect(page.locator('#screen')).toBeFocused();
+    if (mode !== 'native') {
+      await page.locator('#fullscreen').click();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#emulator')).not.toHaveClass(/focus-view/);
+      await expect(page.locator('#example')).toBeEnabled();
+      expect(await page.locator('#help-panel').evaluate(el => el.inert)).toBe(false);
+    }
+  });
+}
+
+test('loading disables commands and shows progress before Wasm is ready', async ({ page }) => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/msx_wasm.wasm', async route => { await gate; await route.continue(); });
+  await page.goto('/');
+  await expect(page.locator('#status')).toHaveText('Loading WebAssembly…');
+  for (const id of ['pause', 'open-rom', 'audio', 'example', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
+  await expect(page.locator('#fullscreen')).toBeEnabled();
+  release();
+  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+});
+
+for (const failure of ['http', 'invalid-wasm']) {
+  test(`initialization failure (${failure}) has visible feedback and disabled commands`, async ({ page }) => {
+    await page.route('**/msx_wasm.wasm', route => route.fulfill({ status: failure === 'http' ? 503 : 200, body: 'unavailable' }));
+    await page.goto('/');
+    await expect(page.locator('#status')).toContainText('Unable to start:');
+    await expect(page.locator('#status')).toContainText('Reload to retry');
+    await expect(page.locator('#status')).toHaveAttribute('data-kind', 'error');
+    for (const id of ['pause', 'open-rom', 'audio', 'example', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
+    await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+  });
+}
+
+test('unrecognized ROMs keep the selected machine and explain how to recover', async ({ page }) => {
+  await boot(page);
+  await page.locator('#cartridge').setInputFiles({ name: 'large.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(49153) });
+  await expect(page.locator('#status')).toContainText('select its documented mapper');
+  await expect(page.locator('#eject')).toBeDisabled();
+  await expect(page.locator('#example')).toBeEnabled();
+  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#bios').setInputFiles('dist/test-cartridge.rom');
+  await expect(page.locator('#status')).toContainText('32 KiB');
+  await expect(page.locator('#status')).toContainText('Selected ROMs are unchanged');
+  await expect(page.locator('#example')).toBeEnabled();
+  await page.locator('#builtin').click();
+  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+});
+
+test('audio unlock failures are visible and retryable', async ({ page }) => {
+  await page.addInitScript(() => { window.AudioContext = class { constructor() { throw new Error('Audio is unavailable'); } }; });
+  await boot(page);
+  await page.locator('#tone').click();
+  await expect(page.locator('#status')).toContainText('Audio: Audio is unavailable');
+  await expect(page.locator('#audio')).toBeEnabled();
+  await expect(page.locator('#tone')).toHaveText('Sound demo');
 });

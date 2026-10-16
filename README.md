@@ -27,7 +27,9 @@ the rustup toolchain first in `PATH` so Cargo, rustc, and rustdoc use the same t
 export PATH="$(rustup run 1.99.0 rustc --print sysroot)/bin:$PATH"
 ```
 
-Click the screen and enter:
+The display is the main workspace. Click or tap it to focus, then use a **physical
+keyboard** (touch typing / an on-screen keyboard is not supported). The focus cue
+changes to **Keyboard active**; Tab moves back to the page controls. Enter:
 
 ```basic
 10 FOR I=1 TO 5 : PRINT I : NEXT I
@@ -38,12 +40,25 @@ The screen prints 1 through 5. `LIST` displays the program. Replace a numbered l
 by entering it again, or delete it by entering its number alone. Left/Right, Home,
 End, Backspace and Delete edit the current line. ASCII text can also be pasted.
 Escape interrupts execution. **Reset** clears the machine and program while keeping
-selected ROMs. **Built-in BASIC** also unloads both ROM inputs. **Pause / Start**
-controls emulation. There is no persistent program or ROM storage.
+selected ROMs. **Built-in BASIC** also unloads both ROM inputs. **Pause / Resume**
+controls emulation. The compact toolbar also has **Open ROM**, **Eject**, and
+**Fullscreen**. Fullscreen keeps the toolbar accessible; **Exit fullscreen** or
+Escape returns to the page. Browsers without fullscreen support get a focused
+view with the same controls and exit options. There is no persistent program or
+ROM storage.
 
-Click **Enable audio**, then type `BEEP`. Stop the sustained tone with `SOUND 8,0`.
-Audio starts only after a user gesture and may need resuming after browser suspension.
-The graphics button draws a sine curve using the emulated VDP; Enter returns to text.
+Try **BASIC example**, **Graphics demo**, or **Sound demo** beneath the display.
+The starters enter commands into the current built-in BASIC session, resume paused
+emulation, and restore keyboard focus. Graphics draws a sine curve using the
+emulated VDP; Enter returns to text. Sound demo enables audio and plays a sustained
+tone; **Stop tone** silences it. You can also **Enable audio**, then type `BEEP`
+and silence it with `SOUND 8,0`. **Mute audio** turns browser playback off;
+**Resume audio** restores it after browser suspension. Audio requires a user gesture.
+
+Expand **Keyboard & BASIC help** for editing and input guidance, **ROMs & advanced
+system options** for BIOS loading and compatibility/legal details, or **BASIC text
+transcript** for the full built-in interpreter output. Weave BASIC is our original
+interpreter, not original Microsoft MSX BASIC.
 
 ## Hardware and compatibility
 
@@ -113,14 +128,15 @@ cartridge text/sprites and generated ROM bytes are original and MIT licensed. Se
 in `dist/`. Rust has no external dependencies; Playwright is a development-only dependency
 under its upstream license and is not shipped in the site.
 
-Download the original **test cartridge** from the app, then select it in the cartridge
-picker. It displays a title and sprite; hold Space to play a roughly 440 Hz PSG tone.
+Expand **ROMs & advanced system options** to download the original **test cartridge**,
+then choose it with **Open ROM** in the toolbar. It displays a title and sprite;
+hold Space to play a roughly 440 Hz PSG tone.
 This cartridge runs Z80 code against standard hardware ports, with no native BASIC
 service calls. Select `.rom` or `.bin` cartridge files locally. There is **no fixed
 upload size limit**: available browser/Wasm memory and the selected mapper's hardware
 address range apply. No image is truncated to fit.
 
-Choose **Cartridge mapper** before selecting the file:
+Choose **Cartridge mapper** under **ROMs & advanced system options** before selecting the file with **Open ROM**:
 
 - **Auto** recognizes only plain 8, 16, 32 and 48 KiB images with an AB header
   visible at CPU address 4000h or 8000h. It does not guess bank-switching hardware
@@ -180,8 +196,10 @@ to Space through the real file picker and Wasm. Rust tests also cover 2/4 MiB
 images, register boundaries, reset, slot effects and invalid-load preservation.
 No fixture downloads or proprietary ROMs are required.
 
-Under **Use your own system ROM**, select a lawfully obtained 32 KiB MSX1 BIOS/BASIC
-ROM. The CPU executes it from reset, allowing original BIOS/BASIC behavior where
+Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
+lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM. **Built-in BASIC** in that section
+unloads both selected ROMs and returns to Weave BASIC. With a system ROM selected,
+the CPU executes it from reset, allowing original BIOS/BASIC behavior where
 compatible. Files are read using `File.arrayBuffer`, never uploaded or persisted.
 Do not commit or redistribute user ROMs unless you independently establish permission.
 Original proprietary Microsoft/ASCII BIOS/BASIC has not been validated here.
@@ -211,7 +229,11 @@ The browser suite types through keyboard events, verifies BASIC digits directly 
 Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
 waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
 AudioContext, and uses real file inputs for ROMs.
-Screenshots go to `test-results/`; CI uploads them as `browser-evidence`.
+The suite also checks starter actions, scoped keyboard focus, loading/failure
+feedback, native fullscreen and its unavailable/rejected API fallbacks, expandable
+help/BIOS/transcript controls, and desktop/tablet/mobile layouts (including 320px
+width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
+details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
@@ -219,6 +241,7 @@ interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelo
 slots/PPI, plain and bank-switched cartridge execution, BASIC syntax/runtime tests,
 and supplied-ROM boot tests. See [test methodology and hardware references](docs/architecture.md)
 and the [manual smoke flow and actual results](docs/validation.md).
+See the [UI redesign validation and screenshots](docs/ui-validation.md) for Issue #7.
 
 ## Deployment
 
