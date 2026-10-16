@@ -1,5 +1,35 @@
 # Issue #8 MegaROM validation record
 
+## Completed post-merge Pages verification
+
+Verified on 2026-10-17 (JST) after PR #10 merged with merge commit
+`6606118c81a4606946e029ce732eb680064cd7f1`. The source Issue #8 was freshly
+confirmed open immediately before the merge, which required the reviewed PR
+head `1661af108e2eab4b8553aab85ecf351a891092ff` and used a merge commit.
+
+[Pages workflow run 38936910588](https://github.com/takahirox/msx-rust/actions/runs/38936910588)
+completed successfully for that merge commit, including its browser checks and
+deployment. Playwright with Chromium 156.0.8078.4 then tested the actual deployed
+site at <https://takahirox.github.io/msx-rust/>:
+
+- HTML, CSS, JavaScript and Wasm returned HTTP 200; built-in BASIC reached READY.
+- Original MIT-licensed fixtures from `tests/browser.spec.js` loaded through the
+  real cartridge file input: 64 KiB ASCII8, 128 KiB ASCII16, 256 KiB Konami,
+  512 KiB Konami SCC and 1024 KiB ASCII8. Each executed code in its final bank,
+  filled the Canvas with the expected backdrop, and changed color while Space
+  was held before restoring the original color on release.
+- Auto requested explicit mapper selection for the 64 KiB image without the
+  obsolete "too large" rejection; manual selection loaded it successfully.
+- Reset restored execution. A malformed 64 KiB image produced a nonfatal import
+  error while the active cartridge continued responding to Space.
+- Ejection restored BASIC, which executed `PRINT 42` and returned to READY.
+- No page errors or failing HTTP responses occurred. Observed requests were
+  exclusively GET requests within the deployed site; no ROM upload occurred.
+
+Required post-merge verification for Issue #8 is complete; no defects were found
+by these checks. Historical pending statements below describe pre-merge evidence.
+External copyrighted ROMs, SCC audio and other browsers were not tested.
+
 ## Integration with the merged Issue #7 UI
 
 Before PR publication on 2026-10-17, integrated `main` at
