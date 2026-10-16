@@ -10,6 +10,7 @@ let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
 let cartridge = '';
+let importGeneration = 0;
 let previousTime;
 let accumulator = 0;
 const FRAME_MS = 1000 * 228 * 262 / 3579545;
@@ -76,17 +77,30 @@ function updateStatus() {
   const native = system === 'Weave BASIC' && !cartridge;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !native;
   status(`${paused ? 'Paused' : 'Running'} · ${system}${cartridge ? ` · ${cartridge}` : ''}`); }
-function restart(action) { flushAudio(); pendingText = []; tone = false; action(); wasm.msx_frame(); render(); updateStatus(); screen.focus(); }
+function restart(action) { importGeneration++; flushAudio(); pendingText = []; tone = false; action(); wasm.msx_frame(); render(); updateStatus(); screen.focus(); }
 async function load(file, isSystem) {
-  if (!file) return;
-  if (file.size > 49152) { status('ROM too large. Plain cartridges only, up to 48 KiB.'); return; }
+  if (!file || !wasm) return;
+  const generation = ++importGeneration;
+  const mapper = Number($('mapper').value);
   try {
+    if (!/\.(rom|bin)$/i.test(file.name)) throw new Error('Select a .rom or .bin ROM image.');
+    if (isSystem && file.size !== 32768) throw new Error('Select a 32 KiB MSX1 BIOS/BASIC system ROM.');
+    // u32 is the raw Wasm ABI's length type, not a cartridge size policy.
+    if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 0xffffffff) throw new Error('The image is empty or exceeds this browser/Wasm address space.');
     const bytes = new Uint8Array(await file.arrayBuffer());
-    new Uint8Array(wasm.memory.buffer, wasm.msx_upload(), bytes.length).set(bytes);
-    if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    if (isSystem) system = file.name; else cartridge = file.name;
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    // Obtain the buffer only AFTER reservation: memory growth detaches old views.
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0, mapper)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    if (isSystem) system = file.name; else cartridge = `${file.name} (${['Auto / Plain', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][mapper]})`;
     restart(() => {});
-  } catch (error) { status(error.message); }
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(error instanceof RangeError ? 'Not enough browser/Wasm memory to import this image. Close other tabs or try a smaller image.' : `ROM import failed: ${error.message}`);
+  }
 }
 // International MSX keyboard matrix (US key placement). Matrix keys continue
 // to work with a user BIOS; text/editor events are consumed only by our firmware.
@@ -139,7 +153,7 @@ $('audio').addEventListener('click', () => enableAudio().catch(error => status(`
 $('example').addEventListener('click', () => command('10 FOR I=1 TO 5\n20 PRINT I\n30 NEXT I\nRUN\n'));
 $('graphics').addEventListener('click', () => command('SCREEN 2 : FOR X=0 TO 255 : PSET X,INT(96+60*SIN(X/20)),10 : NEXT X\n'));
 $('tone').addEventListener('click', async () => { try { await enableAudio(); tone = !tone; command(tone ? '\nBEEP\n' : '\nSOUND 8,0\n'); } catch (error) { status(`Audio: ${error.message}`); } });
-for (const [id, isSystem] of [['cartridge', false], ['bios', true]]) $(id).addEventListener('change', event => load(event.target.files[0], isSystem));
+for (const [id, isSystem] of [['cartridge', false], ['bios', true]]) $(id).addEventListener('change', async event => { await load(event.target.files[0], isSystem); event.target.value = ''; });
 try {
   const response = await fetch('msx_wasm.wasm');
   if (!response.ok) throw new Error(`Wasm request failed (${response.status})`);
@@ -147,7 +161,7 @@ try {
   ({ instance: { exports: wasm } } = await WebAssembly.instantiate(bytes, {}));
   wasm.msx_frame();
   render();
-  for (const element of document.querySelectorAll('button, input')) element.disabled = false;
+  for (const element of document.querySelectorAll('button, input, select')) element.disabled = false;
   updateStatus();
   requestAnimationFrame(frame);
 } catch (error) { status(`Unable to start: ${error.message}. Build and serve the site over HTTP.`); }

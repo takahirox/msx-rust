@@ -1,3 +1,77 @@
+# Issue #8 MegaROM validation record
+
+Source: [Remove the arbitrary cartridge ROM size limit and support bank-switched MegaROMs](https://github.com/takahirox/msx-rust/issues/8).
+Local validation date: 2026-10-17. Pre-merge worktree validation only; no push, PR,
+comment, merge or deployment was performed.
+
+Environment: macOS arm64, pinned rustup Rust 1.99.0 (`b940084d7`), Node.js 24.12.0,
+Python static servers, Playwright 1.64.1 / Chromium 156.0.8078.4.
+
+| Command / check | Actual result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | All 34 integration tests passed: 8 mapper, 13 hardware/machine, 7 CPU, 6 BASIC |
+| `./scripts/build.sh` | Release Wasm and site passed with the existing macOS linker wrapper documented in [deployment.md](deployment.md#pre-merge-validation) |
+| `node scripts/check-dist.mjs` | Passed: unchanged eight-file asset inventory, ROM headers/sizes, relative paths, import-free Wasm and required transfer exports |
+| `npm ci` | Passed; locked development dependencies, no vulnerabilities reported |
+| `npx playwright install chromium` | Passed; browser available |
+| `npm test` | All 14 Chromium tests passed, including real MegaROM file imports and `/msx-rust/` hosting |
+| `node --check web/app.js`; `node --check tests/browser.spec.js` | Passed |
+| `git diff --check` | Passed |
+
+The host initially selected Homebrew Rust 1.94.0, which lacked the Wasm target.
+Selecting the pinned rustup compiler in PATH resolved that mismatch. Its macOS
+linker could not locate `libLLVM.dylib`; an outer DYLD_LIBRARY_PATH did not help.
+The repository's already documented ignored `target/pages-linker.sh` wrapper fixed
+that environment problem without source, compiler or CI configuration changes.
+
+Eight new Rust tests exercise exact ASCII8/ASCII16/Konami/Konami SCC register
+ranges and ignored writes, initial banks, bank wrapping, distinct Konami mirrors,
+SCC enable/ROM-overlay decoding, slot visibility, reset, replacement/ejection,
+system-ROM separation and transactional validation failures. Synthetic images
+from 64 KiB to 4 MiB verify last-bank reads without truncation. Z80 fixtures on
+all four mappers switch a bank and execute code from it. Existing plain cartridge,
+header/entry-point, keyboard, video, PSG and BASIC regressions also pass.
+
+Five browser cases select original generated 64/128/256/512/1024 KiB MegaROM files
+through the real file input and compiled Wasm path. Auto requests explicit mapper
+selection. Code in the final switched bank controls Canvas backdrop pixels and
+reacts to Space. This remains responsive after malformed-header, partial-image,
+wrong-extension and invalid-system-ROM imports. Each case resets, replaces the
+mapper, loads a plain cartridge, ejects and returns to built-in BASIC. File imports
+cause no upload or third-party requests. The actual `/msx-rust/` server test also
+imports and runs a 128 KiB ASCII16 fixture under the project prefix.
+
+A raw Wasm test reserves beyond initial linear memory, creates a fresh writable
+view after growth, writes its last byte, and checks invalid transfer lengths,
+mapper IDs, zero lengths and an unrepresentable u32 reservation without a trap.
+A browser fault-injection test bounds only its test Wasm instance to 4 MiB, then
+requests an 8 MiB reservation to exercise a genuine try_reserve_exact failure
+without exhausting host memory. It separately simulates File.arrayBuffer allocation
+failure; the existing banked cartridge still responds to keyboard input. A deferred file read completed after
+Eject cannot reload its cartridge. Actual host-wide memory exhaustion was not
+attempted. These fixtures contain original MIT-licensed bytes only, with no external
+ROM downloads or additional deployable ROM assets.
+
+SCC sound/register hardware, SRAM mapper variants and universal game compatibility
+are not claimed. Auto deliberately recognizes validated plain layouts only; known
+MegaROMs require manual selection. See the [mapper table and compatibility limits](../README.md#rom-loading-and-legal-guidance).
+Optional external C-BIOS, third-party games, other browsers and physical audio
+listening were not tested for this change. No workflow changes were needed.
+
+## Issue #8 required post-merge verification — pending
+
+After merge and the Pages deployment, verify the actual deployed UI and Wasm at
+<https://takahirox.github.io/msx-rust/>. Select a permitted MegaROM with its documented
+mapper, observe execution and confirm the obsolete 48 KiB rejection is absent.
+Record the deployment run, commit and actual result; file follow-up Issues for
+defects. This implementation node does not deploy or perform post-merge checks.
+Local build/subpath results do not establish deployed results, and this pending
+check must not block pre-merge review or merge.
+
+---
+
 # Issue #3 validation record
 
 Source: [Implement the complete initial browser-playable MSX1 emulator](https://github.com/takahirox/msx-rust/issues/3).
