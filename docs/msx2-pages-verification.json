@@ -1,0 +1,72 @@
+{
+  "verified_at": "2026-10-17T01:54:53.403Z",
+  "url": "https://takahirox.github.io/msx-rust/",
+  "merge_commit": "6815d6d3aa75219bc389bacc49d56afe9ed738d1",
+  "deployment_run": "https://github.com/takahirox/msx-rust/actions/runs/38992701544",
+  "browser": "Chromium 156.0.8078.4",
+  "result": "passed",
+  "checks": [
+    "Deployed app.js matches reviewed source",
+    "Relative Wasm request HTTP 200 and real Wasm startup",
+    "Published original diagnostic ROM boots locally",
+    "SCREEN 7 512x212 palette and sprite pixels",
+    "SCREEN 8 256x212, all 256 colors and sprite pixels",
+    "7/8 keyboard video controls",
+    "Space generates nonzero audio; release silences it",
+    "Reset reboots diagnostic",
+    "Switch back to MSX1 BASIC",
+    "No page errors or non-GET/upload requests"
+  ],
+  "fixture_sha256": "d3f9447666f31a33b4bc4270128ee035b9125a1bbc039ff462c87321f62b9b4d",
+  "screen8_color_count": 256,
+  "audio_peak": 0.1998000144958496,
+  "screenshots": [
+    "msx2-evidence/pages-screen7.png",
+    "msx2-evidence/pages-screen8.png"
+  ],
+  "responses": [
+    {
+      "url": "https://takahirox.github.io/msx-rust/",
+      "status": 200
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/app.js",
+      "status": 200
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/style.css",
+      "status": 200
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/msx_wasm.wasm",
+      "status": 200
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://takahirox.github.io/msx-rust/",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "url": "https://takahirox.github.io/msx-rust/style.css",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "url": "https://takahirox.github.io/msx-rust/app.js",
+      "body": null
+    },
+    {
+      "method": "GET",
+      "url": "https://takahirox.github.io/msx-rust/msx_wasm.wasm",
+      "body": null
+    }
+  ],
+  "limitations": [
+    "Audio verified through scheduled Web Audio sample buffers, not physical speakers",
+    "Commercial games and proprietary firmware were not tested"
+  ],
+  "deployment_conclusion": "success"
+}

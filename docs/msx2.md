@@ -169,11 +169,25 @@ Specifications used for independent implementation:
 [Yamaha/ASCII V9938 Technical Data Book](https://gr8bit.ru/rs/Documentation/V9938-programmers-guide.pdf).
 No third-party emulator implementation or specification example program was copied.
 
-## Required post-merge verification — pending
+## Required post-merge verification — passed
 
-After merge, verify the actual GitHub Pages deployment at
-<https://takahirox.github.io/msx-rust/>. Record its deployment run/commit and observed
-URL, confirm relative Wasm loading, select MSX2 and boot the original diagnostic,
-observe visible video and working controls. Local tests cannot establish that
-publication succeeded. No push, PR, merge, comment or production verification is
-performed by this implementation node; live failures should become follow-up Issues.
+On 2026-10-17, PR #12 merged with merge commit
+`6815d6d3aa75219bc389bacc49d56afe9ed738d1`.
+The [Pages workflow](https://github.com/takahirox/msx-rust/actions/runs/38992701544)
+successfully built and deployed that commit to
+<https://takahirox.github.io/msx-rust/>.
+
+Live Chromium verification confirmed relative Wasm loading, the deployed script
+matching the reviewed source, and boot of the published original MSX2 diagnostic.
+Canvas checks passed for SCREEN 7 at 512×212 and SCREEN 8 at 256×212 with all 256
+colors. Keys 7/8 changed modes; Space generated audio samples and releasing it
+silenced them. Reset rebooted the diagnostic and switching to MSX1 restored BASIC.
+No page errors or upload requests were observed. Audio was verified through Web
+Audio buffers; physical speakers, proprietary firmware and commercial games were
+not tested.
+
+The [verification record](msx2-pages-verification.json) contains the timestamp,
+browser version, fixture hash and request evidence. Screenshots of
+[SCREEN 7](msx2-evidence/pages-screen7.png) and
+[SCREEN 8](msx2-evidence/pages-screen8.png) were visually inspected. No live-site
+failures were found, so no follow-up Issue was needed.
