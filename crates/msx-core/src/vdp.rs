@@ -202,8 +202,9 @@ impl Vdp {
             if self.line == self.visible_lines() as u16 {
                 self.status |= 0x80;
             }
+            // R9 can shorten a PAL frame after the NTSC boundary has passed.
             if self.line
-                == if self.msx2 && self.registers[9] & 2 != 0 {
+                >= if self.msx2 && self.registers[9] & 2 != 0 {
                     313
                 } else {
                     262
@@ -545,7 +546,8 @@ impl Vdp {
                         + if text { (x - margin) / 6 } else { x / 8 })
                         as usize;
                     let pb = (r[4] as usize & 63) << 11;
-                    let cb = ((r[10] as usize & 7) << 14) | ((r[3] as usize) << 6);
+                    let cb = ((r[10] as usize & 7) << 14)
+                        | ((r[3] as usize & if mode == 9 { 0xf8 } else { 0xff }) << 6);
                     let (fg, bg, bit) = if text {
                         let index = (sy / 8) * columns + (x - margin) / 6;
                         let blink = mode == 9

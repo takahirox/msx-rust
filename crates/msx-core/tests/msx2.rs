@@ -167,6 +167,71 @@ fn text80_screen4_transparency_and_adjust() {
     assert_eq!(rgb(&v, 0, 0), [1, 2, 3]);
 }
 #[test]
+fn text80_blink_table_ignores_low_r3_bits() {
+    for high in [0, 5] {
+        for low in 0..8 {
+            let mut v = bitmap(4);
+            reg(&mut v, 1, 0x50);
+            reg(&mut v, 2, 4);
+            reg(&mut v, 3, 0x28 | low);
+            reg(&mut v, 9, 0x80);
+            reg(&mut v, 10, high);
+            reg(&mut v, 7, 0xf2);
+            reg(&mut v, 12, 0x64);
+            reg(&mut v, 13, 0x10);
+            v.vram[0x1000] = 1;
+            v.vram[0x1001] = 1;
+            v.vram[0x1000 + 26 * 80 + 79] = 1;
+            v.vram[8..16].fill(0x80);
+            // TEXT2 aligns the blink table to 512 bytes, including R10's high bits.
+            let base = ((high as usize) << 14) | 0x0a00;
+            v.vram[base] = 0x80;
+            v.vram[base + 269] = 1;
+            v.render();
+            assert_eq!(rgb(&v, 16, 0), v.palette[6]);
+            assert_eq!(rgb(&v, 17, 0), v.palette[4]);
+            assert_eq!(rgb(&v, 22, 0), v.palette[15]);
+            assert_eq!(rgb(&v, 490, 208), v.palette[6]);
+            reg(&mut v, 13, 1);
+            v.render();
+            assert_eq!(rgb(&v, 16, 0), v.palette[15]);
+            assert_eq!(rgb(&v, 17, 0), v.palette[2]);
+        }
+    }
+}
+#[test]
+fn pal_to_ntsc_switch_keeps_frame_rendering_and_vblank_running() {
+    for switch_line in [100, 261, 262, 300, 312] {
+        let mut v = bitmap(6);
+        reg(&mut v, 1, 0x60);
+        reg(&mut v, 9, 0x82);
+        v.tick(228 * switch_line);
+        assert_eq!(v.frames, 0);
+        reg(&mut v, 9, 0x80);
+        let remaining = if switch_line >= 262 {
+            1
+        } else {
+            262 - switch_line
+        };
+        v.tick(228 * (remaining - 1));
+        assert_eq!(v.frames, 0);
+        v.tick(228);
+        assert_eq!(v.frames, 1);
+        assert_eq!(v.line, 0);
+        status(&mut v, 0);
+        assert!(!v.irq());
+        v.vram[0] = 0x30;
+        v.tick(228);
+        assert_eq!(rgb(&v, 0, 0), v.palette[3]);
+        v.tick(228 * 211);
+        assert!(v.irq());
+        assert_eq!(status(&mut v, 0) & 0x80, 0x80);
+        v.tick(228 * 50);
+        assert_eq!(v.frames, 2);
+        assert_eq!(v.line, 0);
+    }
+}
+#[test]
 fn vblank_line_irq_status_selection_and_pal() {
     let mut v = bitmap(6);
     reg(&mut v, 9, 0x82);
