@@ -1,6 +1,6 @@
 # msx-rust
 
-An original Rust MSX1 emulator with a browser/WebAssembly frontend, Canvas video,
+An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
 keyboard and joystick input, Web Audio PSG sound, local ROM loading, and a usable
 open-source BASIC environment. The core has no third-party dependencies or browser APIs.
 
@@ -60,13 +60,29 @@ system options** for BIOS loading and compatibility/legal details, or **BASIC te
 transcript** for the full built-in interpreter output. Weave BASIC is our original
 interpreter, not original Microsoft MSX BASIC.
 
+## MSX2
+
+Choose **Machine → MSX2** in the toolbar, download the original MSX2 diagnostic
+cartridge under advanced options, and open it with **Open ROM**. It runs Z80 code
+to demonstrate V9938 512×212 palette video, 256-color video (hold 8; hold 7 to
+restore), extended VRAM, commands, sprites, expanded slots and RTC. Space plays
+a tone after enabling audio. The built-in MSX2 loader has no BASIC or standard
+BIOS services. MSX1 retains Weave BASIC.
+
+For external firmware, select a matching local **32 KiB MSX2 main BIOS/BASIC** and
+**16 KiB sub-ROM**, then **Apply MSX2 firmware**. The pair is validated before
+replacing active firmware. Files remain local and are never uploaded or saved.
+Changing models clears selected ROMs; Reset retains them. See the [MSX2 profile,
+exact coverage, limitations, screenshots and verification](docs/msx2.md).
+
 ## Hardware and compatibility
 
 | Component | Initial implementation |
 | --- | --- |
 | Z80 | Main/alternate registers, flags, base/CB/ED/DD/FD/indexed-CB instruction families, stack, I/O, HALT, EI delay, IRQ/NMI, IM 0/1/2 and instruction T-states |
-| Memory | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain/MegaROM cartridge in slot 1 |
-| TMS9918A | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
+| Memory (MSX1) | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain/MegaROM cartridge in slot 1 |
+| MSX2 | V9938, 128 KiB VRAM, 64 KiB RAM, expanded slot 3 with sub-ROM in 3-0 and RAM in 3-3, deterministic RTC; [coverage](docs/msx2.md) |
+| TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, PSG joystick 1 input; arrows + Z/X are directions/triggers |
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
@@ -75,8 +91,9 @@ This is an initial implementation, not a claim of universal MSX software compati
 Instruction-level timing is used; individual bus phases, MSX M1 wait states, analog
 video/overscan, VDP access contention, and undocumented CPU silicon quirks are not
 accurately modeled. Sprite status at raster/off-screen edges and unusual combined
-VDP modes are not compatibility guarantees. There are no expanded slots, disk/tape
-drives, SCC audio, MSX2 hardware, or advanced peripherals. ROM-only ASCII8, ASCII16, Konami and Konami SCC banking is supported;
+VDP modes are not compatibility guarantees. There are no disk/tape drives or SCC
+audio. MSX2 coverage and optional peripheral limits are documented separately.
+ROM-only ASCII8, ASCII16, Konami and Konami SCC banking is supported;
 SRAM and other mapper variants are not.
 
 ## Weave BASIC and firmware
@@ -124,7 +141,7 @@ RUN
 No proprietary BIOS, BASIC or game ROM is included. All bundled code, glyph drawings,
 cartridge text/sprites and generated ROM bytes are original and MIT licensed. See
 [LICENSE](LICENSE) and the [asset provenance inventory](firmware/ROM-LICENSE.txt).
-`./scripts/build.sh` generates both ROMs from source and includes their license notices
+`./scripts/build.sh` generates all five original ROMs from source and includes their license notices
 in `dist/`. Rust has no external dependencies; Playwright is a development-only dependency
 under its upstream license and is not shipped in the site.
 
@@ -175,7 +192,7 @@ of these features.
 
 Loading a valid image resets the machine and banks. Reset retains selected ROMs
 and restores initial banks; Eject removes the cartridge; Built-in BASIC removes
-both cartridge and system ROM. Failed imports leave the running machine and its
+cartridge and system firmware. Failed imports leave the running machine and its
 bank selections intact. The Wasm transfer reserves memory before JavaScript creates
 a writable view, then moves that buffer into the core without another cartridge
 copy. Empty files, malformed dumps, unsupported mapping and resource failures are
@@ -198,7 +215,7 @@ No fixture downloads or proprietary ROMs are required.
 
 Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
 lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM. **Built-in BASIC** in that section
-unloads both selected ROMs and returns to Weave BASIC. With a system ROM selected,
+unloads selected ROMs and returns to Weave BASIC in MSX1 mode. With a system ROM selected,
 the CPU executes it from reset, allowing original BIOS/BASIC behavior where
 compatible. Files are read using `File.arrayBuffer`, never uploaded or persisted.
 Do not commit or redistribute user ROMs unless you independently establish permission.
@@ -235,6 +252,10 @@ help/BIOS/transcript controls, and desktop/tablet/mobile layouts (including 320p
 width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
 details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
+
+The MSX2 browser tests also check 512/256-pixel modes, 212 lines, all 256 direct
+colors, sprite/command pixels, local firmware pairs, audio and restoration of MSX1.
+Screenshots go to `test-results/msx2-screen7.png` and `msx2-screen8.png`.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
 interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelopes,

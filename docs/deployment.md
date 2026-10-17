@@ -39,6 +39,7 @@ original boot/test ROMs from Rust source. The complete deployable inventory is:
 - `index.html`, `style.css`, `app.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
+- `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
 - `LICENSE`, `ROM-LICENSE.txt`
 
 The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the
@@ -54,6 +55,10 @@ on port 41873 and the unchanged `dist/` artifact at
 `http://127.0.0.1:41874/msx-rust/`. The prefix test uses real HTTP requests, verifies
 HTML/JS/CSS/Wasm loading beneath the prefix, boots BASIC, types `PRINT 42` and
 checks the transcript and Canvas with no failed requests or page errors.
+
+The MSX2 suite also boots the original diagnostic at this same prefix and checks
+512-wide Canvas output. See the [Issue #11 validation record](msx2.md#verification)
+for MSX2 checks; the results below record the earlier deployment integration.
 
 ## Pre-merge validation
 

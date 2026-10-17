@@ -5,21 +5,21 @@
 `msx-core` owns the CPU, address bus, VDP, PSG, firmware, line editor and BASIC.
 It is ordinary Rust using the standard library with zero crate dependencies.
 `msx-wasm` exports a small C-style ABI for frames, pixels, samples, keyboard events,
-ROM staging and errors. JavaScript owns browser APIs only. Both ROM generators are
+ROM staging and errors. JavaScript owns browser APIs only. All ROM generators are
 ordinary Rust functions, with no assembler, downloaded artifact, or external ROM
 needed to build or boot.
 
 `Machine::step` executes a Z80 instruction and advances VDP and PSG time by its
 T-states. `Machine::frame` preserves instruction overshoot between calls and runs
-228 × 262 T-states per frame, generating roughly 736 audio samples. The VDP renders
-active scanlines and raises VBlank after line 191. Interrupt requests remain asserted
+228 × 262 T-states per NTSC frame (MSX2 PAL uses 313 lines), generating roughly 736 audio samples. The VDP renders
+active scanlines and raises VBlank after 192 or 212 lines. Interrupt requests remain asserted
 until status is read or the interrupt-enable bit is cleared. The CPU acknowledges
 IRQ after EI's following instruction; NMI is independently latched. IM 0 uses the
 bus-supplied opcode (the MSX bus supplies FFh/RST 38h), IM 1 jumps to 38h, and IM 2
 reads its vector through the memory map. RESET reconstructs CPU/peripherals/RAM,
 retaining selected ROMs and resetting the native interpreter's program.
 
-Slots 0/1/2/3 are respectively system ROM/cartridge/empty/RAM. A8h selects a slot
+In MSX1, slots 0/1/2/3 are respectively system ROM/cartridge/empty/RAM. A8h selects a slot
 per 16 KiB page. Empty space reads FFh; RAM accepts memory writes and the cartridge
 slot decodes mapper registers. In built-in mode the boot ROM maps a cartridge into
 pages 1/2 and calls its AB init pointer. Reset restores mapper power-on banks.
@@ -27,9 +27,10 @@ See the [mapper table and selection rules](../README.md#rom-loading-and-legal-gu
 With an external system ROM, normal reset mapping is restored and that ROM probes
 slots itself. A9h reads the active-low keyboard row selected by AAh; ABh handles
 PPI control and port-C bit set/reset. PSG registers 14/15 integrate joystick input.
-Printer, cassette data, and expanded-slot support are absent.
+Printer and cassette data are absent. MSX2 expands slot 3 for sub-ROM and RAM;
+see the [MSX2 hardware, commands, timing limits and tests](msx2.md).
 
-The boot ROM's private F0/F1 service interface is specific to Weave BASIC. This
+The MSX1 boot ROM's private F0/F1 service interface is specific to Weave BASIC. This
 is a native Rust interpreter invoked by Z80 firmware, not an MSX BASIC ROM port.
 Cartridge and external-BIOS CPU execution are independent of this interpreter.
 No external BIOS APIs are trapped, replaced or patched. This distinction is visible

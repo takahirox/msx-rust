@@ -1,5 +1,5 @@
 //! Minimal raw Wasm ABI. All emulation and BASIC live in the portable core.
-use msx_core::{Machine, Mapper};
+use msx_core::{Machine, Mapper, Model};
 use std::cell::RefCell;
 struct App {
     machine: Machine,
@@ -7,6 +7,26 @@ struct App {
     error: String,
 }
 thread_local! {static APP:RefCell<App>=RefCell::new(App{machine:Machine::default(),upload:Vec::new(),error:String::new()});}
+#[no_mangle]
+pub extern "C" fn msx_model(model: u32) {
+    APP.with(|a| {
+        a.borrow_mut()
+            .machine
+            .set_model(if model == 1 { Model::Msx2 } else { Model::Msx1 })
+    });
+}
+#[no_mangle]
+pub extern "C" fn msx_frame_cycles() -> u32 {
+    APP.with(|a| a.borrow().machine.hardware.vdp.frame_cycles() as u32)
+}
+#[no_mangle]
+pub extern "C" fn msx_width() -> u32 {
+    APP.with(|a| a.borrow().machine.hardware.vdp.width() as u32)
+}
+#[no_mangle]
+pub extern "C" fn msx_height() -> u32 {
+    APP.with(|a| a.borrow().machine.hardware.vdp.height() as u32)
+}
 #[no_mangle]
 pub extern "C" fn msx_frame() {
     APP.with(|a| a.borrow_mut().machine.frame());
@@ -83,6 +103,12 @@ pub extern "C" fn msx_load(length: u32, system: u32, mapper: u32) -> u32 {
         let rom = std::mem::take(&mut a.upload);
         let result = if length == 0 || length as usize != rom.len() {
             Err("Invalid ROM transfer length. Select the file again.".into())
+        } else if system == 2 {
+            if rom.len() != 49152 {
+                Err("MSX2 needs a 32 KiB main BIOS and 16 KiB sub-ROM.".into())
+            } else {
+                a.machine.load_msx2_firmware(&rom[..32768], &rom[32768..])
+            }
         } else if system != 0 {
             a.machine.load_bios(&rom)
         } else {
