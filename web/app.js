@@ -194,7 +194,12 @@ async function load(file, isSystem) {
     // Obtain the buffer only AFTER reservation: memory growth detaches old views.
     new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
     if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0, mapper)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    if (isSystem) system = file.name; else cartridge = `${file.name} (${['Auto / Plain', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][mapper]})`;
+    if (isSystem) system = file.name;
+    else {
+      const selected = wasm.msx_detected_mapper();
+      const name = ['Auto', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][selected];
+      cartridge = `${file.name} (${mapper === 0 ? `Auto: ${name}${wasm.msx_detection_confidence() === 4 ? ', estimate' : ', recognized format'}` : name})`;
+    }
     restart(() => {});
   } catch (error) {
     if (generation !== importGeneration) return;

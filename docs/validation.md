@@ -59,9 +59,10 @@ all four mappers switch a bank and execute code from it. Existing plain cartridg
 header/entry-point, keyboard, video, PSG and BASIC regressions also pass.
 
 Five browser cases select original generated 64/128/256/512/1024 KiB MegaROM files
-through the real file input and compiled Wasm path. Auto requests explicit mapper
-selection. Code in the final switched bank controls Canvas backdrop pixels and
-reacts to Space. This remains responsive after malformed-header, partial-image,
+through the real file input and compiled Wasm path. At the time of Issue #8,
+Auto requested explicit mapper selection; Issue #13 adds content inference (see
+[the current method and validation](mapper-detection.md)). Code in the final
+switched bank controls Canvas backdrop pixels and reacts to Space. This remains responsive after malformed-header, partial-image,
 wrong-extension and invalid-system-ROM imports. Each case resets, replaces the
 mapper, loads a plain cartridge, ejects and returns to built-in BASIC. File imports
 cause no upload or third-party requests. The actual `/msx-rust/` server test also
@@ -79,8 +80,9 @@ attempted. These fixtures contain original MIT-licensed bytes only, with no exte
 ROM downloads or additional deployable ROM assets.
 
 SCC sound/register hardware, SRAM mapper variants and universal game compatibility
-are not claimed. Auto deliberately recognizes validated plain layouts only; known
-MegaROMs require manual selection. See the [mapper table and compatibility limits](../README.md#rom-loading-and-legal-guidance).
+are not claimed. Issue #8 originally limited Auto to plain layouts. The current
+[Auto detector](mapper-detection.md) also estimates supported MegaROM mappers;
+uncertain images still require manual selection. See the [mapper table and compatibility limits](../README.md#rom-loading-and-legal-guidance).
 Optional external C-BIOS, third-party games, other browsers and physical audio
 listening were not tested for this change. No workflow changes were needed.
 

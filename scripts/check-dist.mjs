@@ -5,7 +5,7 @@ assert.deepEqual((await readdir('dist')).sort(), expected.sort(), 'Unexpected de
 for (const file of expected) assert((await readFile(`dist/${file}`)).length > 0, `Empty ${file}`);
 const module = await WebAssembly.compile(await readFile('dist/msx_wasm.wasm'));
 assert.deepEqual(WebAssembly.Module.imports(module), []);
-for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_error', 'msx_error_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles']) {
+for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles']) {
   assert(WebAssembly.Module.exports(module).some(e => e.name === name), `Missing Wasm export ${name}`);
 }
 const cartridge = await readFile('dist/test-cartridge.rom');

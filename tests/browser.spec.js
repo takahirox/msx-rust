@@ -178,7 +178,7 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
   // Select an invalid ROM and ensure the running cartridge survives.
   await page.locator('#cartridge').setInputFiles({ name: 'invalid.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(17) });
-  await expect(page.locator('#status')).toContainText('select its documented mapper');
+  await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await page.getByRole('button', { name: 'Eject cartridge' }).click();
   await expect(page.locator('#transcript')).toContainText('READY');
   await expect(page.locator('#example')).toBeEnabled();
@@ -269,11 +269,19 @@ function megaRom(sizeKiB, mapper) {
   const bankSize = mapper === '3' ? 16384 : 8192;
   const lastBank = rom.length / bankSize - 1;
   const register = { '2': 0x7000, '3': 0x7000, '4': 0x8000, '5': 0x9000 }[mapper];
-  rom.set([0x3e, lastBank, 0x32, register & 255, register >> 8, 0xc3, 0x00, 0x80], 0x10);
+  const prefix = mapper === '5' ? [0x3e, 0, 0x32, 0, 0x50] : [];
+  rom.set([...prefix, 0x3e, lastBank, 0x32, register & 255, register >> 8, 0xc3, 0x00, 0x80], 0x10);
   // Select keyboard row 8; while Space is held, change the backdrop A to 6.
   rom.set([0x3e,8,0xd3,0xaa, 0xdb,0xa9,0xe6,1,0x3e,0x0a,0x20,2,0x3e,6,
     0xd3,0x99,0x3e,0x87,0xd3,0x99,0xc3,0x04,0x80], lastBank * bankSize);
   return { name: `authored-${sizeKiB}-${mapper}.rom`, mimeType: 'application/octet-stream', buffer: rom };
+}
+function ambiguousRom(conflicting = false) {
+  const rom = Buffer.alloc(131072);
+  rom.set([0x41, 0x42, 0x10, 0x40]);
+  const addresses = conflicting ? [0x6800, 0x7800, 0x5000, 0x9000] : [0x6000, 0x7000];
+  rom.set([...addresses.flatMap(a => [0x3e, 0, 0x32, a & 255, a >> 8]), 0x76], 0x10);
+  return { name: conflicting ? 'conflicting.rom' : 'ambiguous.rom', mimeType: 'application/octet-stream', buffer: rom };
 }
 async function backdrop(page, rgb) {
   await expect.poll(async () => (await colors(page))[rgb] || 0).toBe(256 * 192);
@@ -285,13 +293,13 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     page.on('request', r => requests.push({ method: r.method(), url: r.url() }));
     const fixture = megaRom(size, mapper);
     await page.locator('#advanced-panel > summary').click();
-    // Auto refuses to guess a mapper. It gives an actionable message without a size cap.
-    await page.locator('#cartridge').setInputFiles(fixture);
-    await expect(page.locator('#status')).toContainText('select its documented mapper');
-    await expect(page.locator('#status')).not.toContainText('too large');
-    await page.locator('#mapper').selectOption(mapper);
+    // The default Auto path reaches and executes code in the last mapper bank.
+    await expect(page.locator('#mapper')).toHaveValue('0');
     await page.locator('#cartridge').setInputFiles(fixture);
     await expect(page.locator('#status')).toContainText(fixture.name);
+    if (mapper === '3') await page.screenshot({ path: 'test-results/auto-ascii16.png', fullPage: true });
+    const name = { '2': 'ASCII8', '3': 'ASCII16', '4': 'Konami', '5': 'Konami SCC' }[mapper];
+    await expect(page.locator('#status')).toContainText(`Auto: ${name}, estimate`);
     await backdrop(page, '212,193,84');
     await page.locator('#screen').focus();
     await page.keyboard.down('Space');
@@ -302,6 +310,8 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     await backdrop(page, '212,193,84');
     for (const bad of [
       { name: 'bad-header.rom', buffer: Buffer.alloc(65536) },
+      ambiguousRom(),
+      ambiguousRom(true),
       { name: 'partial.bin', buffer: fixture.buffer.subarray(0, 65535) },
       { name: 'wrong-extension.txt', buffer: fixture.buffer },
     ]) {
@@ -313,6 +323,12 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
       await page.keyboard.up('Space');
       await backdrop(page, '212,193,84');
     }
+    // Manual controls remain available after failures and bypass ambiguous heuristic choice.
+    await expect(page.locator('#mapper')).toHaveValue('0');
+    await page.locator('#mapper').selectOption(mapper);
+    await page.locator('#cartridge').setInputFiles(fixture);
+    await expect(page.locator('#status')).toContainText(`(${name})`);
+    await backdrop(page, '212,193,84');
     await page.locator('#bios').setInputFiles({ name: 'large-system.rom', mimeType: 'application/octet-stream', buffer: fixture.buffer });
     await expect(page.locator('#status')).toContainText('32 KiB');
     await backdrop(page, '212,193,84');
@@ -340,6 +356,40 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
   });
 }
 
+for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
+  test(`Auto inference keeps MSX2 selected and executes MegaROMs at ${path}`, async ({ page }) => {
+    const errors = await boot(page, path);
+    await page.locator('#model').selectOption('1');
+    for (const mapper of ['2', '3', '4', '5']) {
+      await page.locator('#cartridge').setInputFiles(megaRom(128, mapper));
+      await expect(page.locator('#status')).toContainText('estimate');
+      await expect(page.locator('#model')).toHaveValue('1');
+      // V9938 uses the default MSX2 palette and backdrop size, independent of mapper choice.
+      await expect.poll(() => page.locator('#screen').evaluate(canvas => {
+        const p = canvas.getContext('2d').getImageData(0, 0, 1, 1).data;
+        return Array.from(p).slice(0, 3);
+      })).toEqual([218, 218, 36]);
+    }
+    await page.locator('#cartridge').setInputFiles(ambiguousRom());
+    await expect(page.locator('#status')).toContainText('Ambiguous mapper evidence');
+    await expect(page.locator('#status')).toContainText('unchanged');
+    await expect(page.locator('#model')).toHaveValue('1');
+    expect(errors).toEqual([]);
+  });
+}
+
+test('ambiguous Auto import can be retried with the same file and an explicit mapper', async ({ page }) => {
+  await boot(page);
+  await page.locator('#advanced-panel > summary').click();
+  const file = ambiguousRom();
+  await page.locator('#cartridge').setInputFiles(file);
+  await expect(page.locator('#status')).toContainText('Ambiguous mapper evidence');
+  await expect(page.locator('#status')).toContainText('same file again');
+  await page.locator('#mapper').selectOption('3');
+  await page.locator('#cartridge').setInputFiles(file);
+  await expect(page.locator('#status')).toContainText(`${file.name} (ASCII16)`);
+});
+
 test('Wasm transfer grows memory before creating a view and rejects invalid ABI calls safely', async ({ page }) => {
   await boot(page);
   const result = await page.evaluate(async () => {
@@ -366,12 +416,27 @@ test('Wasm transfer grows memory before creating a view and rejects invalid ABI 
     const p2 = w.msx_upload(8192);
     new Uint8Array(w.memory.buffer, p2, 4).set([0x41, 0x42, 0x10, 0x40]);
     const valid = w.msx_load(8192, 0, 1);
-    return { pointer: !!pointer, grown, invalidLength, lengthError, oversized, resourceError, empty, invalidMapper, mapperError, valid };
+    const manualMapper = w.msx_detected_mapper();
+    const plain = w.msx_upload(8192);
+    new Uint8Array(w.memory.buffer, plain, 17).set([0x41, 0x42, 0x10, 0x40, ...Array(12).fill(0), 0x76]);
+    const autoPlain = w.msx_load(8192, 0, 0);
+    const plainMetadata = [w.msx_detected_mapper(), w.msx_detection_confidence()];
+    const ambiguous = w.msx_upload(131072);
+    const bytes = new Uint8Array(w.memory.buffer, ambiguous, 131072);
+    bytes.set([0x41, 0x42, 0x10, 0x40]);
+    bytes.set([0x3e, 0, 0x32, 0, 0x60, 0x3e, 0, 0x32, 0, 0x70, 0x76], 0x10);
+    const autoAmbiguous = w.msx_load(131072, 0, 0);
+    const ambiguousMetadata = [w.msx_detected_mapper(), w.msx_detection_confidence()];
+    const explanation = new TextDecoder().decode(new Uint8Array(w.memory.buffer, w.msx_detection(), w.msx_detection_len()));
+    return { manualMapper, autoPlain, plainMetadata, autoAmbiguous, ambiguousMetadata, explanation, pointer: !!pointer, grown, invalidLength, lengthError, oversized, resourceError, empty, invalidMapper, mapperError, valid };
   });
   expect(result).toMatchObject({ pointer: true, grown: true, invalidLength: 0, oversized: 0, empty: 0, invalidMapper: 0, valid: 1 });
   expect(result.lengthError).toContain('transfer length');
   expect(result.resourceError).toContain('memory');
   expect(result.mapperError).toContain('Unsupported cartridge mapper');
+  expect(result).toMatchObject({ manualMapper: 1, autoPlain: 1, plainMetadata: [1, 3], autoAmbiguous: 0, ambiguousMetadata: [0, 2] });
+  expect(result.explanation).toContain('Ambiguous mapper evidence');
+  expect(result.explanation).toContain('ASCII16');
 });
 
 // Restrict only the test instance's linear-memory maximum, so allocation failure
@@ -634,7 +699,7 @@ for (const failure of ['http', 'invalid-wasm']) {
 test('unrecognized ROMs keep the selected machine and explain how to recover', async ({ page }) => {
   await boot(page);
   await page.locator('#cartridge').setInputFiles({ name: 'large.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(49153) });
-  await expect(page.locator('#status')).toContainText('select its documented mapper');
+  await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await expect(page.locator('#eject')).toBeDisabled();
   await expect(page.locator('#example')).toBeEnabled();
   await page.locator('#advanced-panel > summary').click();

@@ -99,6 +99,11 @@ programs or ROM bytes were copied from them.
 
 ## Cartridge mapper references and tests
 
+Auto inference is independently implemented in `cartridge/detect.rs`, using local
+AB entry points, bounded instruction tracing, competing register-window scores and
+known banked code transfers. It uses no external heuristic source or ROM database.
+See [the algorithm, exact thresholds, ABI and limits](mapper-detection.md).
+
 The mapper module and generated tests are original code. Register ranges, power-on
 banks and Konami mirror wiring were cross-checked against the openMSX project's
 [ASCII8](https://github.com/openMSX/openMSX/blob/master/src/memory/RomAscii8kB.cc),

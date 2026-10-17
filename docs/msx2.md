@@ -104,6 +104,10 @@ layouts during an active command, undocumented mixed modes and edge-case sprite
 priority are not compatibility guarantees. No MSX2+, turbo R, disk/tape drives,
 SCC audio, SRAM cartridges or game-specific patches are added.
 
+Auto mapper inference uses the same local content analysis as MSX1 and never changes
+the selected model. Estimates can be wrong; choose a documented mapper manually
+and reopen the file when uncertain. See [the detection method](mapper-detection.md).
+
 Successful mapper import only validates cartridge format and banking. It does
 not prove that a game has booted. Commercial games, including Ganbare Goemon /
 Samurai, have not been tested and are not guaranteed. Proprietary original

@@ -1,5 +1,8 @@
 //! ROM-only cartridge mappings. SRAM variants and SCC sound hardware are not implemented.
 
+mod detect;
+pub use detect::{detect_mapper, Candidate, Confidence, Detection};
+
 /// Values are also used by the raw Wasm ABI and the browser mapper picker.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u32)]
@@ -11,6 +14,18 @@ pub enum Mapper {
     Ascii16 = 3,
     Konami = 4,
     KonamiScc = 5,
+}
+impl Mapper {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Plain => "Plain",
+            Self::Ascii8 => "ASCII8",
+            Self::Ascii16 => "ASCII16",
+            Self::Konami => "Konami",
+            Self::KonamiScc => "Konami SCC",
+        }
+    }
 }
 impl TryFrom<u32> for Mapper {
     type Error = String;
@@ -27,7 +42,7 @@ impl TryFrom<u32> for Mapper {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Mapping {
     pub kind: Mapper,
     banks: [u8; 4],
@@ -45,15 +60,16 @@ impl Mapping {
         }
     }
     pub fn validate(rom: &[u8], requested: Mapper) -> Result<Self, String> {
-        let plain_size = [8192, 16384, 32768, 49152].contains(&rom.len());
         let kind = if requested == Mapper::Auto {
-            if !plain_size {
-                return Err("Auto recognizes only plain 8, 16, 32 or 48 KiB AB images. For a MegaROM, select its documented mapper (ASCII8, ASCII16, Konami or Konami SCC) and select the file again.".into());
-            }
-            Mapper::Plain
+            let detection = detect_mapper(rom);
+            detection.mapper.ok_or(detection.explanation)?
         } else {
             requested
         };
+        Self::validate_explicit(rom, kind)
+    }
+    fn validate_explicit(rom: &[u8], kind: Mapper) -> Result<Self, String> {
+        let plain_size = [8192, 16384, 32768, 49152].contains(&rom.len());
         if kind == Mapper::Plain {
             if !plain_size {
                 return Err("Plain mapping needs an 8, 16, 32 or 48 KiB image. Select the documented MegaROM mapper for bank-switched cartridges.".into());
