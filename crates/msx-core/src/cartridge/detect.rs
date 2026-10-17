@@ -180,16 +180,32 @@ fn trace(rom: &[u8], initial: Mapping) -> Evidence {
             continue;
         }
         let read = |offset: u16| path.mapping.read(rom, path.pc.wrapping_add(offset));
-        let op = read(0);
+        let mut op = read(0);
         // Padding is not evidence of code. A long NOP run can hide a data table.
         if (op == 0 || op == 0xff) && (0..16).all(|i| read(i) == op) {
             continue;
         }
-        let word = u16::from_le_bytes([read(1), read(2)]);
         let length = instruction_length(op, read(1));
         if path.pc as usize + length > 0xc000 {
             continue;
         }
+        // DD/FD are ignored by direct control flow, RET, RST and HALT; JP (IX/IY)
+        // remains an indirect transfer. Decode those opcodes and their operands
+        // after the prefix so unreachable fallthrough data cannot become evidence.
+        let second = read(1);
+        let operand = if [0xdd, 0xfd].contains(&op)
+            && (matches!(second, 0xc3 | 0xcd | 0xc9 | 0x10 | 0x18 | 0x76 | 0xe9)
+                || second & 0xc7 == 0xc2
+                || second & 0xc7 == 0xc4
+                || second & 0xc7 == 0xc7
+                || second & 0xe7 == 0x20)
+        {
+            op = second;
+            2
+        } else {
+            1
+        };
+        let word = u16::from_le_bytes([read(operand), read(operand + 1)]);
         let next = path.pc + length as u16;
         if op != 0 && op != 0xff {
             path.transferred = path.transferred.map(|n| (n + 1).min(4));
@@ -233,7 +249,7 @@ fn trace(rom: &[u8], initial: Mapping) -> Evidence {
             let target = if absolute {
                 word
             } else {
-                next.wrapping_add_signed(path.mapping.read(rom, path.pc + 1) as i8 as i16)
+                next.wrapping_add_signed(path.mapping.read(rom, path.pc + operand) as i8 as i16)
             };
             let mut branch = path.clone();
             branch.pc = target;

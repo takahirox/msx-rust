@@ -172,6 +172,70 @@ fn incidental_data_operands_prefixes_and_generic_writes_are_not_identity() {
 }
 
 #[test]
+fn index_prefixed_control_flow_skips_unreachable_mapper_writes() {
+    for prefix in [0xdd, 0xfd] {
+        for transfer in [
+            vec![prefix, 0xc3, 0x00, 0x81], // JP 8100h (index prefix ignored)
+            vec![prefix, 0x18, 0x0d],       // JR 4020h, relative to the prefixed length
+            vec![prefix, 0xcd, 0x00, 0x81], // CALL: do not invent a return state
+            vec![prefix, 0xc9],             // RET
+            vec![prefix, 0x76],             // HALT
+            vec![prefix, 0xe9],             // JP (IX/IY): unknown destination
+            vec![prefix, 0xc7],             // RST 0
+        ] {
+            let mut code = transfer.clone();
+            code.extend(stores(&[0x6800, 0x7800]));
+            let mut rom = image(32768, &code);
+            let destination = [0x3e, 0x5a, 0x32, 0x00, 0xc0, 0x76];
+            rom[0x4100..0x4106].copy_from_slice(&destination);
+            rom[0x20..0x26].copy_from_slice(&destination);
+            let d = detect_mapper(&rom);
+            assert_eq!(
+                (d.mapper, d.confidence),
+                (Some(Mapper::Plain), Confidence::PlainFormat),
+                "{transfer:02x?}: {d:?}"
+            );
+            assert!(d.candidates.iter().all(|c| c.register_windows == 0));
+            if transfer[1] == 0xc3 || transfer[1] == 0x18 {
+                for model in [Model::Msx1, Model::Msx2] {
+                    let mut m = Machine::default();
+                    m.set_model(model);
+                    m.load_cartridge(&rom).unwrap();
+                    m.frame();
+                    assert!(m.cpu.halted);
+                    assert_eq!(m.hardware.ram[0xc000], 0x5a);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn index_prefixed_branches_follow_the_effective_target() {
+    for prefix in [0xdd, 0xfd] {
+        for branch in [
+            vec![prefix, 0xc3, 0x00, 0x41], // JP
+            vec![prefix, 0xcd, 0x00, 0x41], // CALL
+            vec![prefix, 0xc2, 0x00, 0x41], // JP NZ
+            vec![prefix, 0xc4, 0x00, 0x41], // CALL NZ
+            vec![prefix, 0x18, 0x0d],       // JR
+            vec![prefix, 0x20, 0x0d],       // JR NZ
+            vec![prefix, 0x10, 0x0d],       // DJNZ
+        ] {
+            let mut code = branch.clone();
+            code.push(0x76);
+            let mut rom = image(131072, &code);
+            let target = if branch.len() == 4 { 0x100 } else { 0x20 };
+            let writes = stores(&[0x6800, 0x7800]);
+            rom[target..target + writes.len()].copy_from_slice(&writes);
+            let d = detect_mapper(&rom);
+            assert_eq!(d.mapper, Some(Mapper::Ascii8), "{branch:02x?}: {d:?}");
+            assert_eq!(d.confidence, Confidence::Likely);
+        }
+    }
+}
+
+#[test]
 fn calls_branches_unknown_values_and_truncated_instructions_are_bounded() {
     let mut rom = image(131072, &[0xcd, 0x00, 0x41]);
     let code = stores(&[0x6800, 0x7800]);
