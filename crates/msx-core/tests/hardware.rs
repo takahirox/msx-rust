@@ -3,7 +3,7 @@ use msx_core::{
     firmware,
     psg::{Psg, CPU_HZ, SAMPLE_RATE},
     vdp::{Vdp, PALETTE},
-    Hardware, Machine,
+    Hardware, Machine, Model,
 };
 fn pixel(v: &Vdp, x: usize, y: usize) -> &[u8] {
     &v.pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 3]
@@ -35,28 +35,28 @@ fn vdp_ports_readahead_wrap_and_irq() {
 #[test]
 fn vdp_four_modes() {
     let mut v = Vdp::default();
-    v.registers = [0, 0x50, 2, 0, 0, 0x36, 7, 0xf4];
+    v.registers[..8].copy_from_slice(&[0, 0x50, 2, 0, 0, 0x36, 7, 0xf4]);
     v.vram[0x800] = 1;
     v.vram[8] = 0x80;
     v.render();
     assert_eq!(pixel(&v, 8, 0), &PALETTE[15]);
     assert_eq!(pixel(&v, 9, 0), &PALETTE[4]);
     assert_eq!(pixel(&v, 0, 0), &PALETTE[4]);
-    v.registers = [0, 0x40, 6, 0x80, 0, 0x36, 7, 0xf4];
+    v.registers[..8].copy_from_slice(&[0, 0x40, 6, 0x80, 0, 0x36, 7, 0xf4]);
     v.vram[0x1800] = 1;
     v.vram[0x2000] = 0xa2;
     v.vram[0x1b00] = 208;
     v.render();
     assert_eq!(pixel(&v, 0, 0), &PALETTE[10]);
     assert_eq!(pixel(&v, 1, 0), &PALETTE[2]);
-    v.registers = [2, 0x40, 6, 0xff, 3, 0x36, 7, 0xf4];
+    v.registers[..8].copy_from_slice(&[2, 0x40, 6, 0xff, 3, 0x36, 7, 0xf4]);
     v.vram[0x1900] = 1;
     v.vram[0x808] = 0x80;
     v.vram[0x2808] = 0x65;
     v.render();
     assert_eq!(pixel(&v, 0, 64), &PALETTE[6]);
     assert_eq!(pixel(&v, 1, 64), &PALETTE[5]);
-    v.registers = [0, 0x48, 6, 0, 0, 0x36, 7, 0xf4];
+    v.registers[..8].copy_from_slice(&[0, 0x48, 6, 0, 0, 0x36, 7, 0xf4]);
     v.vram[0x1800] = 1;
     v.vram[8] = 0x23;
     v.render();
@@ -66,7 +66,7 @@ fn vdp_four_modes() {
 #[test]
 fn sprites_priority_collision_fifth_and_large_early_clock() {
     let mut v = Vdp::default();
-    v.registers = [0, 0x40, 6, 0x80, 0, 0x36, 7, 4];
+    v.registers[..8].copy_from_slice(&[0, 0x40, 6, 0x80, 0, 0x36, 7, 4]);
     v.vram[0x3800] = 0x80;
     for n in 0..5 {
         v.vram[0x1b00 + n * 4..0x1b04 + n * 4].copy_from_slice(&[9, 20, 0, 2 + n as u8]);
@@ -290,7 +290,7 @@ fn cartridge_sizes_mapping_and_invalid_load_preserves_machine() {
 #[test]
 fn transparent_sprite_pixels_collide_without_hiding_a_lower_priority_sprite() {
     let mut v = Vdp::default();
-    v.registers = [0, 0x40, 6, 0x80, 0, 0x36, 7, 4];
+    v.registers[..8].copy_from_slice(&[0, 0x40, 6, 0x80, 0, 0x36, 7, 4]);
     v.vram[0x3800] = 0x80;
     v.vram[0x1b00..0x1b0c].copy_from_slice(&[9, 20, 0, 0, 9, 20, 0, 10, 208, 0, 0, 0]);
     v.render();
@@ -299,15 +299,18 @@ fn transparent_sprite_pixels_collide_without_hiding_a_lower_priority_sprite() {
 }
 #[test]
 fn page_two_cartridge_header_boots_without_a_page_one_header() {
-    let mut m = Machine::default();
-    let mut rom = vec![0; 32768];
-    rom[0x4000..0x4004].copy_from_slice(&[b'A', b'B', 0x10, 0x80]);
-    rom[0x4010..0x4015].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0]);
-    rom[0x4015] = 0x76;
-    m.load_cartridge(&rom).unwrap();
-    m.frame();
-    assert!(m.cpu.halted);
-    assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut m = Machine::default();
+        m.set_model(model);
+        let mut rom = vec![0; 32768];
+        rom[0x4000..0x4004].copy_from_slice(&[b'A', b'B', 0x10, 0x80]);
+        rom[0x4010..0x4015].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0]);
+        rom[0x4015] = 0x76;
+        m.load_cartridge(&rom).unwrap();
+        m.frame();
+        assert!(m.cpu.halted);
+        assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    }
 }
 #[test]
 fn cartridge_init_can_return_to_native_basic() {

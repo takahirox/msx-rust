@@ -1,5 +1,5 @@
 //! Original, generated ROM fixtures; no game or system ROM data.
-use msx_core::{cpu::Bus, firmware, Machine, Mapper};
+use msx_core::{cpu::Bus, firmware, Machine, Mapper, Model};
 
 fn image(size: usize) -> Vec<u8> {
     let mut rom = vec![0; size];
@@ -196,7 +196,7 @@ fn cartridge_installation_clears_previous_hardware_state() {
     assert_eq!(m.hardware.joystick, 0x3f);
     assert_eq!(m.hardware.input(0xf0), 0);
     assert_eq!(m.hardware.vdp.vram, [0; 16384]);
-    assert_eq!(m.hardware.vdp.registers, [0; 8]);
+    assert_eq!(m.hardware.vdp.registers, [0; 64]);
     assert!(m.hardware.vdp.pixels.iter().all(|&b| b == 0));
     assert_eq!(m.hardware.vdp.line, 0);
     assert_eq!(m.hardware.vdp.frames, 0);
@@ -272,39 +272,42 @@ fn validation_and_auto_are_conservative_and_transactional() {
 }
 #[test]
 fn cpu_executes_from_a_switched_bank() {
-    for kind in [
-        Mapper::Ascii8,
-        Mapper::Ascii16,
-        Mapper::Konami,
-        Mapper::KonamiScc,
-    ] {
-        let mut rom = image(128 * 1024);
-        let register: u16 = match kind {
-            Mapper::Ascii8 => 0x7000,
-            Mapper::Ascii16 => 0x7000,
-            Mapper::Konami => 0x8000,
-            _ => 0x9000,
-        };
-        rom[0x10..0x18].copy_from_slice(&[
-            0x3e,
-            7,
-            0x32,
-            register as u8,
-            (register >> 8) as u8,
-            0xc3,
-            0x00,
-            0x80,
-        ]);
-        let bank = if kind == Mapper::Ascii16 {
-            0x4000
-        } else {
-            0x2000
-        };
-        rom[7 * bank..7 * bank + 6].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0, 0x76]);
-        let mut m = Machine::default();
-        m.load_cartridge_owned(rom, kind).unwrap();
-        m.frame();
-        assert!(m.cpu.halted);
-        assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    for model in [Model::Msx1, Model::Msx2] {
+        for kind in [
+            Mapper::Ascii8,
+            Mapper::Ascii16,
+            Mapper::Konami,
+            Mapper::KonamiScc,
+        ] {
+            let mut rom = image(128 * 1024);
+            let register: u16 = match kind {
+                Mapper::Ascii8 => 0x7000,
+                Mapper::Ascii16 => 0x7000,
+                Mapper::Konami => 0x8000,
+                _ => 0x9000,
+            };
+            rom[0x10..0x18].copy_from_slice(&[
+                0x3e,
+                7,
+                0x32,
+                register as u8,
+                (register >> 8) as u8,
+                0xc3,
+                0x00,
+                0x80,
+            ]);
+            let bank = if kind == Mapper::Ascii16 {
+                0x4000
+            } else {
+                0x2000
+            };
+            rom[7 * bank..7 * bank + 6].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0, 0x76]);
+            let mut m = Machine::default();
+            m.set_model(model);
+            m.load_cartridge_owned(rom, kind).unwrap();
+            m.frame();
+            assert!(m.cpu.halted);
+            assert_eq!(m.hardware.ram[0xc000], 0x5a);
+        }
     }
 }

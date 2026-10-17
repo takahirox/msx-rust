@@ -269,7 +269,7 @@ pub struct Console {
 }
 impl Console {
     pub fn setup(&mut self, vdp: &mut Vdp) {
-        vdp.registers = [0, 0x50, 0, 0, 1, 0x36, 7, 0xf4];
+        vdp.registers[..8].copy_from_slice(&[0, 0x50, 0, 0, 1, 0x36, 7, 0xf4]);
         font::install(&mut vdp.vram, 0x800);
         vdp.vram[..960].fill(b' ');
         self.x = 0;
@@ -689,13 +689,13 @@ impl Basic {
                 match mode {
                     0 => self.console.setup(vdp),
                     1 => {
-                        vdp.registers = [0, 0x40, 6, 0x80, 0, 0x36, 7, 0xf4];
+                        vdp.registers[..8].copy_from_slice(&[0, 0x40, 6, 0x80, 0, 0x36, 7, 0xf4]);
                         font::install(&mut vdp.vram, 0);
                         vdp.vram[0x1800..0x1b00].fill(32);
                         vdp.vram[0x2000..0x2020].fill(0xf4);
                     }
                     2 => {
-                        vdp.registers = [2, 0x40, 6, 0xff, 3, 0x36, 7, 0xf4];
+                        vdp.registers[..8].copy_from_slice(&[2, 0x40, 6, 0xff, 3, 0x36, 7, 0xf4]);
                         vdp.vram[..0x1800].fill(0);
                         vdp.vram[0x2000..0x3800].fill(0xf4);
                         for i in 0..768 {
@@ -703,7 +703,7 @@ impl Basic {
                         }
                     }
                     _ => {
-                        vdp.registers = [0, 0x48, 6, 0, 0, 0x36, 7, 0xf4];
+                        vdp.registers[..8].copy_from_slice(&[0, 0x48, 6, 0, 0, 0x36, 7, 0xf4]);
                         vdp.vram[..0x800].fill(0);
                         for i in 0..768 {
                             vdp.vram[0x1800 + i] = ((i / 128) * 32 + i % 32) as u8;

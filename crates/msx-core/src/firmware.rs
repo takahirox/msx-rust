@@ -96,3 +96,231 @@ pub fn test_cartridge() -> Vec<u8> {
     }
     rom
 }
+
+/// Original minimal MSX2 cartridge loader. This is not MSX BIOS or BASIC.
+/// Only self-contained AB cartridges are supported; external firmware executes
+/// its own slot discovery and BIOS entry points without Rust interception.
+pub fn msx2_bios() -> Vec<u8> {
+    let mut rom = vec![0xff; 32768];
+    rom[..3].copy_from_slice(&[0xc3, 0x00, 0x01]);
+    rom[6] = 0x98;
+    rom[7] = 0x98;
+    rom[0x2d] = 1;
+    let mut boot = vec![
+        0xf3, 0x3e, 0xf0, 0xd3, 0xa8, // DI; map page 3 to expanded slot 3
+        0x3e, 0xff, 0x32, 0xff, 0xff, // select 3-3 RAM on all pages
+        0x3e, 0xd4, 0xd3, 0xa8, 0x31, 0x00, 0xf0, // BIOS, cartridge, cartridge, RAM
+    ];
+    for page in [0x40, 0x80] {
+        boot.extend_from_slice(&[
+            0x3a, 0x00, page, 0xfe, 0x41, 0x20, 0x0f, 0x3a, 0x01, page, 0xfe, 0x42, 0x20, 0x08,
+            0x2a, 0x02, page, 0x7c, 0xb5, 0x28, 0x01, 0xe9,
+        ]);
+    }
+    boot.extend_from_slice(&[
+        0x3e, 4, 0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99, 0x76, 0x18, 0xfd,
+    ]);
+    rom[0x100..0x100 + boot.len()].copy_from_slice(&boot);
+    rom
+}
+/// An original diagnostic sub-ROM, not an implementation of the MSX2 BIOS API.
+/// A Z80 inter-slot call to 0100h returns 2Ah and writes C100h.
+pub fn msx2_subrom() -> Vec<u8> {
+    let mut rom = vec![0xff; 16384];
+    rom[..2].copy_from_slice(b"CD");
+    rom[0x3ffe..].copy_from_slice(b"WV");
+    rom[0x100..0x106].copy_from_slice(&[0x3e, 0x2a, 0x32, 0x00, 0xc1, 0xc9]);
+    rom
+}
+
+/// Independent MIT-licensed V9938 diagnostic cartridge. Keys 7/8 select SCREEN
+/// 7/8; Space controls a PSG tone. Every hardware operation is executed by Z80.
+pub fn msx2_cartridge() -> Vec<u8> {
+    struct Code {
+        bytes: Vec<u8>,
+        labels: Vec<(String, u16)>,
+        fixups: Vec<(usize, String)>,
+    }
+    impl Code {
+        fn emit(&mut self, b: &[u8]) {
+            self.bytes.extend_from_slice(b);
+        }
+        fn out(&mut self, port: u8, value: u8) {
+            self.emit(&[0x3e, value, 0xd3, port]);
+        }
+        fn reg(&mut self, r: u8, value: u8) {
+            self.out(0x99, value);
+            self.out(0x99, 0x80 | r);
+        }
+        fn word(&mut self, r: u8, v: u16) {
+            self.reg(r, v as u8);
+            self.reg(r + 1, (v >> 8) as u8);
+        }
+        fn label(&mut self, name: &str) {
+            self.labels
+                .push((name.into(), 0x4010 + self.bytes.len() as u16));
+        }
+        fn jump(&mut self, opcode: u8, name: &str) {
+            self.emit(&[opcode, 0, 0]);
+            self.fixups.push((self.bytes.len() - 2, name.into()));
+        }
+        fn address(&mut self, a: usize) {
+            self.reg(14, (a >> 14) as u8);
+            self.out(0x99, a as u8);
+            self.out(0x99, 0x40 | ((a >> 8) & 63) as u8);
+        }
+        fn wait(&mut self) {
+            self.jump(0xcd, "wait");
+        }
+    }
+    let mut c = Code {
+        bytes: Vec::new(),
+        labels: Vec::new(),
+        fixups: Vec::new(),
+    };
+    c.emit(&[0xf3, 0x31, 0x00, 0xf0]);
+    // Code remains in slot 1. Select expanded slot 3-3 RAM, then select its
+    // sub-ROM on page zero, call real Z80 code and restore the main ROM.
+    c.out(0xa8, 0xd4);
+    c.emit(&[0x3e, 0xff, 0x32, 0xff, 0xff]);
+    c.emit(&[0x3e, 0xfc, 0x32, 0xff, 0xff]);
+    c.out(0xa8, 0xd7);
+    c.emit(&[0x3a, 0xfe, 0x3f, 0xfe, b'W']);
+    c.jump(0xc2, "restore-slots");
+    c.emit(&[0x3a, 0xff, 0x3f, 0xfe, b'V']);
+    c.jump(0xc2, "restore-slots");
+    c.emit(&[0xcd, 0x00, 0x01, 0xfe, 0x2a]);
+    c.jump(0xc2, "failure");
+    c.label("restore-slots");
+    c.out(0xa8, 0xd4);
+    c.emit(&[0x3e, 0xff, 0x32, 0xff, 0xff]);
+    // RTC battery RAM bank 2, nibble round trip.
+    c.out(0xb4, 13);
+    c.out(0xb5, 10);
+    c.out(0xb4, 0);
+    c.out(0xb5, 5);
+    c.emit(&[0xdb, 0xb5, 0xe6, 15, 0xfe, 5]);
+    c.jump(0xc2, "failure");
+    c.out(0xb4, 13);
+    c.out(0xb5, 8);
+    for (r, v) in [(0, 254), (1, 0), (7, 0x3e), (8, 0)] {
+        c.out(0xa0, r);
+        c.out(0xa1, v);
+    }
+    c.jump(0xcd, "screen7");
+    c.label("poll");
+    c.out(0xaa, 1);
+    c.emit(&[0xdb, 0xa9, 0xe6, 1]);
+    c.jump(0xcc, "screen8");
+    c.out(0xaa, 0);
+    c.emit(&[0xdb, 0xa9, 0xe6, 0x80]);
+    c.jump(0xcc, "screen7");
+    c.out(0xaa, 8);
+    c.emit(&[0xdb, 0xa9, 0xe6, 1, 0x3e, 0, 0x20, 2, 0x3e, 15, 0x47]);
+    c.out(0xa0, 8);
+    c.emit(&[0x78, 0xd3, 0xa1]);
+    c.jump(0xc3, "poll");
+    for (label, mode, fill, line, width) in [
+        ("screen7", 10, 0x22, 3, 512),
+        ("screen8", 14, 0x1c, 0xe0, 256),
+    ] {
+        c.label(label);
+        c.reg(1, 0);
+        c.reg(0, mode);
+        c.reg(9, 0x80);
+        c.reg(2, 0x3f);
+        c.reg(7, 1);
+        c.reg(8, 0);
+        c.reg(16, 2);
+        c.out(0x9a, 0x70);
+        c.out(0x9a, 0); // red
+        c.out(0x9a, 0x07);
+        c.out(0x9a, 7); // cyan
+                        // Extended VRAM page 1, 512x212 or 256x212 byte fill.
+        c.word(36, 0);
+        c.word(38, 256);
+        c.word(40, width);
+        c.word(42, 212);
+        c.reg(44, fill);
+        c.reg(45, 0);
+        c.reg(46, 0xc0);
+        c.wait();
+        // Logical line and rectangle copy, all in the high 64 KiB.
+        c.word(36, 40);
+        c.word(38, 300);
+        c.word(40, 150);
+        c.word(42, 60);
+        c.reg(44, line);
+        c.reg(46, 0x70);
+        c.wait();
+        c.word(32, 40);
+        c.word(34, 300);
+        c.word(36, 40);
+        c.word(38, 400);
+        c.word(40, 150);
+        c.word(42, 10);
+        c.reg(46, 0x90);
+        c.wait();
+        // CPU-to-VDP logical transfer with first pixel preloaded in R44.
+        c.word(36, 10);
+        c.word(38, 266);
+        c.word(40, 1);
+        c.word(42, 1);
+        c.reg(44, line);
+        c.reg(46, 0xb0);
+        c.wait();
+        // A 256-byte-wide color ramp in extended VRAM. The bytes reside in
+        // our cartridge and are transferred by Z80 OUT instructions.
+        c.address(0x1a000);
+        let source: u16 = if mode == 10 { 0x6000 } else { 0x7000 };
+        c.emit(&[0x21, source as u8, (source >> 8) as u8, 0x11, 0x00, 0x10]);
+        c.label(&format!("ramp-{label}"));
+        c.emit(&[0x7e, 0xd3, 0x98, 0x23, 0x1b, 0x7a, 0xb3]);
+        c.jump(0xc2, &format!("ramp-{label}"));
+        // Sprite mode 2 tables away from the displayed bitmap.
+        c.reg(5, 0x77);
+        c.reg(11, 0);
+        c.reg(6, 15);
+        c.address(0x3a00);
+        for b in [31, 32, 0, 0, 216] {
+            c.out(0x98, b);
+        }
+        c.address(0x3800);
+        for _ in 0..16 {
+            c.out(0x98, 15);
+        }
+        c.address(0x7800);
+        for b in [0x18, 0x3c, 0x7e, 0xff, 0xff, 0x7e, 0x3c, 0x18] {
+            c.out(0x98, b);
+        }
+        c.reg(1, 0x40);
+        c.emit(&[0xc9]);
+    }
+    c.label("wait");
+    c.reg(15, 2);
+    c.label("busy");
+    c.emit(&[0xdb, 0x99, 0xe6, 1]);
+    c.jump(0xc2, "busy");
+    c.reg(15, 0);
+    c.emit(&[0xc9]);
+    c.label("failure");
+    c.reg(7, 8);
+    c.emit(&[0x76]);
+    c.jump(0xc3, "failure");
+    for (p, label) in &c.fixups {
+        let a = c.labels.iter().find(|(s, _)| s == label).unwrap().1;
+        c.bytes[*p..*p + 2].copy_from_slice(&a.to_le_bytes());
+    }
+    let mut rom = vec![0; 16384];
+    rom[..4].copy_from_slice(&[b'A', b'B', 0x10, 0x40]);
+    for y in 0..16 {
+        for x in 0..256 {
+            let color = (x / 16) as u8;
+            rom[0x2000 + y * 256 + x] = color * 17;
+            rom[0x3000 + y * 256 + x] = x as u8;
+        }
+    }
+    assert!(c.bytes.len() < 0x1ff0);
+    rom[0x10..0x10 + c.bytes.len()].copy_from_slice(&c.bytes);
+    rom
+}

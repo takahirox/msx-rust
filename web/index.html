@@ -4,19 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#131518">
-  <title>msx-rust · MSX1 emulator</title>
+  <title>msx-rust · MSX1 / MSX2 emulator</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
   <header class="app-header">
     <h1>msx<span> / rust</span></h1>
-    <span class="app-description">MSX1 emulator</span>
+    <span class="app-description">MSX1 / MSX2 emulator</span>
     <a href="https://github.com/takahirox/msx-rust#readme">Documentation ↗</a>
   </header>
   <section id="emulator" class="computer" aria-label="Emulator" aria-busy="true">
     <div class="toolbar" role="group" aria-label="Emulator controls">
       <div class="control-group">
+        <label for="model" class="machine-label">Machine</label>
+        <select id="model" aria-label="Machine" disabled><option value="0">MSX1</option><option value="1">MSX2</option></select>
         <button id="pause" disabled>Pause</button>
         <button id="reset" disabled title="Restart with the selected ROMs">Reset</button>
         <button id="audio" disabled aria-pressed="false">Enable audio</button>
@@ -66,12 +68,19 @@
         <h2>Cartridges</h2>
         <label class="file" for="mapper">Cartridge mapper</label>
         <select id="mapper" disabled><option value="0">Auto (plain images)</option><option value="1">Plain</option><option value="2">ASCII8</option><option value="3">ASCII16</option><option value="4">Konami</option><option value="5">Konami SCC (no SCC sound)</option></select>
-        <p>Choose the mapper, then use <strong>Open ROM</strong> above for a local .rom or .bin cartridge. Auto recognizes plain AB images; for a MegaROM choose its documented mapper. No fixed upload size cap; available browser/Wasm memory and mapper address range apply. SRAM variants, SCC sound, disks and MSX2 are unsupported. Loading resets the machine; Eject removes the cartridge. Many commercial cartridges require a compatible system BIOS.</p>
+        <p>Choose the mapper, then use <strong>Open ROM</strong> above for a local .rom or .bin cartridge. Auto recognizes plain AB images; for a MegaROM choose its documented mapper. No fixed upload size cap; available browser/Wasm memory and mapper address range apply. SRAM variants, SCC sound and disks are unsupported. Loading resets the machine; Eject removes the cartridge. Many commercial cartridges require a compatible system BIOS.</p>
         <p><a href="test-cartridge.rom" download>Download our original test cartridge</a>, then open it above. Hold Space to hear its PSG tone after enabling audio.</p>
+        <p><a href="msx2-test-cartridge.rom" download>Download our original MSX2 diagnostic cartridge</a>. Select MSX2 and open it above. Keys <kbd>7</kbd>/<kbd>8</kbd> switch 512-wide palette / 256-color video; Space plays a tone. It tests extended VRAM, commands, sprites, expanded slots and our diagnostic sub-ROM. Its loader is not MSX BIOS or BASIC.</p>
         <h2>Local system BIOS / BASIC</h2>
-        <p>Load a lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM to execute it from reset. Built-in BASIC unloads both system and cartridge ROMs and returns to Weave BASIC.</p>
+        <p>Load a lawfully obtained 32 KiB main BIOS/BASIC ROM to execute it from reset. MSX2 also requires a matching 16 KiB sub-ROM: select both, then Apply MSX2 firmware. Files stay in this tab and are never uploaded or stored. Built-in mode unloads all system and cartridge ROMs. MSX1 returns to Weave BASIC; MSX2 returns to our minimal cartridge loader, which has no BASIC or standard BIOS API.</p>
         <label class="file" for="bios">Local system ROM (32 KiB)</label>
         <input id="bios" type="file" accept=".rom,.bin" disabled>
+        <div id="msx2-firmware" hidden>
+          <label class="file" for="subrom">Local MSX2 sub-ROM (16 KiB)</label>
+          <input id="subrom" type="file" accept=".rom,.bin" disabled>
+          <button id="apply-firmware" disabled>Apply MSX2 firmware</button>
+          <p id="firmware-selection">Select both firmware files.</p>
+        </div>
         <button id="builtin" disabled>Built-in BASIC</button>
         <p><strong>ROMs stay on your device.</strong> Files are read in memory, never uploaded or saved. No proprietary BIOS, BASIC or games are bundled. Only use ROMs you have permission to use or redistribute.</p>
         <p>This is an initial emulator with compatibility limits. Weave BASIC is not a compatible MSX BIOS. C-BIOS is a separate replacement BIOS with no BASIC and is not bundled. <a href="https://github.com/takahirox/msx-rust#hardware-and-compatibility">Compatibility details ↗</a> · <a href="ROM-LICENSE.txt">ROM provenance</a></p>

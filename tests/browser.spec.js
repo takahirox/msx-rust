@@ -514,11 +514,11 @@ for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [320, 640]]
     expect(bounds.y + bounds.height).toBeLessThan(height);
     await expect(page.locator('#cartridge')).toBeHidden();
     if (width >= 768) expect((await page.locator('.toolbar').boundingBox()).height).toBeLessThanOrEqual(70);
-    const buttons = await page.locator('.toolbar button').all();
+    const controls = await page.locator('.toolbar button, .toolbar select').all();
     const boxes = [];
-    for (const button of buttons) {
-      await expect(button).toBeVisible();
-      const box = await button.boundingBox();
+    for (const control of controls) {
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
       expect(box.height).toBeGreaterThanOrEqual(44);
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);

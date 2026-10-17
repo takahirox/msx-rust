@@ -7,5 +7,20 @@ fn main() {
         msx_core::firmware::test_cartridge(),
     )
     .unwrap();
+    fs::write(
+        format!("{dir}/msx2-test-cartridge.rom"),
+        msx_core::firmware::msx2_cartridge(),
+    )
+    .unwrap();
+    fs::write(
+        format!("{dir}/msx2-diagnostic-sub.rom"),
+        msx_core::firmware::msx2_subrom(),
+    )
+    .unwrap();
+    fs::write(
+        format!("{dir}/weave-msx2-boot.rom"),
+        msx_core::firmware::msx2_bios(),
+    )
+    .unwrap();
     fs::write(format!("{dir}/weave-boot.rom"), msx_core::firmware::bios()).unwrap();
 }

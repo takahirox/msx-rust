@@ -78,7 +78,7 @@ pub fn glyph(c: u8) -> [u8; 8] {
     }
     result
 }
-pub fn install(vram: &mut [u8; 16384], base: usize) {
+pub fn install(vram: &mut [u8], base: usize) {
     for c in 0..256 {
         vram[base + c * 8..base + c * 8 + 8].copy_from_slice(&glyph(c as u8));
     }

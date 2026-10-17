@@ -1,4 +1,4 @@
-//! Platform-independent, original MSX1 implementation. No browser dependencies.
+//! Platform-independent, original MSX1/MSX2 implementation. No browser dependencies.
 pub mod basic;
 pub mod cartridge;
 pub mod cpu;
@@ -7,7 +7,15 @@ use cartridge::Mapping;
 pub mod firmware;
 pub mod font;
 pub mod psg;
+pub mod rtc;
 pub mod vdp;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Model {
+    #[default]
+    Msx1,
+    Msx2,
+}
 use basic::Basic;
 use cpu::{Bus, Cpu};
 use psg::Psg;
@@ -15,6 +23,10 @@ use std::collections::VecDeque;
 use vdp::Vdp;
 
 pub struct Hardware {
+    pub model: Model,
+    pub subrom: Vec<u8>,
+    pub secondary: [u8; 4],
+    pub rtc: rtc::Rtc,
     pub ram: Vec<u8>,
     pub bios: Vec<u8>,
     pub cartridge: Vec<u8>,
@@ -33,6 +45,10 @@ pub struct Hardware {
 impl Default for Hardware {
     fn default() -> Self {
         Self {
+            model: Model::Msx1,
+            subrom: Vec::new(),
+            secondary: [0; 4],
+            rtc: rtc::Rtc::default(),
             ram: vec![0; 65536],
             bios: firmware::bios(),
             cartridge: Vec::new(),
@@ -57,6 +73,11 @@ impl Hardware {
         self.ram.fill(0);
         self.mapping = Mapping::new(self.mapping.kind);
         self.slots = 0xf0;
+        self.secondary = [0; 4];
+        if self.model == Model::Msx2 && self.builtin {
+            self.secondary[3] = 0xff;
+        }
+        self.rtc.selected = 0;
         self.ppi_c = 0;
         self.ppi_control = 0x82;
         self.release_keys();
@@ -83,21 +104,40 @@ impl Hardware {
         self.joystick = 0x3f;
     }
 }
+impl Hardware {
+    fn slot(&self, address: u16) -> (u8, u8) {
+        let page = (address >> 14) * 2;
+        let primary = (self.slots >> page) & 3;
+        let secondary = if self.model == Model::Msx2 && primary == 3 {
+            (self.secondary[3] >> page) & 3
+        } else {
+            0
+        };
+        (primary, secondary)
+    }
+}
 impl Bus for Hardware {
     fn read(&mut self, address: u16) -> u8 {
-        let slot = (self.slots >> ((address >> 14) * 2)) & 3;
+        if address == 0xffff && self.model == Model::Msx2 && self.slots >> 6 == 3 {
+            return !self.secondary[3];
+        }
         let a = address as usize;
-        match slot {
-            0 => self.bios.get(a).copied().unwrap_or(255),
-            1 => self.mapping.read(&self.cartridge, address),
-            3 => self.ram[a],
+        match self.slot(address) {
+            (0, 0) => self.bios.get(a).copied().unwrap_or(255),
+            (1, 0) => self.mapping.read(&self.cartridge, address),
+            (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
+            (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[a],
             _ => 255,
         }
     }
     fn write(&mut self, address: u16, value: u8) {
-        match (self.slots >> ((address >> 14) * 2)) & 3 {
-            1 => self.mapping.write(address, value),
-            3 => self.ram[address as usize] = value,
+        if address == 0xffff && self.model == Model::Msx2 && self.slots >> 6 == 3 {
+            self.secondary[3] = value;
+            return;
+        }
+        match self.slot(address) {
+            (1, 0) => self.mapping.write(address, value),
+            (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[address as usize] = value,
             _ => {}
         }
     }
@@ -116,6 +156,7 @@ impl Bus for Hardware {
                     self.psg.read()
                 }
             }
+            0xb5 if self.model == Model::Msx2 => self.rtc.read(),
             0xa8 => self.slots,
             0xa9 => self
                 .keyboard
@@ -124,7 +165,7 @@ impl Bus for Hardware {
                 .unwrap_or(255),
             0xaa => self.ppi_c,
             0xab => self.ppi_control,
-            0xf0 if self.builtin => self.keys.pop_front().unwrap_or(0),
+            0xf0 if self.builtin && self.model == Model::Msx1 => self.keys.pop_front().unwrap_or(0),
             _ => 255,
         }
     }
@@ -132,6 +173,10 @@ impl Bus for Hardware {
         match port as u8 {
             0x98 => self.vdp.write(value),
             0x99 => self.vdp.control(value),
+            0x9a => self.vdp.write_palette(value),
+            0x9b => self.vdp.write_indirect(value),
+            0xb4 if self.model == Model::Msx2 => self.rtc.selected = value & 15,
+            0xb5 if self.model == Model::Msx2 => self.rtc.write(value),
             0xa0 => self.psg.select(value),
             0xa1 => self.psg.write(value),
             0xa8 => self.slots = value,
@@ -148,7 +193,7 @@ impl Bus for Hardware {
                     }
                 }
             }
-            0xf1 if self.builtin => self.services.push_back(value),
+            0xf1 if self.builtin && self.model == Model::Msx1 => self.services.push_back(value),
             _ => {}
         }
     }
@@ -173,6 +218,33 @@ impl Default for Machine {
     }
 }
 impl Machine {
+    /// Switching profiles releases incompatible firmware and cartridge images.
+    pub fn set_model(&mut self, model: Model) {
+        self.hardware.model = model;
+        self.hardware.vdp = Vdp::new(model == Model::Msx2);
+        self.hardware.rtc = rtc::Rtc::default();
+        self.use_builtin();
+    }
+    /// Install a complete MSX2 firmware set atomically. No component is committed
+    /// to the running machine until both lengths have been validated.
+    pub fn load_msx2_firmware(&mut self, main: &[u8], sub: &[u8]) -> Result<(), String> {
+        if self.hardware.model != Model::Msx2 {
+            return Err("Select MSX2 before loading its main BIOS and sub-ROM.".into());
+        }
+        if main.len() != 32768 || sub.len() != 16384 {
+            return Err(
+                "MSX2 requires a 32 KiB main BIOS/BASIC and a separate 16 KiB sub-ROM.".into(),
+            );
+        }
+        if main[0x2d] != 1 || &sub[..2] != b"CD" {
+            return Err("Expected an MSX2 main ROM (generation byte 002Dh = 1) and a CD-header MSX2 sub-ROM. Select a matching firmware pair.".into());
+        }
+        self.hardware.bios = main.to_vec();
+        self.hardware.subrom = sub.to_vec();
+        self.hardware.builtin = false;
+        self.reset();
+        Ok(())
+    }
     pub fn reset(&mut self) {
         self.hardware.reset();
         self.cpu = Cpu::new();
@@ -207,6 +279,9 @@ impl Machine {
         self.reset();
     }
     pub fn load_bios(&mut self, rom: &[u8]) -> Result<(), String> {
+        if self.hardware.model == Model::Msx2 {
+            return Err("MSX2 requires both the main BIOS and sub-ROM. Select both files.".into());
+        }
         if rom.len() != 32768 {
             return Err("Select a 32 KiB MSX1 BIOS/BASIC system ROM.".into());
         }
@@ -216,14 +291,26 @@ impl Machine {
         Ok(())
     }
     pub fn use_builtin(&mut self) {
-        self.hardware.bios = firmware::bios();
+        self.hardware.bios = if self.hardware.model == Model::Msx2 {
+            firmware::msx2_bios()
+        } else {
+            firmware::bios()
+        };
+        self.hardware.subrom = if self.hardware.model == Model::Msx2 {
+            firmware::msx2_subrom()
+        } else {
+            Vec::new()
+        };
         self.hardware.builtin = true;
         self.hardware.cartridge = Vec::new();
         self.hardware.mapping = Mapping::default();
         self.reset();
     }
     pub fn text_key(&mut self, key: u8) {
-        if self.hardware.builtin && self.hardware.keys.len() < 256 {
+        if self.hardware.builtin
+            && self.hardware.model == Model::Msx1
+            && self.hardware.keys.len() < 256
+        {
             self.hardware.keys.push_back(key);
         }
     }
@@ -231,6 +318,9 @@ impl Machine {
         let cycles = self.cpu.step(&mut self.hardware);
         self.hardware.vdp.tick(cycles);
         self.hardware.psg.tick(cycles);
+        if self.hardware.model == Model::Msx2 {
+            self.hardware.rtc.tick(cycles);
+        }
         while let Some(key) = self.hardware.services.pop_front() {
             if key == 0 {
                 self.basic.boot(&mut self.hardware.vdp);
@@ -243,12 +333,12 @@ impl Machine {
     }
     pub fn frame(&mut self) {
         self.hardware.psg.samples.clear();
-        self.frame_debt += 228 * 262;
+        self.frame_debt += self.hardware.vdp.frame_cycles();
         while self.frame_debt > 0 {
             let c = self.step();
             self.frame_debt -= c as i32;
         }
-        if self.hardware.builtin {
+        if self.hardware.builtin && self.hardware.model == Model::Msx1 {
             self.basic
                 .pump(&mut self.hardware.vdp, &mut self.hardware.psg, 200);
         }
