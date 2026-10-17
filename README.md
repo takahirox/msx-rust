@@ -155,18 +155,21 @@ address range apply. No image is truncated to fit.
 
 Choose **Cartridge mapper** under **ROMs & advanced system options** before selecting the file with **Open ROM**:
 
-- **Auto** recognizes only plain 8, 16, 32 and 48 KiB images with an AB header
-  visible at CPU address 4000h or 8000h. It does not guess bank-switching hardware
-  from a file's length or scan arbitrary bytes for instruction patterns. Larger
-  images receive a request to select the documented mapper. A small bank-switched
-  image can also need manual selection. An AB header is format validation, not a
-  guarantee of software compatibility.
+- **Auto** (default) recognizes plain 8, 16, 32 and 48 KiB AB-header layouts and
+  estimates ASCII8, ASCII16, Konami or Konami SCC from reachable Z80 mapper writes
+  and banked code structure. A MegaROM needs sufficient evidence and a clear lead
+  over competing candidates; size and the AB header alone cannot choose its mapper.
+  Successful MegaROM imports display **Auto: mapper, estimate**. Uncertain imports
+  report candidate scores and leave the running cartridge and machine intact.
+  Choose a documented mapper manually and select the same local file again to retry.
+  See the [independent method, thresholds and limits](docs/mapper-detection.md).
 - **Plain** uses the same header validation. Small images mirror in 4000h–BFFFh;
   48 KiB images start at 0000h. These lengths describe a mapping format, not an
   upload cap.
 - **ASCII8**, **ASCII16**, **Konami**, and **Konami SCC** explicitly select ROM-only
-  MegaROM hardware. Use the ROM author's documentation to choose; arbitrary or
-  ambiguous images cannot be identified reliably. Change the mapper and select
+  MegaROM hardware, bypassing heuristic choice while keeping format validation.
+  Use the ROM author's documentation to choose; arbitrary or ambiguous images
+  cannot be identified reliably. Change the mapper and select
   the same file again to retry. Changing the picker alone leaves the running
   cartridge unchanged.
 
@@ -199,19 +202,25 @@ copy. Empty files, malformed dumps, unsupported mapping and resource failures ar
 reported as nonfatal errors. Extremely large files remain subject to browser
 ArrayBuffer limits and the 32-bit Wasm address space.
 
+Inference uses the same local bytes under MSX1 and MSX2 and never changes the
+machine model. A likely mapper does not identify a game, prove it boots, select
+its required BIOS/sub-ROM, or add SCC audio or other unsupported hardware.
+
 The small built-in boot ROM initializes self-contained cartridges using their AB
 init pointer; many commercial cartridges need a compatible system BIOS and will
 not work with it. No commercial-game compatibility or manual copyrighted-game
 play-testing is required or claimed.
 
 All mapper fixtures are generated, original MIT-licensed code in
-[`cartridge.rs`](crates/msx-core/tests/cartridge.rs) and
+[`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
+[`detection.rs`](crates/msx-core/tests/detection.rs) and
 [`browser.spec.js`](tests/browser.spec.js). Run the verification commands below to
 test legally distributable images: browser fixtures of 64, 128, 256, 512 and
-1024 KiB actually switch to code in the last bank, display a backdrop and respond
+1024 KiB use Auto, switch to code in the last bank, display a backdrop and respond
 to Space through the real file picker and Wasm. Rust tests also cover 2/4 MiB
 images, register boundaries, reset, slot effects and invalid-load preservation.
-No fixture downloads or proprietary ROMs are required.
+No fixture downloads or proprietary ROMs are required. These synthetic tests verify
+specified evidence handling, not universal detection accuracy on commercial ROMs.
 
 Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
 lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM. **Built-in BASIC** in that section

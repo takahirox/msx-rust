@@ -255,7 +255,7 @@ impl Machine {
         self.load_cartridge_with_mapper(rom, Mapper::Auto)
     }
     pub fn load_cartridge_with_mapper(&mut self, rom: &[u8], mapper: Mapper) -> Result<(), String> {
-        Mapping::validate(rom, mapper)?;
+        let mapper = Mapping::validate(rom, mapper)?.kind;
         let mut owned = Vec::new();
         owned.try_reserve_exact(rom.len()).map_err(|_| {
             "Not enough memory for this cartridge. Close other tabs or try a smaller image."

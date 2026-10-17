@@ -1,12 +1,18 @@
 //! Minimal raw Wasm ABI. All emulation and BASIC live in the portable core.
-use msx_core::{Machine, Mapper, Model};
+use msx_core::{
+    cartridge::{detect_mapper, Confidence},
+    Machine, Mapper, Model,
+};
 use std::cell::RefCell;
 struct App {
     machine: Machine,
     upload: Vec<u8>,
     error: String,
+    detection: String,
+    detected_mapper: u32,
+    confidence: u32,
 }
-thread_local! {static APP:RefCell<App>=RefCell::new(App{machine:Machine::default(),upload:Vec::new(),error:String::new()});}
+thread_local! {static APP:RefCell<App>=RefCell::new(App{machine:Machine::default(),upload:Vec::new(),error:String::new(),detection:String::new(),detected_mapper:0,confidence:0});}
 #[no_mangle]
 pub extern "C" fn msx_model(model: u32) {
     APP.with(|a| {
@@ -101,6 +107,9 @@ pub extern "C" fn msx_load(length: u32, system: u32, mapper: u32) -> u32 {
     APP.with(|a| {
         let mut a = a.borrow_mut();
         let rom = std::mem::take(&mut a.upload);
+        a.detection.clear();
+        a.detected_mapper = 0;
+        a.confidence = Confidence::Invalid as u32;
         let result = if length == 0 || length as usize != rom.len() {
             Err("Invalid ROM transfer length. Select the file again.".into())
         } else if system == 2 {
@@ -112,7 +121,19 @@ pub extern "C" fn msx_load(length: u32, system: u32, mapper: u32) -> u32 {
         } else if system != 0 {
             a.machine.load_bios(&rom)
         } else {
-            Mapper::try_from(mapper).and_then(|mapper| a.machine.load_cartridge_owned(rom, mapper))
+            Mapper::try_from(mapper).and_then(|requested| {
+                let selected = if requested == Mapper::Auto {
+                    let detection = detect_mapper(&rom);
+                    a.confidence = detection.confidence as u32;
+                    a.detection = detection.explanation;
+                    detection.mapper.ok_or_else(|| a.detection.clone())?
+                } else {
+                    requested
+                };
+                a.machine.load_cartridge_owned(rom, selected)?;
+                a.detected_mapper = selected as u32;
+                Ok(())
+            })
         };
         match result {
             Ok(()) => {
@@ -141,4 +162,22 @@ pub extern "C" fn msx_transcript() -> *const u8 {
 #[no_mangle]
 pub extern "C" fn msx_transcript_len() -> u32 {
     APP.with(|a| a.borrow().machine.basic.console.transcript.len() as u32)
+}
+
+/// Metadata for the last cartridge import attempt (0 mapper means no selection).
+#[no_mangle]
+pub extern "C" fn msx_detected_mapper() -> u32 {
+    APP.with(|a| a.borrow().detected_mapper)
+}
+#[no_mangle]
+pub extern "C" fn msx_detection_confidence() -> u32 {
+    APP.with(|a| a.borrow().confidence)
+}
+#[no_mangle]
+pub extern "C" fn msx_detection() -> *const u8 {
+    APP.with(|a| a.borrow().detection.as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn msx_detection_len() -> u32 {
+    APP.with(|a| a.borrow().detection.len() as u32)
 }
