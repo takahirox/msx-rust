@@ -223,7 +223,25 @@ impl Machine {
         self.hardware.model = model;
         self.hardware.vdp = Vdp::new(model == Model::Msx2);
         self.hardware.rtc = rtc::Rtc::default();
-        self.use_builtin();
+        if model == Model::Msx2 {
+            self.use_cbios().expect("MSX2 profile selected");
+        } else {
+            self.use_builtin();
+        }
+    }
+    /// Restore the bundled cartridge BIOS, releasing local firmware and cartridges.
+    /// C-BIOS executes entirely as Z80 code and enables no native BASIC services.
+    pub fn use_cbios(&mut self) -> Result<(), String> {
+        if self.hardware.model != Model::Msx2 {
+            return Err("Select MSX2 before selecting C-BIOS.".into());
+        }
+        self.hardware.bios = firmware::CBIOS_MSX2_MAIN.to_vec();
+        self.hardware.subrom = firmware::CBIOS_MSX2_SUB.to_vec();
+        self.hardware.builtin = false;
+        self.hardware.cartridge = Vec::new();
+        self.hardware.mapping = Mapping::default();
+        self.reset();
+        Ok(())
     }
     /// Install a complete MSX2 firmware set atomically. No component is committed
     /// to the running machine until both lengths have been validated.
@@ -290,6 +308,7 @@ impl Machine {
         self.reset();
         Ok(())
     }
+    /// Restore Weave BASIC (MSX1) or the original diagnostic loader (MSX2).
     pub fn use_builtin(&mut self) {
         self.hardware.bios = if self.hardware.model == Model::Msx2 {
             firmware::msx2_bios()

@@ -33,7 +33,8 @@ fn banked(mapper: Mapper, size: usize) -> Vec<u8> {
         Mapper::Konami => 0x8000,
         _ => 0x9000,
     };
-    let mut code = Vec::new();
+    // Map both cartridge pages explicitly; a real BIOS maps the AB-init page.
+    let mut code = vec![0xf3, 0x3e, 0xd4, 0xd3, 0xa8];
     if mapper == Mapper::KonamiScc {
         code.extend([0x3e, 0, 0x32, 0, 0x50]);
     }
@@ -98,7 +99,12 @@ fn infers_each_mapper_and_executes_in_both_machine_models() {
             m.set_model(model);
             m.load_cartridge(&rom).unwrap();
             assert_eq!(m.hardware.model, model);
-            m.frame();
+            for _ in 0..600 {
+                m.frame();
+                if m.hardware.ram[0xc000] == 0x5a {
+                    break;
+                }
+            }
             assert!(m.cpu.halted);
             assert_eq!(m.hardware.ram[0xc000], 0x5a);
         }
@@ -186,6 +192,10 @@ fn index_prefixed_control_flow_skips_unreachable_mapper_writes() {
             let mut code = transfer.clone();
             code.extend(stores(&[0x6800, 0x7800]));
             let mut rom = image(32768, &code);
+            // Preserve the exact indexed-branch locations while preparing both
+            // cartridge pages under the default MSX2 C-BIOS as well as MSX1.
+            rom[2] = 0x80;
+            rom[0x80..0x88].copy_from_slice(&[0xf3, 0x3e, 0xd4, 0xd3, 0xa8, 0xc3, 0x10, 0x40]);
             let destination = [0x3e, 0x5a, 0x32, 0x00, 0xc0, 0x76];
             rom[0x4100..0x4106].copy_from_slice(&destination);
             rom[0x20..0x26].copy_from_slice(&destination);
@@ -201,7 +211,12 @@ fn index_prefixed_control_flow_skips_unreachable_mapper_writes() {
                     let mut m = Machine::default();
                     m.set_model(model);
                     m.load_cartridge(&rom).unwrap();
-                    m.frame();
+                    for _ in 0..600 {
+                        m.frame();
+                        if m.hardware.ram[0xc000] == 0x5a {
+                            break;
+                        }
+                    }
                     assert!(m.cpu.halted);
                     assert_eq!(m.hardware.ram[0xc000], 0x5a);
                 }

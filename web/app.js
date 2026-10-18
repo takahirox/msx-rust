@@ -13,6 +13,9 @@ let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
 let model = 0;
+let firmware = 'cbios';
+const cbiosName = 'C-BIOS 0.29a · cartridge BIOS (no BASIC)';
+const diagnosticName = 'Original cartridge loader + diagnostic sub-ROM';
 let mainFile;
 let subFile;
 let cartridge = '';
@@ -29,7 +32,7 @@ function status(message, kind = 'info') {
 }
 function updateControls() {
   const native = model === 0 && system === 'Weave BASIC' && !cartridge;
-  for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware']) $(id).disabled = !ready || loading;
+  for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware', 'firmware']) $(id).disabled = !ready || loading;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
   $('eject').disabled = !ready || !cartridge;
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
@@ -258,7 +261,25 @@ document.addEventListener('visibilitychange', () => { previousTime = undefined; 
 screen.addEventListener('paste', event => { event.preventDefault(); command((event.clipboardData.getData('text/plain')).replace(/\r\n?/g, '\n').replace(/[^\x20-\x7e\n]/g, '')); });
 $('pause').addEventListener('click', () => { paused = !paused; releaseKeys(); flushAudio(); updateStatus(); screen.focus(); });
 $('reset').addEventListener('click', () => restart(() => wasm.msx_reset()));
-$('builtin').addEventListener('click', () => { system = model ? 'Original cartridge loader + diagnostic sub-ROM' : 'Weave BASIC'; mainFile = subFile = undefined; updateFirmwareSelection(); cartridge = ''; tone = false; $('bios').value = ''; $('subrom').value = ''; $('cartridge').value = ''; restart(() => wasm.msx_builtin()); });
+function clearRomSelections() {
+  cartridge = ''; mainFile = subFile = undefined;
+  $('bios').value = ''; $('subrom').value = ''; $('cartridge').value = '';
+  updateFirmwareSelection();
+}
+function restoreFirmware(selected = 'cbios') {
+  if (!ready || loading) return;
+  // Both built-in pairs are already in Wasm; no async fetch can partially switch them.
+  if (model && selected === 'cbios') {
+    if (!wasm.msx_cbios()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  } else wasm.msx_builtin();
+  firmware = selected;
+  $('firmware').value = selected;
+  system = model ? (selected === 'cbios' ? cbiosName : diagnosticName) : 'Weave BASIC';
+  clearRomSelections();
+  restart(() => {});
+}
+$('builtin').addEventListener('click', () => restoreFirmware());
+$('firmware').addEventListener('change', () => restoreFirmware($('firmware').value));
 $('eject').addEventListener('click', () => { cartridge = ''; $('cartridge').value = ''; restart(() => wasm.msx_eject()); });
 $('open-rom').addEventListener('click', () => $('cartridge').click());
 $('audio').addEventListener('click', async () => {
@@ -280,11 +301,12 @@ function updateFirmwareSelection() {
 }
 $('model').addEventListener('change', () => {
   model = Number($('model').value);
-  system = model ? 'Original cartridge loader + diagnostic sub-ROM' : 'Weave BASIC';
-  cartridge = ''; mainFile = subFile = undefined;
-  $('bios').value = ''; $('subrom').value = ''; $('cartridge').value = '';
+  firmware = 'cbios'; $('firmware').value = firmware;
+  system = model ? cbiosName : 'Weave BASIC';
+  clearRomSelections();
+  $('msx2-builtins').hidden = !model;
   $('msx2-firmware').hidden = !model;
-  $('builtin').textContent = model ? 'Built-in MSX2 loader' : 'Built-in BASIC';
+  $('builtin').textContent = model ? 'Restore built-in C-BIOS' : 'Built-in BASIC';
   updateFirmwareSelection();
   restart(() => wasm.msx_model(model));
 });
@@ -310,6 +332,7 @@ $('apply-firmware').addEventListener('click', async () => {
     transfer.set(new Uint8Array(main)); transfer.set(new Uint8Array(sub), 32768);
     if (!wasm.msx_load(49152, 2, 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     system = `${mainFile.name} + ${subFile.name}`;
+    firmware = 'local'; $('firmware').value = firmware;
     restart(() => {});
   } catch (error) {
     if (generation === importGeneration) { wasm.msx_cancel_upload(); status(`ROM import failed: ${error.message} Active firmware is unchanged: ${system}.`, 'error'); }

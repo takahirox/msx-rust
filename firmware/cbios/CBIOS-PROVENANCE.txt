@@ -1,0 +1,38 @@
+C-BIOS 0.29a — unmodified official release binaries
+Project: https://cbios.sourceforge.net/
+Release: https://sourceforge.net/projects/cbios/files/cbios/0.29/
+Archive: https://downloads.sourceforge.net/project/cbios/cbios/0.29/cbios-0.29a.zip
+Archive filename: cbios-0.29a.zip (2018-09-23), 269374 bytes
+Archive SHA-256: c585a2f4a10b397e460a95043d59ac79cf4442fbb45a6e14a1e27ef9febaed73
+
+Only these two ROMs are copied from cbios-0.29a/roms/:
+cbios_main_msx2.rom — 32768 bytes, international keyboard, 60 Hz MSX2
+SHA-256: 8767fca1a1ca5928496bb6185a0e951c66d68f65361305134a25f7912085766b
+cbios_sub.rom — 16384 bytes, MSX2 sub-ROM
+SHA-256: 95db258195d1dea673b3826a8ef3d4b747f87f93587ae66e137acd2e39c3c0f1
+
+The release document cbios-0.29a/doc/cbios.txt (heading: C-BIOS 0.29)
+explicitly permits source AND BINARY redistribution with or without modification.
+CBIOS-LICENSE.txt reproduces its complete License section, including all nine
+copyright holders, both redistribution conditions and the full disclaimer.
+These ROMs remain under that BSD-2-Clause license, NOT the emulator's MIT license.
+Binary redistributions must retain CBIOS-LICENSE.txt in their documentation or
+other accompanying materials. Our static build includes it, this record and
+ROM-LICENSE.txt, with links from the app. No upstream code was modified.
+
+The Rust core embeds exactly this pair (also inside the Wasm binary). Main ROM:
+unexpanded primary slot 0, 0000h–7FFFh. Sub-ROM: expanded slot 3-0, 0000h–3FFFh.
+Slot 1 holds cartridges; slot 3-3 holds fixed 64 KiB RAM. No logo, BASIC, disk,
+MSX-MUSIC, vendor extension, regional variant or proprietary firmware is bundled.
+No logo ROM is necessary: C-BIOS can initialize, display its no-cartridge message
+and boot the independently authored service-test and diagnostic cartridges with
+this pair. The BIOS discovers slots/RAM and executes on the emulated Z80; there
+are no native BIOS traps. This is a cartridge-oriented replacement BIOS, with no
+original MSX BASIC, and compatibility remains limited.
+
+Builds and tests use only checked-in bytes; no runtime or test-time SourceForge
+access is needed. The standalone ROM files and notices are copied to dist/ for
+inventory, download and attribution; the browser boots the embedded Wasm pair
+without extra firmware fetches. User firmware is never incorporated into builds,
+uploaded, logged or persisted. No commercial game is a fixture or compatibility
+claim. See README.md, docs/msx2.md and docs/deployment.md in the source repository.

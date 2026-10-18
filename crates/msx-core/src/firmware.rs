@@ -1,4 +1,4 @@
-//! Original firmware and cartridge construction; all emitted bytes are MIT licensed.
+//! Original firmware/cartridge generators (MIT) and separately licensed C-BIOS binaries.
 //! See firmware/boot.asm for the exact boot routine, including the native BASIC ABI.
 use crate::font;
 pub fn bios() -> Vec<u8> {
@@ -322,5 +322,72 @@ pub fn msx2_cartridge() -> Vec<u8> {
     }
     assert!(c.bytes.len() < 0x1ff0);
     rom[0x10..0x10 + c.bytes.len()].copy_from_slice(&c.bytes);
+    rom
+}
+/// Unmodified international/60 Hz C-BIOS 0.29a binaries. BSD-2-Clause;
+/// provenance and complete notices are in firmware/cbios/, separate from MIT.
+pub const CBIOS_MSX2_MAIN: &[u8; 32768] =
+    include_bytes!("../../../firmware/cbios/cbios_main_msx2.rom");
+pub const CBIOS_MSX2_SUB: &[u8; 16384] = include_bytes!("../../../firmware/cbios/cbios_sub.rom");
+
+/// Independent MIT-licensed standard-BIOS cartridge. It intentionally requires
+/// BIOS slot discovery and real RDSLT/WRSLT, EXTROM, CHGMOD, CHPUT, FILVRM,
+/// WRTVRM, SNSMAT, WRTPSG and WRTVDP execution; the diagnostic loader cannot run it.
+/// SCREEN 1 has an original striped tile at (0,16). Space changes (8,16) from
+/// black to white and plays a tone. C200h-C202h hold the slot/input/pass results.
+pub fn cbios_test_cartridge() -> Vec<u8> {
+    let mut rom = vec![0; 16384];
+    rom[..4].copy_from_slice(&[b'A', b'B', 0x10, 0x40]);
+    let mut code = vec![0xf3, 0x31, 0x00, 0xf0]; // DI; LD SP,F000h
+    let fail = [0xc2, 0x00, 0x43]; // JP NZ,4300h
+
+    // C-BIOS must have discovered expanded slot 3 before calling AB init.
+    code.extend_from_slice(&[0x3a, 0xc4, 0xfc, 0xe6, 0x80, 0xfe, 0x80]);
+    code.extend_from_slice(&fail);
+    // Read the expanded sub-ROM, try a protected write, then read it again.
+    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
+    code.extend_from_slice(&fail);
+    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0x1e, 0x00, 0xcd, 0x14, 0x00]);
+    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
+    code.extend_from_slice(&fail);
+    // Write/read expanded RAM in slot 3-3, while main BIOS stays in page zero.
+    code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0x1e, 0x5a, 0xcd, 0x14, 0x00]);
+    code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0xcd, 0x0c, 0x00, 0xfe, 0x5a]);
+    code.extend_from_slice(&fail);
+    // EXTROM INIPLT, then CHGMOD SCREEN 1 (also calls the sub-ROM).
+    code.extend_from_slice(&[0xdd, 0x21, 0x41, 0x01, 0xcd, 0x5f, 0x01]);
+    code.extend_from_slice(&[0x3e, 1, 0xcd, 0x5f, 0, 0x3e, 12, 0xcd, 0xa2, 0]);
+    for ch in b"C-BIOS SERVICE TEST" {
+        code.extend_from_slice(&[0x3e, *ch, 0xcd, 0xa2, 0]);
+    }
+    // FILVRM: original alternating pattern for character 128, blank for 136.
+    for (address, value) in [(0x0400u16, 0xaa), (0x0440, 0)] {
+        code.extend_from_slice(&[0x21, address as u8, (address >> 8) as u8]);
+        code.extend_from_slice(&[0x01, 8, 0, 0x3e, value, 0xcd, 0x56, 0]);
+    }
+    // WRTVRM: color groups and two cells in the third row.
+    for (address, value) in [
+        (0x2010u16, 0xf1),
+        (0x2011, 0xf0),
+        (0x1840, 128),
+        (0x1841, 136),
+    ] {
+        code.extend_from_slice(&[0x21, address as u8, (address >> 8) as u8]);
+        code.extend_from_slice(&[0x3e, value, 0xcd, 0x4d, 0]);
+    }
+    // WRTPSG: channel A, ~440 Hz, tone only. Loop changes volume via BIOS.
+    for (register, value) in [(0, 254), (1, 0), (7, 0xbe), (8, 0)] {
+        code.extend_from_slice(&[0x3e, register, 0x1e, value, 0xcd, 0x93, 0]);
+    }
+    code.extend_from_slice(&[0x3e, 0xa5, 0x32, 0x02, 0xc2]); // All services returned.
+    let loop_address = 0x4010 + code.len() as u16;
+    code.extend_from_slice(&[0x3e, 8, 0xcd, 0x41, 1, 0xe6, 1, 0xee, 1, 0x32, 1, 0xc2]);
+    // E = volume, B = backdrop; NZ means Space pressed.
+    code.extend_from_slice(&[0x1e, 0, 0x06, 1, 0x28, 4, 0x1e, 15, 0x06, 15]);
+    code.extend_from_slice(&[0x3e, 8, 0xcd, 0x93, 0, 0x0e, 7, 0xcd, 0x47, 0]);
+    code.extend_from_slice(&[0xc3, loop_address as u8, (loop_address >> 8) as u8]);
+    assert!(code.len() < 0x2f0);
+    rom[0x10..0x10 + code.len()].copy_from_slice(&code);
+    rom[0x300..0x305].copy_from_slice(&[0xf3, 0x76, 0xc3, 0x01, 0x43]);
     rom
 }

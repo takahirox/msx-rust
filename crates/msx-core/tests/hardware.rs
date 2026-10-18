@@ -305,9 +305,14 @@ fn page_two_cartridge_header_boots_without_a_page_one_header() {
         let mut rom = vec![0; 32768];
         rom[0x4000..0x4004].copy_from_slice(&[b'A', b'B', 0x10, 0x80]);
         rom[0x4010..0x4015].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0]);
-        rom[0x4015] = 0x76;
+        rom[0x4015..0x4017].copy_from_slice(&[0xf3, 0x76]);
         m.load_cartridge(&rom).unwrap();
-        m.frame();
+        for _ in 0..600 {
+            m.frame();
+            if m.hardware.ram[0xc000] == 0x5a {
+                break;
+            }
+        }
         assert!(m.cpu.halted);
         assert_eq!(m.hardware.ram[0xc000], 0x5a);
     }

@@ -286,7 +286,13 @@ fn cpu_executes_from_a_switched_bank() {
                 Mapper::Konami => 0x8000,
                 _ => 0x9000,
             };
-            rom[0x10..0x18].copy_from_slice(&[
+            // A real BIOS maps the AB header's page for init. This fixture
+            // explicitly enables the cartridge on page 2 before jumping there.
+            rom[0x10..0x1c].copy_from_slice(&[
+                0x3e,
+                0xd4,
+                0xd3,
+                0xa8,
                 0x3e,
                 7,
                 0x32,
@@ -305,7 +311,13 @@ fn cpu_executes_from_a_switched_bank() {
             let mut m = Machine::default();
             m.set_model(model);
             m.load_cartridge_owned(rom, kind).unwrap();
-            m.frame();
+            // The default MSX2 C-BIOS discovers slots/RAM before AB init.
+            for _ in 0..600 {
+                m.frame();
+                if m.hardware.ram[0xc000] == 0x5a {
+                    break;
+                }
+            }
             assert!(m.cpu.halted);
             assert_eq!(m.hardware.ram[0xc000], 0x5a);
         }

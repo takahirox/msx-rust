@@ -374,6 +374,7 @@ fn sprite2_per_line_color_combine_collision_and_ninth() {
 fn expanded_slot_register_subrom_protection_and_reset() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
+    m.use_builtin();
     let h = &mut m.hardware;
     h.output(0xa8, 0xff);
     h.write(0xffff, 0xff);
@@ -406,6 +407,7 @@ fn expanded_slot_register_subrom_protection_and_reset() {
 fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
+    m.use_builtin();
     m.load_cartridge(&firmware::msx2_cartridge()).unwrap();
     for _ in 0..15 {
         m.frame();

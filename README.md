@@ -62,18 +62,30 @@ interpreter, not original Microsoft MSX BASIC.
 
 ## MSX2
 
-Choose **Machine → MSX2** in the toolbar, download the original MSX2 diagnostic
-cartridge under advanced options, and open it with **Open ROM**. It runs Z80 code
-to demonstrate V9938 512×212 palette video, 256-color video (hold 8; hold 7 to
-restore), extended VRAM, commands, sprites, expanded slots and RTC. Space plays
-a tone after enabling audio. The built-in MSX2 loader has no BASIC or standard
-BIOS services. MSX1 retains Weave BASIC.
+Choose **Machine → MSX2**, then **Open ROM** to boot a supported cartridge with
+built-in **C-BIOS 0.29a**. This open-source, cartridge-oriented replacement BIOS
+executes on the emulated Z80. It provides **no original MSX BASIC**, and game
+compatibility is limited. Accepting a file or estimating its mapper does not prove
+that it boots. MSX1 retains Weave BASIC.
+
+Under **ROMs & advanced system options → MSX2 firmware**, select **Original
+diagnostic loader** to restore the previous minimal loader (no standard BIOS API),
+or C-BIOS to restore the default. Both choices eject the cartridge and clear local
+firmware selections. **Restore built-in C-BIOS** does the same. **Reset** keeps the
+active firmware/cartridge and restores mapper banks; **Eject** keeps the firmware.
+Changing machine models clears selected ROMs and resets to that model's default.
+
+Download our original **C-BIOS service-test cartridge** under advanced options and
+open it to exercise standard BIOS calls, expanded slots, video, keyboard and PSG.
+Space changes a black tile to white and plays a tone after enabling audio. The
+separate original MSX2 diagnostic demonstrates V9938 512×212 palette video,
+256-color video (hold 8; hold 7 to restore), extended VRAM, commands, sprites and RTC.
 
 For external firmware, select a matching local **32 KiB MSX2 main BIOS/BASIC** and
 **16 KiB sub-ROM**, then **Apply MSX2 firmware**. The pair is validated before
-replacing active firmware. Files remain local and are never uploaded or saved.
-Changing models clears selected ROMs; Reset retains them. See the [MSX2 profile,
-exact coverage, limitations, screenshots and verification](docs/msx2.md).
+replacing active firmware and restarting the current cartridge. Files remain local
+and are never uploaded or saved; failed imports preserve the current session.
+See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 
 ## Hardware and compatibility
 
@@ -105,7 +117,7 @@ and invokes this Rust firmware service through private ports F0/F1. The interpre
 writes the real emulated VDP tables and PSG registers; the browser contains no BASIC
 parser and does not draw a separate text or graphics mockup. `firmware/boot.asm`
 and `crates/msx-core/src/firmware.rs` contain the boot source and exact byte generator.
-The service ports are disabled when a user system ROM is selected.
+The service ports are disabled with C-BIOS or a user system ROM.
 
 Supported commands: `PRINT` (strings/numbers, `;` and `,`), `LET` or bare assignment,
 `IF ... THEN` statement/line number, `GOTO`, nested `FOR ... TO ... STEP ...` / `NEXT`,
@@ -138,11 +150,17 @@ RUN
 
 ## ROM loading and legal guidance
 
-No proprietary BIOS, BASIC or game ROM is included. All bundled code, glyph drawings,
-cartridge text/sprites and generated ROM bytes are original and MIT licensed. See
-[LICENSE](LICENSE) and the [asset provenance inventory](firmware/ROM-LICENSE.txt).
-`./scripts/build.sh` generates all five original ROMs from source and includes their license notices
-in `dist/`. Rust has no external dependencies; Playwright is a development-only dependency
+No proprietary BIOS, BASIC or game ROM is included. The emulator, original glyphs,
+cartridges and six generated ROMs are MIT licensed; the bundled C-BIOS main/sub
+pair is separately **BSD-2-Clause**, with its complete upstream copyrights,
+conditions and disclaimer in [CBIOS-LICENSE.txt](firmware/cbios/CBIOS-LICENSE.txt).
+[The pinned release record](firmware/cbios/CBIOS-PROVENANCE.txt) includes the official
+archive URL, exact version and archive/ROM SHA-256 hashes. See [LICENSE](LICENSE)
+and the [asset provenance inventory](firmware/ROM-LICENSE.txt).
+`./scripts/build.sh` generates the original ROMs and copies the two unmodified
+C-BIOS ROMs and notices into `dist/`. The core embeds the same pair in Wasm, so
+normal boot needs no separate firmware download or SourceForge connection.
+Rust has no external crate dependencies; Playwright is a development-only dependency
 under its upstream license and is not shipped in the site.
 
 Expand **ROMs & advanced system options** to download the original **test cartridge**,
@@ -206,10 +224,10 @@ Inference uses the same local bytes under MSX1 and MSX2 and never changes the
 machine model. A likely mapper does not identify a game, prove it boots, select
 its required BIOS/sub-ROM, or add SCC audio or other unsupported hardware.
 
-The small built-in boot ROM initializes self-contained cartridges using their AB
-init pointer; many commercial cartridges need a compatible system BIOS and will
-not work with it. No commercial-game compatibility or manual copyrighted-game
-play-testing is required or claimed.
+The original diagnostic loader initializes self-contained cartridges using their AB
+init pointer; many commercial cartridges need standard BIOS services. MSX2 now
+defaults to C-BIOS for that purpose, with limited compatibility. No commercial-game
+compatibility or manual copyrighted-game play-testing is required or claimed.
 
 All mapper fixtures are generated, original MIT-licensed code in
 [`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
@@ -230,10 +248,10 @@ compatible. Files are read using `File.arrayBuffer`, never uploaded or persisted
 Do not commit or redistribute user ROMs unless you independently establish permission.
 Original proprietary Microsoft/ASCII BIOS/BASIC has not been validated here.
 
-[C-BIOS](https://cbios.sourceforge.net/) is a separately available BSD-licensed
-replacement BIOS suitable for additional cartridge testing. It has **no BASIC**;
-it is neither bundled nor the source of our BASIC prompt. C-BIOS 0.29a was tested
-as a local input with our cartridge; see the [validation record](docs/validation.md).
+[C-BIOS](https://cbios.sourceforge.net/) 0.29a is bundled for MSX2, with **no original
+MSX BASIC**. No C-BIOS logo, BASIC, disk or music ROM is included. The historical
+[validation record](docs/validation.md) describes earlier external-firmware tests;
+[current bundled-path checks](docs/msx2.md#verification) require no user firmware.
 
 ## Development and verification
 
@@ -262,8 +280,10 @@ width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
 details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
 
-The MSX2 browser tests also check 512/256-pixel modes, 212 lines, all 256 direct
-colors, sprite/command pixels, local firmware pairs, audio and restoration of MSX1.
+The MSX2 browser tests run the default bundled C-BIOS path at both site roots,
+verify real standard-BIOS cartridge pixels, keyboard input and audio/silence, and
+check firmware switching, local pairs, privacy and restoration of MSX1. They also
+check 512/256-pixel modes, 212 lines, all 256 direct colors and sprite/command pixels.
 Screenshots go to `test-results/msx2-screen7.png` and `msx2-screen8.png`.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
