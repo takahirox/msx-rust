@@ -3,6 +3,11 @@ fn main() {
     let dir = env::args().nth(1).expect("output directory");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
+        format!("{dir}/cbios-test-cartridge.rom"),
+        msx_core::firmware::cbios_test_cartridge(),
+    )
+    .unwrap();
+    fs::write(
         format!("{dir}/test-cartridge.rom"),
         msx_core::firmware::test_cartridge(),
     )

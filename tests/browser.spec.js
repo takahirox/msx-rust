@@ -269,7 +269,10 @@ function megaRom(sizeKiB, mapper) {
   const bankSize = mapper === '3' ? 16384 : 8192;
   const lastBank = rom.length / bankSize - 1;
   const register = { '2': 0x7000, '3': 0x7000, '4': 0x8000, '5': 0x9000 }[mapper];
-  const prefix = mapper === '5' ? [0x3e, 0, 0x32, 0, 0x50] : [];
+  // Real BIOS init maps the AB header's page. Select both cartridge pages and
+  // blank the BIOS text screen so this hardware-only fixture shows a backdrop.
+  const prefix = [0xf3, 0x3e, 0xd4, 0xd3, 0xa8, 0x3e, 0, 0xd3, 0x99, 0x3e, 0x81, 0xd3, 0x99,
+    ...(mapper === '5' ? [0x3e, 0, 0x32, 0, 0x50] : [])];
   rom.set([...prefix, 0x3e, lastBank, 0x32, register & 255, register >> 8, 0xc3, 0x00, 0x80], 0x10);
   // Select keyboard row 8; while Space is held, change the backdrop A to 6.
   rom.set([0x3e,8,0xd3,0xaa, 0xdb,0xa9,0xe6,1,0x3e,0x0a,0x20,2,0x3e,6,
@@ -473,8 +476,9 @@ function boundedMemoryWasm(bytes, maxPages) {
 }
 
 test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
-  // 3.5 MiB permits the upload but not the old reset's replacement framebuffer.
-  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 56);
+  // 3.5625 MiB permits the upload but not the old reset's replacement framebuffer.
+  // One extra 64 KiB page accounts for the embedded 48 KiB C-BIOS pair.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 57);
   await page.addInitScript(base64 => {
     const instantiate = WebAssembly.instantiate.bind(WebAssembly);
     WebAssembly.instantiate = async (...args) => {

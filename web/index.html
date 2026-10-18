@@ -72,7 +72,12 @@
         <p><a href="test-cartridge.rom" download>Download our original test cartridge</a>, then open it above. Hold Space to hear its PSG tone after enabling audio.</p>
         <p><a href="msx2-test-cartridge.rom" download>Download our original MSX2 diagnostic cartridge</a>. Select MSX2 and open it above. Keys <kbd>7</kbd>/<kbd>8</kbd> switch 512-wide palette / 256-color video; Space plays a tone. It tests extended VRAM, commands, sprites, expanded slots and our diagnostic sub-ROM. Its loader is not MSX BIOS or BASIC.</p>
         <h2>Local system BIOS / BASIC</h2>
-        <p>Load a lawfully obtained 32 KiB main BIOS/BASIC ROM to execute it from reset. MSX2 also requires a matching 16 KiB sub-ROM: select both, then Apply MSX2 firmware. Files stay in this tab and are never uploaded or stored. Built-in mode unloads all system and cartridge ROMs. MSX1 returns to Weave BASIC; MSX2 returns to our minimal cartridge loader, which has no BASIC or standard BIOS API.</p>
+        <div id="msx2-builtins" hidden>
+          <label class="file" for="firmware">MSX2 firmware</label>
+          <select id="firmware" disabled><option value="cbios">C-BIOS 0.29a (built-in, default)</option><option value="diagnostic">Original diagnostic loader</option><option value="local" disabled>Local firmware pair</option></select>
+          <p>C-BIOS is an open-source replacement BIOS for cartridges, with <strong>no original MSX BASIC</strong> and limited compatibility. Built-in firmware changes eject the cartridge and clear local selections. The diagnostic loader has no standard BIOS services. <a href="cbios-test-cartridge.rom" download>Download our original C-BIOS service-test cartridge</a> (Space changes a tile and plays a tone). <a href="CBIOS-LICENSE.txt">C-BIOS license</a> · <a href="CBIOS-PROVENANCE.txt">Release and hashes</a></p>
+        </div>
+        <p>Load a lawfully obtained 32 KiB main BIOS/BASIC ROM to execute it from reset. MSX2 also requires a matching 16 KiB sub-ROM: select both, then Apply MSX2 firmware. Files stay in this tab and are never uploaded or stored. Restore built-in firmware to unload local system and cartridge ROMs.</p>
         <label class="file" for="bios">Local system ROM (32 KiB)</label>
         <input id="bios" type="file" accept=".rom,.bin" disabled>
         <div id="msx2-firmware" hidden>
@@ -83,7 +88,7 @@
         </div>
         <button id="builtin" disabled>Built-in BASIC</button>
         <p><strong>ROMs stay on your device.</strong> Files are read in memory, never uploaded or saved. No proprietary BIOS, BASIC or games are bundled. Only use ROMs you have permission to use or redistribute.</p>
-        <p>This is an initial emulator with compatibility limits. Weave BASIC is not a compatible MSX BIOS. C-BIOS is a separate replacement BIOS with no BASIC and is not bundled. <a href="https://github.com/takahirox/msx-rust#hardware-and-compatibility">Compatibility details ↗</a> · <a href="ROM-LICENSE.txt">ROM provenance</a></p>
+        <p>This is an initial emulator with compatibility limits. Weave BASIC is not a compatible MSX BIOS. Accepting a ROM or estimating its mapper does not prove that it boots. If the display stays blank, check the selected machine, firmware and mapper, then Reset or try a matching lawfully obtained local firmware pair. <a href="https://github.com/takahirox/msx-rust#hardware-and-compatibility">Compatibility details ↗</a> · <a href="ROM-LICENSE.txt">ROM provenance</a></p>
       </div>
     </details>
     <details id="transcript-panel">

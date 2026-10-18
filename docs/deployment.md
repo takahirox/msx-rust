@@ -34,19 +34,39 @@ installs the toolchain specified by the repository before the build runs.
 
 The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 `dist/`, copies only the web entry files and license notices, then generates the
-original boot/test ROMs from Rust source. The complete deployable inventory is:
+six original boot/test ROMs from Rust source. It also copies only the two pinned
+C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
+The complete deployable inventory is **16 files**:
 
 - `index.html`, `style.css`, `app.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
 - `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
-- `LICENSE`, `ROM-LICENSE.txt`
+- `cbios-test-cartridge.rom`
+- `cbios_main_msx2.rom`, `cbios_sub.rom`
+- `LICENSE`, `ROM-LICENSE.txt`, `CBIOS-LICENSE.txt`, `CBIOS-PROVENANCE.txt`
 
 The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the
-original MIT-licensed firmware, glyphs and cartridge; no proprietary BIOS/BASIC,
-games, third-party ROMs, source, test fixtures or npm packages are shipped.
+original MIT-licensed firmware, glyphs and cartridges, and separately BSD-2-Clause
+C-BIOS. No proprietary BIOS/BASIC, games, other third-party ROMs, sources or npm
+packages are shipped. The two unmodified official release binaries are also
+embedded in the core/Wasm, so choosing default MSX2 needs no firmware network
+request or SourceForge access. All assets can be served locally without external
+network access; browser tests never download firmware at runtime.
+
+[CBIOS-PROVENANCE.txt](../firmware/cbios/CBIOS-PROVENANCE.txt) records the original
+SourceForge release/archive URLs, version 0.29a, archive size and SHA-256, both ROM
+sizes/hashes and exact slot mapping. [CBIOS-LICENSE.txt](../firmware/cbios/CBIOS-LICENSE.txt)
+reproduces the complete License section from that release's `doc/cbios.txt`, with
+all copyright holders, both redistribution conditions and disclaimer. Its binary
+redistribution condition requires these notices in accompanying materials;
+retain both records with the site and Wasm/ROM redistributions. C-BIOS remains
+separate from the repository's MIT license. No logo, BASIC, music or disk ROM is
+needed or distributed. The app links the notices and downloadable independent
+service-test cartridge under advanced options.
 `scripts/check-dist.mjs` rejects missing, empty or unexpected output files and
-checks Wasm exports, ROM headers/sizes and relative HTML links. Only `dist/` is
+checks Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes,
+unchanged license/provenance records and relative HTML links. Only `dist/` is
 uploaded by the Pages workflow.
 
 All module, stylesheet and Wasm URLs are relative; there is no client-side router.
@@ -56,9 +76,15 @@ on port 41873 and the unchanged `dist/` artifact at
 HTML/JS/CSS/Wasm loading beneath the prefix, boots BASIC, types `PRINT 42` and
 checks the transcript and Canvas with no failed requests or page errors.
 
-The MSX2 suite also boots the original diagnostic at this same prefix and checks
-512-wide Canvas output. See the [Issue #11 validation record](msx2.md#verification)
-for MSX2 checks; the results below record the earlier deployment integration.
+The MSX2 suite boots the default embedded C-BIOS pair and independent BIOS service
+cartridge at both roots, verifying Canvas pixels, keyboard/PSG audio and silence,
+local pair validation, firmware switching, privacy and MSX1 restoration. It also
+boots the diagnostic cartridge and checks 512-wide Canvas output. See the
+[current MSX2 validation record](msx2.md#verification); the results below record
+the earlier deployment integration. Issue #15 additionally requires post-merge
+verification of the actual published C-BIOS path, static firmware/notices and
+service cartridge, with deployment run and observed results recorded; this remains
+pending until performed on the deployed build.
 
 ## Pre-merge validation
 
