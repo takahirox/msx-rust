@@ -238,13 +238,29 @@ Specifications used for independent implementation:
 [Yamaha/ASCII V9938 Technical Data Book](https://gr8bit.ru/rs/Documentation/V9938-programmers-guide.pdf).
 No third-party emulator implementation or specification example program was copied.
 
-## Required post-merge verification — pending
+## Required post-merge verification — passed
 
-After merge, verify the actual GitHub Pages deployment at
-<https://takahirox.github.io/msx-rust/>. Record its deployment run/commit and observed
-URL, confirm relative Wasm/static firmware asset loads and license links, select
-MSX2 with default C-BIOS and boot the independent service-test cartridge through
-the browser file input. Verify its pixels, Space/input/audio and absence of client
-errors; record the deployment run and results. Local tests cannot establish that publication succeeded. No push, PR, merge,
-comment or production verification is performed by this implementation node;
-report live failures through new Issues.
+On 2026-10-18, [deployment run 39108108022](https://github.com/takahirox/msx-rust/actions/runs/39108108022)
+successfully built and deployed merge commit `be1dd8baa0f48cc7a352fbbdc02868f207b5f719`
+from [PR #16](https://github.com/takahirox/msx-rust/pull/16).
+The live site at <https://takahirox.github.io/msx-rust/> was then verified with
+Playwright 1.64.1 / headless Chromium 156.0.8078.4:
+
+- All 16 assets in `scripts/check-dist.mjs` returned HTTP 200 with nonempty bodies.
+  The deployed HTML, JavaScript and CSS matched the reviewed source; the C-BIOS
+  main/sub ROMs and complete license/provenance notices matched the checked-in
+  files byte for byte. Both ROM SHA-256 hashes matched the pinned inventory.
+- The existing default C-BIOS service test from `tests/msx2.spec.js` was adapted
+  to the live HTTPS origin, using fixture files downloaded from that deployment.
+  The test passed (1 test, 13.9 seconds). It selected MSX2 with default C-BIOS,
+  loaded the independent cartridge through the real file input, and verified its
+  Canvas tile pattern, Space-controlled pixels, nonzero PSG audio and silence on
+  release. Reset, local main/sub firmware, diagnostic-loader switching, returning
+  to C-BIOS, eject and MSX1 `PRINT 42` also passed.
+- Browser requests were limited to the site's HTML, JavaScript, CSS and Wasm GETs;
+  external requests were blocked. No page errors, failed requests, HTTP errors,
+  ROM uploads or storage writes were observed. Firmware and license downloads
+  were checked separately; normal boot used the firmware embedded in Wasm.
+
+This completes the required deployment check for Issue #15. It verifies the
+original service cartridge, without making commercial-game compatibility claims.
