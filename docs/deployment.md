@@ -178,8 +178,9 @@ Official game ROMs were compared byte-for-byte with the pinned upstream Git
 objects. Each retained upstream license was checked for complete copyright,
 permission and disclaimer text. Whitespace normalization is recorded in the
 [redistribution audit](../demos/PROVENANCE.txt); game ROMs are unmodified.
-Live deployment and its Actions run/commit have not been verified in this node;
-Issue #21's required post-merge checks remain pending below.
+Live deployment was subsequently verified after merge; see the
+[Issue #21 verification record](demo-live-evidence/README.md) for the Actions
+run, deployed commit, execution/input checks and published-site screenshots.
 
 ## One-time repository owner setup
 
@@ -216,14 +217,13 @@ steps. A build error prevents upload and deployment. For deployment errors, chec
 the Pages publishing source, environment rules and deployment job logs. The
 `github-pages` environment and deployment step expose the actual published URL.
 
-## Required post-merge verification (pending)
+## Required post-merge verification
 
-Issue #21 additionally requires verifying Demo ROMs on the actual deployed site:
-record the Actions run and deployed commit, launch a third-party MSX1 game and
-the original MSX2 diagnostic, observe video and working input, check Reset/Eject/
-BASIC restoration, and fetch all manifest ROM/license URLs without errors. File
-live-site defects as separate follow-up Issues. This remains pending until after
-merge; local screenshots and prefix tests do not establish deployment success.
+Issue #21's required Demo ROMs verification is complete on the actual deployed
+site. The [verification record](demo-live-evidence/README.md) identifies the
+successful Actions run and deployed commit and records game/diagnostic video,
+working input, Reset/Eject/BASIC restoration and all manifest ROM/license URL
+checks. No live-site defects were found requiring follow-up Issues.
 
 After this integration is reviewed and merged:
 
