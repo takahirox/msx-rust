@@ -18,7 +18,7 @@
     <div class="toolbar" role="group" aria-label="Emulator controls">
       <div class="control-group">
         <label for="model" class="machine-label">Machine</label>
-        <select id="model" aria-label="Machine" disabled><option value="0">MSX1</option><option value="1">MSX2</option></select>
+        <select id="model" aria-label="Machine" disabled><option value="0">MSX1</option><option value="1" selected>MSX2</option></select>
         <button id="pause" disabled>Pause</button>
         <button id="reset" disabled title="Restart with the selected ROMs">Reset</button>
         <button id="audio" disabled aria-pressed="false">Enable audio</button>
@@ -112,7 +112,7 @@
         <div id="msx2-builtins">
           <label class="file" for="firmware">Firmware policy</label>
           <select id="firmware" disabled><option value="auto">Automatic: Weave BASIC / cartridge C-BIOS</option><option value="cbios">C-BIOS 0.29a (explicit, no BASIC)</option><option value="diagnostic" disabled>Original diagnostic loader</option><option value="local" disabled>Local user BIOS</option></select>
-          <p>C-BIOS is an open-source replacement BIOS for cartridges, with <strong>no original MSX BASIC</strong> and limited compatibility. Automatic mode starts Weave BASIC on both machines, uses the matching C-BIOS for cartridges, and returns to BASIC on Eject. Explicit C-BIOS, diagnostic and local firmware selections persist through Open ROM, Reset and Eject. Firmware switches restart execution and discard the in-memory BASIC program. Use Weave BASIC clears the override and ejects cartridges. Selecting a machine also returns to fresh automatic BASIC. The diagnostic loader has no standard BIOS services. Original C-BIOS service-test cartridges: <a href="cbios-msx1-test-cartridge.rom" download>MSX1</a> · <a href="cbios-test-cartridge.rom" download>MSX2</a> (Space changes a tile and plays a tone). <a href="CBIOS-LICENSE.txt">C-BIOS license</a> · <a href="CBIOS-PROVENANCE.txt">Release and hashes</a></p>
+          <p>Fresh page loads start MSX2 Weave BASIC; choose MSX1 with Machine. C-BIOS is an open-source replacement BIOS for cartridges, with <strong>no original MSX BASIC</strong> and limited compatibility. Automatic mode starts Weave BASIC on both machines, uses the matching C-BIOS for cartridges, and returns to BASIC on Eject. Explicit C-BIOS, diagnostic and local firmware selections persist through Open ROM, Reset and Eject. Firmware switches restart execution and discard the in-memory BASIC program. Use Weave BASIC clears the override and ejects cartridges. Selecting a machine also returns to fresh automatic BASIC. The diagnostic loader has no standard BIOS services. Original C-BIOS service-test cartridges: <a href="cbios-msx1-test-cartridge.rom" download>MSX1</a> · <a href="cbios-test-cartridge.rom" download>MSX2</a> (Space changes a tile and plays a tone). <a href="CBIOS-LICENSE.txt">C-BIOS license</a> · <a href="CBIOS-PROVENANCE.txt">Release and hashes</a></p>
         </div>
         <p>Load a lawfully obtained 32 KiB main BIOS/BASIC ROM to execute it from reset. MSX2 also requires a matching 16 KiB sub-ROM: select both, then Apply MSX2 firmware. Files stay in this tab and are never uploaded or stored. Use Weave BASIC to unload local system and cartridge ROMs and restore automatic behavior.</p>
         <label class="file" for="bios">Local system ROM (32 KiB)</label>

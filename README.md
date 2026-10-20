@@ -107,7 +107,10 @@ Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
 
 ## MSX2
 
-Both **MSX1** and **MSX2** start in original, independent **Weave BASIC**.
+Each fresh page load starts **MSX2** in original, independent **Weave BASIC**,
+with the V9938 and 128 KiB VRAM profile. Choose **MSX1** in **Machine** to use
+that model; reloads and new tabs start MSX2 again without remembering a preference.
+Both models support Weave BASIC.
 Selecting a machine clears incompatible ROMs and starts fresh BASIC. Under the
 default automatic policy, **Open ROM** switches to the matching bundled
 **C-BIOS 0.29a** (MSX1 main or MSX2 main + sub-ROM) before Z80 cartridge boot.

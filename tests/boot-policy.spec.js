@@ -16,7 +16,8 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     test(`automatic BASIC, BIOS cartridge, eject and explicit firmware: model ${model} at ${path}`,async({page})=>{
       const errors=[]; page.on('pageerror',e=>errors.push(e.message));
       await page.goto(path); await expect(page.locator('#transcript')).toContainText('READY');
-      await page.locator('#model').selectOption(model);
+      await expect(page.locator('#model')).toHaveValue('1');
+      if(model==='0') await page.locator('#model').selectOption(model);
       await expect(page.locator('#status')).toContainText('Weave BASIC');
       await expect(page.locator('#example')).toBeEnabled();
       await enter(page,'10 INPUT N$'); await enter(page,'20 PRINT N$;42'); await enter(page,'RUN');
@@ -64,7 +65,9 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await expect.poll(()=>pixel(page,8,16)).toEqual([255,255,255]);
       await page.keyboard.up('Space'); await expect.poll(()=>pixel(page,8,16)).toEqual([0,0,0]);
       await page.locator('#reset').click(); await pattern(page);
+      await expect(page.locator('#model')).toHaveValue(model);
       await page.locator('#eject').click(); await enter(page,'PRINT 91');
+      await expect(page.locator('#model')).toHaveValue(model);
       await expect(page.locator('#status')).toContainText('Weave BASIC');
       await expect(page.locator('#transcript')).toContainText('91\nREADY');
       await enter(page,'LIST'); await expect(page.locator('#transcript')).not.toContainText('20 PRINT');
@@ -81,6 +84,7 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await page.locator('#eject').click(); await expect(page.locator('#firmware')).toHaveValue('local');
       await expect(page.locator('#status')).toContainText('user BIOS');
       await page.locator('#builtin').click(); await enter(page,'PRINT 86');
+      await expect(page.locator('#model')).toHaveValue(model);
       await expect(page.locator('#firmware')).toHaveValue('auto');
       await expect(page.locator('#transcript')).toContainText('86\nREADY');
       expect(errors).toEqual([]);

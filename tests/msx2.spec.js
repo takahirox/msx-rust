@@ -2,8 +2,7 @@ import { test, expect } from '@playwright/test';
 
 async function boot(page, path = '/') {
   await page.goto(path);
-  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
-  await page.locator('#model').selectOption('1');
+  await expect(page.locator('#model')).toHaveValue('1');
   await expect(page.locator('#status')).toContainText('MSX2 · Weave BASIC');
 }
 async function pixel(page, x, y) {

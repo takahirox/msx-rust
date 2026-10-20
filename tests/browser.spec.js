@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-async function boot(page, path = "/") {
+async function boot(page, path = "/", model = '1') {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(path);
-  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
+  await expect(page.locator('#model')).toHaveValue('1');
+  if (model === '0') await page.locator('#model').selectOption('0');
   await expect(page.locator('#transcript')).toContainText('READY');
   await page.locator('#screen').focus();
   return errors;
@@ -46,6 +48,83 @@ async function visibleDigits(page) {
     return result;
   });
 }
+for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
+  test(`fresh loads start MSX2 BASIC before the first frame at ${path}`, async ({ page, context }) => {
+    const errors = [];
+    const observeErrors = target => {
+      target.on('pageerror', error => errors.push(error.message));
+      target.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    };
+    observeErrors(page);
+    await context.addInitScript(() => {
+      Storage.prototype.setItem = () => { throw new Error('Unexpected preference persistence'); };
+      indexedDB.open = () => { throw new Error('Unexpected IndexedDB'); };
+      const instantiate = WebAssembly.instantiate;
+      WebAssembly.instantiate = async (...args) => {
+        const result = await instantiate(...args), exports = result.instance.exports;
+        let model;
+        return { ...result, instance: { exports: { ...exports,
+          msx_model(value) { model = value; exports.msx_model(value); },
+          msx_frame() {
+            exports.msx_frame();
+            if (!window.firstFrame) window.firstFrame = {
+              model, selected: document.getElementById('model').value,
+              firmware: exports.msx_firmware(), policy: exports.msx_boot_policy(),
+              text: new TextDecoder().decode(new Uint8Array(exports.memory.buffer, exports.msx_transcript(), exports.msx_transcript_len())),
+            };
+          },
+        } } };
+      };
+    });
+    const startup = async target => {
+      await expect(target.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
+      await expect(target.locator('#model')).toHaveValue('1');
+      await expect(target.locator('#firmware')).toHaveValue('auto');
+      await expect(target.locator('#eject')).toBeDisabled();
+      await expect(target.locator('#example')).toBeEnabled();
+      await expect(target.locator('#transcript')).toContainText('READY');
+      const first = await target.evaluate(() => window.firstFrame);
+      expect(first).toMatchObject({ model: 1, selected: '1', firmware: 0, policy: 0 });
+      expect(first.text).toContain('WEAVE BASIC');
+      expect(first.text).toContain('READY');
+      await target.locator('#advanced-panel').evaluate(el => { el.open = true; });
+      await expect(target.locator('#msx2-firmware')).toBeVisible();
+      await expect(target.locator('#firmware option[value=diagnostic]')).toBeEnabled();
+    };
+    await page.goto(path);
+    await startup(page);
+    await page.locator('#example').click();
+    await expect.poll(() => visibleDigits(page)).toEqual([1, 2, 3, 4, 5]);
+    // SCREEN 8 and the last scanline exercise real V9938 bitmap VRAM and Canvas.
+    await enter(page, 'SCREEN 8:LINE (4,4)-(120,211),28,BF');
+    await expect(page.locator('#screen')).toHaveAttribute('width', '256');
+    await expect(page.locator('#screen')).toHaveAttribute('height', '212');
+    await expect.poll(() => page.locator('#screen').evaluate(canvas =>
+      Array.from(canvas.getContext('2d').getImageData(120,211,1,1).data).slice(0,3)
+    )).toEqual([255,0,0]);
+    await page.locator('#model').selectOption('0');
+    await enter(page, 'PRINT 42');
+    await expect(page.locator('#transcript')).toContainText('42\nREADY');
+    await page.locator('#reset').click();
+    await expect(page.locator('#model')).toHaveValue('0');
+    await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+    await expect(page.locator('#transcript')).not.toContainText('PRINT 42');
+    await page.locator('#builtin').click();
+    await expect(page.locator('#model')).toHaveValue('0');
+    await page.locator('#model').selectOption('1');
+    await startup(page);
+    // A new tab and a reload ignore another tab's deliberate MSX1 selection.
+    await page.locator('#model').selectOption('0');
+    const fresh = await context.newPage();
+    observeErrors(fresh);
+    await fresh.goto(new URL(path, 'http://127.0.0.1:41873').href);
+    await startup(fresh);
+    await fresh.close();
+    await page.reload();
+    await startup(page);
+    expect(errors).toEqual([]);
+  });
+}
 test('boots, edits, lists and runs a BASIC program with visible output', async ({ page }) => {
   const errors = await boot(page);
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
@@ -78,7 +157,7 @@ test('boots, edits, lists and runs a BASIC program with visible output', async (
   expect(errors).toEqual([]);
 });
 test('graphics uses the VDP and Escape interrupts an infinite BASIC program', async ({ page }) => {
-  await boot(page);
+  await boot(page, '/', '0');
   await page.getByRole('button', { name: 'Graphics demo' }).click();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(200);
   await page.screenshot({ path: 'test-results/graphics.png', fullPage: true });
@@ -164,7 +243,7 @@ test('Web Audio plays a PSG tone and fresh buffers settle to silence after mutin
   await expect(page.locator('#audio-state')).toHaveText('Audio on');
 });
 test('file picker boots original cartridge, handles bad ROMs, ejects and loads local system ROM', async ({ page }) => {
-  const errors = await boot(page);
+  const errors = await boot(page, '/', '0');
   const requests = [];
   page.on('request', request => requests.push({ method: request.method(), url: request.url() }));
   const chooser = page.waitForEvent('filechooser');
@@ -211,7 +290,7 @@ test('deployment assets are complete and Wasm has no imports', async ({ page }) 
 // this optional path never downloads user firmware.
 if (process.env.MSX_TEST_BIOS) {
   test('locally supplied C-BIOS boots the authored cartridge in the browser', async ({ page }) => {
-    const errors = await boot(page);
+    const errors = await boot(page, '/', '0');
     await page.locator('#bios').setInputFiles(process.env.MSX_TEST_BIOS);
     await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
     await expect.poll(async () => (await colors(page))['212,193,84'] || 0, { timeout: 20000 }).toBeGreaterThan(20);
@@ -248,7 +327,7 @@ test('boots with all assets beneath a GitHub Pages project prefix', async ({ pag
   page.on('request', request => requests.push(new URL(request.url()).pathname));
   page.on('requestfailed', request => failures.push(request.url()));
   page.on('response', response => { if (response.status() >= 400) failures.push(response.url()); });
-  const errors = await boot(page, 'http://127.0.0.1:41874/msx-rust/');
+  const errors = await boot(page, 'http://127.0.0.1:41874/msx-rust/', '0');
   await enter(page, 'PRINT 42');
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
@@ -292,7 +371,7 @@ async function backdrop(page, rgb) {
 }
 for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [1024, '2']]) {
   test(`real file input executes ${size} KiB bank-switched mapper ${mapper} and survives failed imports`, async ({ page }) => {
-    const errors = await boot(page);
+    const errors = await boot(page, '/', '0');
     const requests = [];
     page.on('request', r => requests.push({ method: r.method(), url: r.url() }));
     const fixture = megaRom(size, mapper);
@@ -477,16 +556,17 @@ function boundedMemoryWasm(bytes, maxPages) {
 }
 
 test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
-  // 3.6875 MiB permits the upload but not the old reset's replacement framebuffer.
-  // Accounts for both bundled main ROMs and preallocated firmware buffers;
-  // still too small for a second cartridge copy or replacement framebuffer.
-  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 59);
+  // 4.6875 MiB permits the upload after MSX2 startup and an explicit MSX1 switch,
+  // including the larger V9938 framebuffer/VRAM allocations. It still cannot fit
+  // a second cartridge copy; pointer checks also verify framebuffer reuse.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 75);
   await page.addInitScript(base64 => {
     const instantiate = WebAssembly.instantiate.bind(WebAssembly);
     WebAssembly.instantiate = async (...args) => {
       args[0] = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       const result = await instantiate(...args);
       const exports = result.instance.exports;
+      window.memoryTestWasm = exports;
       return { ...result, instance: { exports: { ...exports, msx_upload(length) {
         const pointer = exports.msx_upload(length);
         window.lastUpload = { length, reserved: pointer !== 0 };
@@ -494,19 +574,22 @@ test('a reserved 2 MiB cartridge installs and resets without extra memory', asyn
       } } } };
     };
   }, bounded.toString('base64'));
-  const errors = await boot(page);
+  const errors = await boot(page, '/', '0');
+  const pixels = await page.evaluate(() => window.memoryTestWasm.msx_pixels());
   await page.locator('#advanced-panel > summary').click();
   await page.locator('#mapper').selectOption('2');
   const fixture = megaRom(2048, '2');
   await page.locator('#cartridge').setInputFiles(fixture);
   await expect.poll(() => page.evaluate(() => window.lastUpload)).toEqual({ length: 2 * 1024 * 1024, reserved: true });
   await expect(page.locator('#status')).toHaveText(`Running · MSX1 C-BIOS 0.29a · cartridge BIOS (no BASIC) · ${fixture.name} (ASCII8)`);
+  expect(await page.evaluate(() => window.memoryTestWasm.msx_pixels())).toBe(pixels);
   await backdrop(page, '212,193,84');
   await page.locator('#screen').focus();
   await page.keyboard.down('Space');
   await backdrop(page, '212,82,77');
   await page.keyboard.up('Space');
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  expect(await page.evaluate(() => window.memoryTestWasm.msx_pixels())).toBe(pixels);
   await backdrop(page, '212,193,84');
   await page.getByRole('button', { name: 'Eject cartridge' }).click();
   await enter(page, 'PRINT 42');
@@ -539,7 +622,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
       return arrayBuffer.call(this);
     };
   }, bounded.toString('base64'));
-  const errors = await boot(page);
+  const errors = await boot(page, '/', '0');
   await page.locator('#advanced-panel > summary').click();
   await page.locator('#mapper').selectOption('2');
   await enter(page, '10 PRINT 86');
@@ -637,7 +720,7 @@ test('focus is visible, Tab leaves the display, and samples resume paused BASIC'
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(page.locator('#screen')).toBeFocused();
   await page.getByRole('button', { name: 'BASIC example', exact: true }).click();
-  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
   await expect(page.locator('#screen')).toBeFocused();
   await expect(page.locator('#transcript')).toContainText('1\n2\n3\n4\n5\nREADY');
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
@@ -692,10 +775,14 @@ test('loading disables commands and shows progress before Wasm is ready', async 
   await page.route('**/msx_wasm.wasm', async route => { await gate; await route.continue(); });
   await page.goto('/');
   await expect(page.locator('#status')).toHaveText('Loading WebAssembly…');
+  await expect(page.locator('#model')).toHaveValue('1');
   for (const id of ['pause', 'open-rom', 'audio', 'example', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
   await expect(page.locator('#fullscreen')).toBeEnabled();
+  // Simulate a browser restoring a stale form selection while Wasm downloads.
+  await page.locator('#model').evaluate(select => { select.value = '0'; });
   release();
-  await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
+  await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
+  await expect(page.locator('#model')).toHaveValue('1');
   await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
 });
 
@@ -712,7 +799,7 @@ for (const failure of ['http', 'invalid-wasm']) {
 }
 
 test('unrecognized ROMs keep the selected machine and explain how to recover', async ({ page }) => {
-  await boot(page);
+  await boot(page, '/', '0');
   await page.locator('#cartridge').setInputFiles({ name: 'large.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(49153) });
   await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await expect(page.locator('#eject')).toBeDisabled();
@@ -737,7 +824,7 @@ test('audio unlock failures are visible and retryable', async ({ page }) => {
 
 for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
   test(`classic-style original BASIC programs use keyboard, input and VDP at ${path}`, async ({ page }) => {
-    const errors = await boot(page, path);
+    const errors = await boot(page, path, '0');
     const load = async name => {
       await enter(page, 'NEW');
       const source = await readFile(`examples/basic/${name}.bas`, 'utf8');
