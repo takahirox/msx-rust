@@ -119,6 +119,35 @@ fn signed_dac_rounding_zero_periods_and_frequency_write_resets() {
 }
 
 #[test]
+fn shared_wave_rotation_selects_voice_five_for_bit_six_and_voice_four_for_bit_seven() {
+    for (mode, offsets) in [
+        (0x00, [0, 0, 0]),
+        (0x40, [0, 1, 0]),
+        (0x80, [1, 2, 0]),
+        (0xc0, [0, 0, 0]),
+    ] {
+        let mut chip = Scc::default();
+        for i in 0..32 {
+            chip.write(0x9860 + i, i as u8);
+        }
+        voice(&mut chip, 3, 19, 15); // Voice 4 advances every 20 cycles.
+        voice(&mut chip, 4, 39, 15); // Voice 5 advances every 40 cycles.
+        chip.write(0x98e0, mode);
+        // Check before/after voice 5 advances, then after both phases wrap.
+        for (cycles, offset) in [20, 20, 1240].into_iter().zip(offsets) {
+            chip.tick(cycles);
+            for i in 0..32u8 {
+                assert_eq!(
+                    chip.read(0x9860 + u16::from(i)),
+                    i.wrapping_sub(offset) & 31,
+                    "mode {mode:02x}, offset {offset}, sample {i}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn deformation_dividers_rotation_protection_and_read_side_effect() {
     let mut initial = Scc::default();
     for c in 0..5 {

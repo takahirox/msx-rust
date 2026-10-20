@@ -50,13 +50,14 @@ Deformation bits are modeled as follows:
 | 1 | Use its low eight bits; takes priority if both bits 0/1 are set |
 | 2–4 | No modeled effect; undocumented |
 | 5 | A period write also resets that voice's wave position to zero |
-| 6 | Rotate waveform read addresses for all voices; all wave RAM is write-protected |
-| 7 | Rotate shared wave 4/5 reads; protect that waveform from writes |
+| 6 | Rotate waveform read addresses; shared wave 4/5 uses voice 5's phase; all wave RAM is write-protected |
+| 7 | Rotate shared wave 4/5 reads using voice 4's phase; protect that waveform from writes |
 
 Rotation moves the data originally at offset 0 toward offset 1, at the wave's
 oscillator cadence. With both rotation bits set, only the first three waves
-rotate, and all four remain write-protected. Shared-wave read rotation uses
-voice 4's position. Electrical interactions between the two voices accessing
+rotate, and all four remain write-protected. With bit 6 alone, shared-wave read
+rotation uses voice 5's position; with bit 7 alone, it uses voice 4's position.
+Electrical interactions between the two voices accessing
 the shared RAM, especially combined rotation modes, are approximated by the
 independent digital oscillators; bus-dependent noise is not synthesized.
 

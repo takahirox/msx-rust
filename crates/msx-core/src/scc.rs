@@ -23,7 +23,13 @@ impl Scc {
                 } else {
                     self.deformation & 0x40 != 0
                 };
-                let offset = if rotating { self.position[bank] } else { 0 };
+                // Bit 6 clocks the shared wave with voice 5; bit 7 uses voice 4.
+                let voice = if bank == 3 && self.deformation & 0x40 != 0 {
+                    4
+                } else {
+                    bank
+                };
+                let offset = if rotating { self.position[voice] } else { 0 };
                 self.waves[bank][(r.wrapping_sub(offset) & 31) as usize] as u8
             }
             0xe0..=0xff => {
