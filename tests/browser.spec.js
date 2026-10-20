@@ -10,11 +10,11 @@ async function boot(page, path = "/") {
   await page.locator('#screen').focus();
   return errors;
 }
-async function enter(page, line) {
+async function enter(page, line, prefix = '>') {
   await page.locator('#screen').focus();
   await page.keyboard.type(line);
   await page.keyboard.press('Enter');
-  await expect(page.locator('#transcript')).toContainText(`>${line}\n`);
+  await expect(page.locator('#transcript')).toContainText(`${prefix}${line}\n`);
 }
 async function colors(page) {
   return page.locator('#screen').evaluate(canvas => {
@@ -748,11 +748,11 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await load('greeting');
     await expect(page.locator('#transcript')).toContainText('NAME? ');
     await expect(page.locator('#screen')).toBeFocused();
-    await enter(page, 'SKY');
+    await enter(page, 'SKY', 'NAME? ');
     await expect(page.locator('#transcript')).toContainText('COUNT (1-5)? ');
-    await enter(page, 'BAD');
+    await enter(page, 'BAD', 'COUNT (1-5)? ');
     await expect(page.locator('#transcript')).toContainText('?REDO FROM START\nCOUNT (1-5)? ');
-    await enter(page, '2');
+    await enter(page, '2', 'COUNT (1-5)? ');
     await expect(page.locator('#transcript')).toContainText('HELLO SKY\nHELLO SKY\nREADY');
     await enter(page, 'CLS:PRINT 5');
     await expect.poll(() => visibleDigits(page)).toEqual([5]);

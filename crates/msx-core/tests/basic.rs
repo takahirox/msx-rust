@@ -303,6 +303,55 @@ fn data_follows_line_order_and_restore_rewinds_with_inline_literals() {
     assert!(b.submit("10 DATA \"BROKEN").is_err());
 }
 #[test]
+fn input_editor_preserves_preceding_print_output_in_vram() {
+    let (mut b, mut v, mut p) = fixture();
+    program(
+        &mut b,
+        "10 CLS:PRINT \"WHAT IS YOUR NAME\";:INPUT N$:PRINT N$",
+    );
+    run(&mut b, &mut v, &mut p, "RUN");
+    assert_eq!(&v.vram[..20], b"WHAT IS YOUR NAME? \x7f");
+    for key in b"SKY" {
+        b.key(*key, &mut v, &mut p);
+    }
+    assert_eq!(&v.vram[..23], b"WHAT IS YOUR NAME? SKY\x7f");
+    b.key(8, &mut v, &mut p);
+    assert_eq!(&v.vram[..24], b"WHAT IS YOUR NAME? SK\x7f  ");
+    b.key(b'Y', &mut v, &mut p);
+    b.key(13, &mut v, &mut p);
+    assert_eq!(&v.vram[..23], b"WHAT IS YOUR NAME? SKY ");
+    assert_eq!(&v.vram[40..44], b"SKY ");
+    ends(&b, "WHAT IS YOUR NAME? SKY\nSKY\nREADY\n");
+}
+
+#[test]
+fn input_editor_scrolls_in_remaining_columns_and_handles_prompt_wrapping() {
+    for length in [36, 37, 38, 39, 40, 78] {
+        let (mut b, mut v, mut p) = fixture();
+        let prompt = format!("{}? ", "X".repeat(length));
+        run(
+            &mut b,
+            &mut v,
+            &mut p,
+            &format!("CLS:INPUT \"{}\";N$", "X".repeat(length)),
+        );
+        assert_eq!(&v.vram[..prompt.len()], prompt.as_bytes());
+        assert_eq!(v.vram[prompt.len()], 127);
+        for key in b"ABCDEFGHIJ" {
+            b.key(*key, &mut v, &mut p);
+            assert_eq!(&v.vram[..prompt.len()], prompt.as_bytes());
+        }
+        b.key(130, &mut v, &mut p);
+        assert_eq!(&v.vram[..prompt.len()], prompt.as_bytes());
+        assert_eq!(v.vram[prompt.len()], 127);
+        b.key(13, &mut v, &mut p);
+        assert_eq!(&v.vram[..prompt.len()], prompt.as_bytes());
+        assert_eq!(&v.vram[prompt.len()..prompt.len() + 10], b"ABCDEFGHIJ");
+        assert!(!b.running);
+    }
+}
+
+#[test]
 fn input_retries_atomically_and_resumes_subroutine_with_array_targets() {
     let (mut b, mut v, mut p) = fixture();
     program(

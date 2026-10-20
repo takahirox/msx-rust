@@ -464,12 +464,12 @@ impl Console {
     fn edit(&mut self, vdp: &mut Vdp, line: &str, cursor: usize) {
         self.edit_prompt(vdp, line, cursor, ">");
     }
-    fn edit_prompt(&mut self, vdp: &mut Vdp, line: &str, cursor: usize, prompt: &str) {
-        // One scrolling editor row; the full line is committed on Enter.
-        let prefix = &prompt[..prompt.len().min(20)];
-        let width = 39 - prefix.len();
+    fn edit_prompt(&mut self, vdp: &mut Vdp, line: &str, cursor: usize, prefix: &str) {
+        // Scroll within the remaining columns, preserving output before the editor.
+        // The full line is committed on Enter.
+        let width = 40 - self.x - prefix.len();
         let start = cursor.saturating_sub(width - 1);
-        let row = &mut vdp.vram[self.y * 40..self.y * 40 + 40];
+        let row = &mut vdp.vram[self.y * 40 + self.x..self.y * 40 + 40];
         row.fill(b' ');
         row[..prefix.len()].copy_from_slice(prefix.as_bytes());
         for (i, c) in line.bytes().skip(start).take(width).enumerate() {
@@ -577,9 +577,9 @@ impl Basic {
             13 => {
                 let line = std::mem::take(&mut self.input);
                 self.cursor = 0;
-                vdp.vram[self.console.y * 40..self.console.y * 40 + 40].fill(b' ');
-                self.console.x = 0;
-                self.console.write(vdp, &format!(">{line}\n"));
+                vdp.vram[self.console.y * 40 + self.console.x..self.console.y * 40 + 40].fill(b' ');
+                let prefix = if self.waiting.is_some() { "" } else { ">" };
+                self.console.write(vdp, &format!("{prefix}{line}\n"));
                 if self.waiting.is_some() {
                     self.accept_input(&line, vdp);
                 } else {
@@ -617,10 +617,8 @@ impl Basic {
         }
     }
     fn edit(&mut self, vdp: &mut Vdp) {
-        let prompt = self
-            .waiting
-            .as_ref()
-            .map_or(">", |input| input.prompt.as_str());
+        // INPUT already wrote its prompt and left the console at the answer column.
+        let prompt = if self.waiting.is_some() { "" } else { ">" };
         self.console
             .edit_prompt(vdp, &self.input, self.cursor, prompt);
     }
