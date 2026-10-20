@@ -313,7 +313,12 @@ Graphics review found multicolor addressing, tile-mode CLS and transparent-sprit
 collision issues; fixes have regression coverage. No failing checks remain in the
 reported final automated suites.
 
-## Required post-merge verification — pending
+## Initial post-merge verification record
+
+Issue #17's subsequent required live Pages verification is now complete; see the
+[post-merge report](issue-17-post-merge-verification.md) for the deployment run,
+merged commit, observed output and screenshots. The following records the initial
+implementation node's pending publication state.
 
 Target: <https://takahirox.github.io/msx-rust/>. No push, PR, merge, comment or deployment
 was performed by this implementation node. A read-only `GET /repos/takahirox/msx-rust/pages`
