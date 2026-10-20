@@ -10,11 +10,11 @@ async function boot(page, path = "/") {
   await page.locator('#screen').focus();
   return errors;
 }
-async function enter(page, line) {
+async function enter(page, line, prefix = '>') {
   await page.locator('#screen').focus();
   await page.keyboard.type(line);
   await page.keyboard.press('Enter');
-  await expect(page.locator('#transcript')).toContainText(`>${line}\n`);
+  await expect(page.locator('#transcript')).toContainText(`${prefix}${line}\n`);
 }
 async function colors(page) {
   return page.locator('#screen').evaluate(canvas => {
@@ -723,3 +723,69 @@ test('audio unlock failures are visible and retryable', async ({ page }) => {
   await expect(page.locator('#audio')).toBeEnabled();
   await expect(page.locator('#tone')).toHaveText('Sound demo');
 });
+
+for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
+  test(`classic-style original BASIC programs use keyboard, input and VDP at ${path}`, async ({ page }) => {
+    const errors = await boot(page, path);
+    const load = async name => {
+      await enter(page, 'NEW');
+      const source = await readFile(`examples/basic/${name}.bas`, 'utf8');
+      for (const line of source.trim().split('\n')) await enter(page, line);
+      await enter(page, 'RUN');
+    };
+    await load('scores');
+    await expect(page.locator('#transcript')).toContainText('COMET:3\nORBIT:1\nMOON:2\nREADY');
+    // Independently recognize output glyphs in Canvas for array/DATA/GOSUB flow.
+    await enter(page, 'NEW');
+    for (const line of [
+      '10 DIM A(5):FOR I=1 TO 5:READ A(I):NEXT I',
+      '20 CLS:FOR I=1 TO 5:GOSUB 100:NEXT I:END',
+      '100 PRINT A(I):RETURN',
+      '200 DATA 1,2,3,4,5',
+    ]) await enter(page, line);
+    await enter(page, 'RUN');
+    await expect.poll(() => visibleDigits(page)).toEqual([1, 2, 3, 4, 5]);
+    await load('greeting');
+    await expect(page.locator('#transcript')).toContainText('NAME? ');
+    await expect(page.locator('#screen')).toBeFocused();
+    await enter(page, 'SKY', 'NAME? ');
+    await expect(page.locator('#transcript')).toContainText('COUNT (1-5)? ');
+    await enter(page, 'BAD', 'COUNT (1-5)? ');
+    await expect(page.locator('#transcript')).toContainText('?REDO FROM START\nCOUNT (1-5)? ');
+    await enter(page, '2', 'COUNT (1-5)? ');
+    await expect(page.locator('#transcript')).toContainText('HELLO SKY\nHELLO SKY\nREADY');
+    await enter(page, 'CLS:PRINT 5');
+    await expect.poll(() => visibleDigits(page)).toEqual([5]);
+    // BREAK discards partially typed INPUT and resumes command editing.
+    await enter(page, 'INPUT "WAIT";N');
+    await page.keyboard.type('123');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#transcript')).toContainText('WAIT? BREAK\nREADY');
+    await enter(page, 'PRINT 4');
+    await expect(page.locator('#transcript')).toContainText('>PRINT 4\n4\nREADY');
+    await enter(page, 'INPUT N');
+    await page.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(page.locator('#transcript')).not.toContainText('INPUT N');
+    await expect(page.locator('#transcript')).toContainText('READY');
+    await load('shapes');
+    const sampled = () => page.locator('#screen').evaluate(canvas => {
+      const data = canvas.getContext('2d').getImageData(0, 0, 256, 192).data;
+      return [[16,96],[128,56],[128,96],[32,32],[0,0]].map(([x,y]) => Array.from(data.slice((y*256+x)*4,(y*256+x)*4+3)));
+    });
+    await expect.poll(sampled).toEqual([[255,255,255],[255,255,255],[212,193,84],[212,82,77],[84,85,237]]);
+    await page.screenshot({ path: `test-results/basic-shapes-${path === '/' ? 'root' : 'pages'}.png`, fullPage: true });
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#transcript')).toContainText('READY');
+    await enter(page, '10 GOSUB 10');
+    await enter(page, 'RUN');
+    await expect(page.locator('#transcript')).toContainText('?TOO MANY GOSUBS IN 10');
+    await page.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(page.locator('#transcript')).not.toContainText('GOSUB');
+    await enter(page, '10 SCREEN 2:PAINT (0,0),10,15:GOTO 10');
+    await enter(page, 'RUN');
+    await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(40000);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#transcript')).toContainText('>RUN\nBREAK\nREADY');
+    expect(errors).toEqual([]);
+  });
+}

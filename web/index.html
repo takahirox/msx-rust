@@ -58,6 +58,30 @@
         <p>Click or tap the display to focus it, then use a <strong>physical keyboard</strong>. Typing and ASCII paste work only while the display is focused. Touch typing and an on-screen keyboard are not supported.</p>
         <p><kbd>Enter</kbd> runs a line or returns from graphics. <kbd>Escape</kbd> interrupts BASIC. Use arrows, Home, End, Backspace and Delete to edit. Arrows + <kbd>Z</kbd>/<kbd>X</kbd> also control joystick 1. Focus loss releases held keys.</p>
         <p>Start with <code>PRINT 2+2</code>. Numbered lines store a program; <code>RUN</code> runs it and <code>LIST</code> shows it. Retype a line to replace it, or enter its number alone to delete it. Type <code>HELP</code> for commands.</p>
+        <p>Weave BASIC is independently implemented and MSX BASIC-inspired. It supports <code>GOSUB</code>/<code>RETURN</code>, explicit one/two-dimensional <code>DIM</code>, numeric/string arrays, <code>DATA</code>/<code>READ</code>/<code>RESTORE</code> and <code>INPUT "NAME";N$</code>. INPUT waits for comma-separated fields in text mode; invalid values retry the whole input. Escape cancels input/execution; Reset clears everything.</p>
+        <p>Graphics in SCREEN 2/3: <code>LINE (0,0)-(80,80),10,B</code> (B box, BF filled box), <code>CIRCLE (128,96),40,15</code>, <code>PAINT (128,96),10,15</code>. Color is optional. Full circles only; mode 2 shares two colors per eight pixels. Arrays require DIM; bounds are inclusive, with up to two dimensions and 16,384 total elements. ELSE, files, tokenized programs, PLAY and BIOS calls are unsupported. RUN resets variables, arrays and DATA.</p>
+        <h2>Original examples (MIT licensed)</h2>
+        <p>Reset or type NEW before each listing, paste/type it into the focused display, then type RUN. The greeting asks for a name and count (1–5). Enter returns from completed graphics.</p>
+        <h3>Scores: subroutines, arrays and DATA</h3>
+        <pre>10 DIM A(3),N$(3)
+20 FOR I=1 TO 3:READ N$(I),A(I):NEXT I
+30 FOR I=1 TO 3:GOSUB 100:NEXT I
+40 END
+100 PRINT N$(I);&quot;:&quot;;A(I):RETURN
+200 DATA COMET,3,ORBIT,1,MOON,2</pre>
+        <h3>Greeting: interactive INPUT</h3>
+        <pre>10 INPUT &quot;NAME&quot;;N$
+20 INPUT &quot;COUNT (1-5)&quot;;N
+30 IF N&lt;1 OR N&gt;5 THEN 20
+40 FOR I=1 TO N:PRINT &quot;HELLO &quot;;N$:NEXT I
+50 END</pre>
+        <h3>Shapes: LINE, CIRCLE and PAINT</h3>
+        <pre>10 SCREEN 2
+20 LINE (16,16)-(239,175),15,B
+30 CIRCLE (128,96),40,15
+40 PAINT (128,96),10,15
+50 LINE (32,32)-(63,55),6,BF
+60 END</pre>
         <p>Reset clears the program and restarts selected ROMs. Pause / Resume stops and starts emulation. Enable audio after a click; if the browser suspends sound, choose Resume audio. Sound demo plays a sustained tone; Stop tone silences it.</p>
         <p>The starters run in built-in Weave BASIC. They resume paused emulation and enter commands into the current session. Use Reset for a fresh program. <a href="https://github.com/takahirox/msx-rust#weave-basic-and-firmware">Full BASIC reference ↗</a></p>
       </div>

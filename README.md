@@ -119,34 +119,140 @@ parser and does not draw a separate text or graphics mockup. `firmware/boot.asm`
 and `crates/msx-core/src/firmware.rs` contain the boot source and exact byte generator.
 The service ports are disabled with C-BIOS or a user system ROM.
 
-Supported commands: `PRINT` (strings/numbers, `;` and `,`), `LET` or bare assignment,
-`IF ... THEN` statement/line number, `GOTO`, nested `FOR ... TO ... STEP ...` / `NEXT`,
-`LIST`, `RUN`, `NEW`, `END`, `STOP`, `REM`/apostrophe comments, `HELP`, `CLS`, `SCREEN`,
-`COLOR`, `PSET`, `VDP`, `VPOKE`, `SOUND` and `BEEP`. Expressions support parentheses,
-arithmetic, powers, comparisons, boolean `AND`/`OR`/`NOT`, `ABS`, `INT`, `SQR`, `SIN`
-and `COS`. Variables are case-insensitive, default to zero (empty for `$` strings),
-and use f64 numbers. `RUN` clears variables. BASIC execution yields each frame so
-Escape remains responsive even with `10 GOTO 10`.
+Supported commands: `PRINT` (strings/numbers, `;` and 14-column comma zones),
+`LET` or bare assignment, `IF ... THEN` statement/line number, `GOTO`,
+`GOSUB` / `RETURN`, nested `FOR ... TO ... STEP ...` / `NEXT`, `DIM`,
+`DATA` / `READ` / `RESTORE`, interactive `INPUT`, `LIST`, `RUN`, `NEW`, `END`,
+`STOP`, `REM`/apostrophe comments, `HELP`, `CLS`, `SCREEN`, `COLOR`, `PSET`,
+`LINE`, `CIRCLE`, `PAINT`, `VDP`, `VPOKE`, `SOUND` and `BEEP`. Expressions support
+parentheses, arithmetic, powers, comparisons, boolean `AND`/`OR`/`NOT`, `ABS`,
+`INT`, `SQR`, `SIN` and `COS`. Variables are case-insensitive, default to zero
+(empty for `$` strings), and use f64 numbers. Names retain all their characters;
+numeric output uses compact decimal formatting rather than MSX's surrounding spaces.
 
-Limitations compared with MSX BASIC: no arrays, `INPUT`, `GOSUB`, `ELSE`, `DATA`,
-files, binary tokens, or MSX BIOS entry-point API. Input is ASCII, up to 240 characters
-per line, with a horizontally scrolling editor; lowercase glyphs display as uppercase.
-There are at most 64 nested loops. Use `PRINT` in text mode. `SCREEN 0` is 40-column
-text, `SCREEN 1` is tile graphics, `SCREEN 2` is 256×192 graphics with the TMS9918A
+- `GOSUB 100` returns to the following statement, including after a colon. Calls
+  nest up to 64 deep; `RETURN` discards unfinished loops inside that call while
+  preserving caller loops. Direct `GOSUB` and `GOTO` can reach stored lines.
+  Bare `RETURN` without a call is an error; `RETURN line` is unsupported.
+- `DIM A(10),N$(2,3)` explicitly allocates one- or two-dimensional arrays, separate
+  from scalars. Bounds are inclusive, zero-based integers from 0 to 4095, with
+  16,384 total elements across arrays. Unlike MSX BASIC, implicit dimensioning is
+  unsupported. Wrong dimensions, fractional/negative indices, out-of-bounds
+  accesses, repeated `DIM`, and type mismatches are errors.
+- `DATA -2,HELLO,"A:B,C"` stores literal fields in numbered-line order, including
+  multiple `DATA` statements on a line. Quote commas/colons; unquoted strings may
+  contain spaces. `READ A,N$` advances through those fields; numeric fields must
+  parse as finite decimal numbers (scientific notation is accepted in DATA/INPUT).
+  Type errors leave the offending field unread; exhaustion reports `OUT OF DATA`.
+  `RESTORE` rewinds; `RESTORE 100` starts at the first DATA at/after the existing
+  line 100. Direct `DATA` is a no-op and is not added to the stored data.
+- `INPUT "NAME";N$` or `INPUT A,N$` waits in SCREEN 0 using the same ASCII editor
+  and keyboard/paste path as commands. Enter one comma-separated field per target;
+  quote strings containing commas. Wrong field counts, malformed quotes or invalid
+  numbers print `?REDO FROM START` and retry the whole input without assignments.
+  Array targets are resolved when INPUT starts. The prompt remains visible (long
+  prompts are shortened in the editor). Escape cancels the program and partial
+  input; Reset clears the machine. No polling loop blocks the browser while waiting.
+- `RUN` clears scalars/arrays and rewinds DATA. `NEW` also removes the program.
+  Editing a stored line rewinds DATA. Direct commands otherwise retain variables
+  and the data position. End-of-program, `END`, `STOP`, errors and Escape clear
+  pending calls, loops and INPUT. `RUN` in a program restarts with fresh state.
+  `STOP` prints BREAK with its program line; resumable `CONT` is unsupported.
+  Execution yields each frame, including infinite `GOTO`/`RUN` programs.
+
+FOR loops with an initially exhausted range execute zero times (a deliberate
+deviation from MSX BASIC's initial iteration); NEXT accepts one variable at a time.
+Input is ASCII, up to 240 characters per editor line, with horizontal scrolling;
+lowercase glyphs display as uppercase. There are at most 64 nested loops.
+Use `PRINT` and `INPUT` in text mode. `SCREEN 0` is 40-column text, `SCREEN 1` is
+tile graphics, `SCREEN 2` is 256×192 graphics with the TMS9918A
 one-foreground/background-pair-per-eight-pixels restriction, and `SCREEN 3` uses
-4×4 color blocks. `PSET x,y,color` works in modes 2/3. Color numbers are 0–15.
+4×4 color blocks. Graphics statements use the emulated VRAM in modes 2/3:
+
+```basic
+PSET (128,96),10
+LINE (16,16)-(239,175),15,B
+LINE (32,32)-(63,55),6,BF
+CIRCLE (128,96),40,15
+PAINT (128,96),10,15
+```
+
+`PSET x,y,color` is also retained. Color is optional (defaults to the foreground
+set by `COLOR fg,bg`), with values 0–15. `LINE` supports plain segments, `B` boxes
+and `BF` filled boxes, omitted start (`LINE -(x,y)`), and `STEP(x,y)` relative
+coordinates. Coordinates round to integers and accept −32768 through 32767, including
+the result of relative offsets; off-screen drawing is clipped. `CIRCLE` supports full circles
+with integer radii 0–1024; arcs and aspect parameters are unsupported. `PAINT`
+supports optional fill and border colors (border defaults to fill), filling the
+four-connected region bounded by the border color or screen edges. It snapshots
+VRAM boundaries and visits at most 49,152 pixels (3,072 blocks in mode 3), so an
+open or same-color fill terminates. An explicit border is supported in both modes,
+including SCREEN 2 as a Weave extension. These bounded primitives run within one
+statement and yield before the next statement to keep repeated drawing responsive.
+Mode 2 drawing can recolor other foreground pixels in the same eight-pixel group;
+drawing the group's background color clears the corresponding pattern bit.
+Color 0 displays as the VDP backdrop. `SCREEN` initializes colors and drawing
+position; `CLS` clears graphics without resetting the position.
+
 Low-level `VDP register,value`, `VPOKE address,value`, and `SOUND register,value`
 use decimal parameters. `BEEP` sustains a tone until silenced.
+Still unsupported: `ELSE`, automatic arrays, integer/single/double type suffixes,
+`PLAY`, sprite commands, files/disk/tape, binary tokenized programs, MSX BIOS entry
+points and MSX2 BASIC in C-BIOS mode. This is an independently implemented,
+MSX BASIC-inspired language subset, not Microsoft's original BASIC.
 
-For example, enter a numbered graphics program in text mode, then run it:
+### Original BASIC examples
+
+These examples, fixtures and interpreter additions are independently authored under
+this repository's MIT license. Copy/type each listing into a fresh built-in MSX1
+session (Reset or `NEW`), then enter `RUN`. They are also in
+[examples/basic](examples/basic) and the browser's **Keyboard & BASIC help**.
+
+Array/data processing with a subroutine:
+
+```basic
+10 DIM A(3),N$(3)
+20 FOR I=1 TO 3:READ N$(I),A(I):NEXT I
+30 FOR I=1 TO 3:GOSUB 100:NEXT I
+40 END
+100 PRINT N$(I);":";A(I):RETURN
+200 DATA COMET,3,ORBIT,1,MOON,2
+RUN
+```
+
+Interactive greeting (enter a name, then a count from 1 to 5; Escape cancels):
+
+```basic
+10 INPUT "NAME";N$
+20 INPUT "COUNT (1-5)";N
+30 IF N<1 OR N>5 THEN 20
+40 FOR I=1 TO N:PRINT "HELLO ";N$:NEXT I
+50 END
+RUN
+```
+
+Graphics (Enter returns to text after the program finishes):
 
 ```basic
 10 SCREEN 2
-20 FOR X=0 TO 255
-30 PSET X,INT(96+60*SIN(X/20)),10
-40 NEXT X
+20 LINE (16,16)-(239,175),15,B
+30 CIRCLE (128,96),40,15
+40 PAINT (128,96),10,15
+50 LINE (32,32)-(63,55),6,BF
+60 END
 RUN
 ```
+
+### Language references and provenance
+
+Syntax and observable behavior are informed by the publicly available
+[MSX Technical Data Book, MSX BASIC Reference Guide, chapter 2](https://map.grauw.nl/resources/system/msxtech.pdf)
+(printed pp. 65, 68–71, 73, 77–78 and 84–88: variable/array, flow, DATA/INPUT
+and graphics statement descriptions), alongside the
+[TMS9918A hardware references](docs/architecture.md). The bounds, reset behavior,
+INPUT retry policy and unsupported forms above are deliberate limits of Weave BASIC.
+Only language/hardware documentation was used: no proprietary ROM, implementation,
+disassembly, token table, or third-party interpreter code was used or bundled.
 
 ## ROM loading and legal guidance
 
