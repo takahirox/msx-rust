@@ -12,7 +12,8 @@ let audioContext;
 let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
-let model = 0;
+// Use the HTML default even if the browser restores an older form selection.
+let model = Number($('model').querySelector('option[selected]').value);
 let firmware = 'auto';
 let localName = '';
 function cbiosName() { return `${model ? 'MSX2' : 'MSX1'} C-BIOS 0.29a · cartridge BIOS (no BASIC)`; }
@@ -433,6 +434,8 @@ try {
   if (!response.ok) throw new Error(`Wasm request failed (${response.status})`);
   const bytes = await response.arrayBuffer();
   ({ instance: { exports: wasm } } = await WebAssembly.instantiate(bytes, {}));
+  wasm.msx_model(model);
+  updateModelControls();
   wasm.msx_frame();
   render();
   ready = true;

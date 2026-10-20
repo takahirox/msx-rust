@@ -104,7 +104,7 @@ for (const site of sites) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     // Starting in MSX2 also proves a game selects its declared MSX1 machine.
-    await page.locator('#model').selectOption('1');
+    await expect(page.locator('#model')).toHaveValue('1');
     for (const id of ['plustaker','yoko']) {
       await choose(page,id);await gameReady(page,id);
       await expect(page.locator('#firmware')).toHaveValue('auto');
@@ -163,7 +163,7 @@ for (const site of sites) {
     await page.route('**/demos/yokosht.rom',r=>r.fulfill({status:404,body:'Missing'}));
     await page.locator('#demo').selectOption('yoko');await page.locator('#play-demo').click();
     await expect(page.locator('#status')).toContainText('HTTP 404');
-    await expect(page.locator('#model')).toHaveValue('0');await expect(page.locator('#firmware')).toHaveValue('auto');
+    await expect(page.locator('#model')).toHaveValue('1');await expect(page.locator('#firmware')).toHaveValue('auto');
     await basicCommand(page,'LIST');await expect(page.locator('#transcript')).toContainText('10 PRINT 91');
     await page.unroute('**/demos/yokosht.rom');
     await choose(page,'msx2-diagnostic');await expect(page.locator('#screen')).toHaveAttribute('width','512');
@@ -199,6 +199,7 @@ for (const site of sites) {
 
   test(`explicit firmware remains authoritative for demos at ${prefix}`,async({page})=>{
     await page.goto(site);await expect(page.locator('#demo')).toBeEnabled();
+    await page.locator('#model').selectOption('0');
     await page.locator('#advanced-panel > summary').click();
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx1.rom');
     await choose(page,'plustaker');
@@ -227,14 +228,13 @@ test('missing/invalid catalogs can be retried, and core validation failures do n
   await page.route('**/demos/manifest.json',r=>r.fulfill({json:unsupported}));
   await page.locator('#play-demo').click();await expect(page.locator('#demo-message')).toContainText('Invalid demo metadata');
   await page.unroute('**/demos/manifest.json');
-  // A hash-valid but malformed cartridge still has to pass the Rust validator.
+  // A hash-valid but malformed MSX1 cartridge must leave the default MSX2 unchanged.
   const invalid=Buffer.alloc(16384), changed=structuredClone(manifest);
   changed.demos[0].sha256=createHash('sha256').update(invalid).digest('hex');
-  changed.demos[0].model='MSX2';
   await page.route('**/demos/manifest.json',r=>r.fulfill({json:changed}));
   await page.route('**/demos/plustakermsx.rom',r=>r.fulfill({body:invalid}));
   await page.locator('#play-demo').click();await expect(page.locator('#demo')).toBeEnabled();
   await page.locator('#play-demo').click();await expect(page.locator('#status')).toContainText('Demo load failed');
-  await expect(page.locator('#model')).toHaveValue('0');
+  await expect(page.locator('#model')).toHaveValue('1');
   await basicCommand(page,'LIST');await expect(page.locator('#transcript')).toContainText('10 PRINT 84');
 });
