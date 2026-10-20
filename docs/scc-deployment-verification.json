@@ -1,0 +1,188 @@
+{
+  "repository": "takahirox/msx-rust",
+  "source_issue": {
+    "number": 23,
+    "url": "https://github.com/takahirox/msx-rust/issues/23",
+    "state_read_immediately_before_merge": "OPEN"
+  },
+  "pr": {
+    "number": 24,
+    "url": "https://github.com/takahirox/msx-rust/pull/24",
+    "head_sha": "43edecde648133a781ffef8c65819f94a3f6549d"
+  },
+  "merge": {
+    "merged": true,
+    "method": "merge",
+    "commit": "89836f36234ef90b9461466d4036b1934f84d8b7",
+    "parents": [
+      "e8ee30ad09acd5c376cc6f1fc313a850cd83313c",
+      "43edecde648133a781ffef8c65819f94a3f6549d"
+    ],
+    "required_checks_or_reviews_bypassed": false
+  },
+  "deployment": {
+    "site_url": "https://takahirox.github.io/msx-rust/",
+    "workflow_run_id": 39451252852,
+    "workflow_run_url": "https://github.com/takahirox/msx-rust/actions/runs/39451252852",
+    "head_sha": "89836f36234ef90b9461466d4036b1934f84d8b7",
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "Build browser app",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Deploy GitHub Pages",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "main_validation": {
+      "rust_tests_passed": 95,
+      "browser_tests_passed": 58,
+      "formatting": "passed",
+      "clippy": "passed",
+      "wasm_build": "passed",
+      "distribution_validation": "passed"
+    },
+    "published_assets_match_this_run_production_artifact": [
+      {
+        "file": "scc-test-cartridge.rom",
+        "sha256": "2cdefd0ecd2ad737ab28f6544174f7d475181e0d170f7ab4cd3c40a3c4ed7b87",
+        "matches_workflow_artifact": true
+      },
+      {
+        "file": "msx_wasm.wasm",
+        "sha256": "7da87dba3acfa0e151afb7403bcb92a7b9e05537938448e01bb91a36015d45aa",
+        "matches_workflow_artifact": true
+      },
+      {
+        "file": "app.js",
+        "sha256": "11321541987d58f5d9191c9ddbb9ebe2fb378956fd5df5f4d4cd53374f0a4746",
+        "matches_workflow_artifact": true
+      }
+    ]
+  },
+  "live_verification": {
+    "started_at_utc": "2026-10-20T15:53:43.337Z",
+    "recorded_at_utc": "2026-10-20T15:56:03.226108+00:00",
+    "browser": "Chromium 156.0.8078.4, headless",
+    "command": "npx playwright test --config target/pages-live/playwright.config.mjs",
+    "test_source": "tests/scc.spec.js",
+    "test_source_sha256": "fa1f3ec4fdb48cf6b1aff1d1e98562e44023770d7fb3fcae7525f7df0a043ca4",
+    "adaptation": "Reused the existing SCC browser tests with only the site list changed to the published HTTPS URL, the upload fixture path changed to the downloaded published ROM, and measurements logged. No local web server or substitute synthesizer was used. Temporary config, script and raw reporter output are under ignored target/pages-live/.",
+    "fixture_url": "https://takahirox.github.io/msx-rust/scc-test-cartridge.rom",
+    "fixture": "Original redistributable 64 KiB Z80 SCC MegaROM, imported through the browser file input.",
+    "stats": {
+      "startTime": "2026-10-20T15:53:43.337Z",
+      "duration": 83775.034,
+      "expected": 4,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "assertions_passed_in_every_case": [
+      "Compiled published Wasm booted the fixture with the selected model and mapper.",
+      "Completed native Web Audio buffers contained finite samples bounded by 0.9, with 734-737 samples per frame.",
+      "SCC voice 1 matched independently calculated DAC levels +0.056/-0.0565 and pitch within 8 Hz of 3579545/(32*254) Hz.",
+      "Hiding the SCC overlay and releasing the enable key produced fresh silent buffers (peak < 0.0001).",
+      "PSG alone exceeded 0.09 peak; PSG plus SCC exceeded 0.14 peak and increased mean-square output by more than 0.001.",
+      "All five SCC voices together produced nonzero output.",
+      "Failed imports preserved the active SCC waveform.",
+      "Mute suspended the native AudioContext and stopped scheduling; resume restored operation.",
+      "Pause, focus loss and reset produced fresh silent buffers; SCC playback resumed after reset.",
+      "Eject returned to Weave BASIC and produced fresh completed silent buffers (peak < 0.0001)."
+    ],
+    "cases": [
+      {
+        "model": "MSX1",
+        "mapper": "Konami SCC",
+        "status": "passed",
+        "duration_ms": 21214,
+        "measurements": [
+          {
+            "phase": "SCC",
+            "frequencyHz": 441.4194483445808,
+            "peak": 0.05650000274181366,
+            "buffers": 30
+          },
+          {
+            "phase": "PSG and SCC",
+            "psgPeak": 0.10205443948507309,
+            "mixedPeak": 0.15855422616004944,
+            "psgMeanSquare": 0.009988725061026953,
+            "mixedMeanSquare": 0.013132521778563982
+          }
+        ]
+      },
+      {
+        "model": "MSX1",
+        "mapper": "Auto",
+        "status": "passed",
+        "duration_ms": 20664,
+        "measurements": [
+          {
+            "phase": "SCC",
+            "frequencyHz": 440.1321338206354,
+            "peak": 0.05650000274181366,
+            "buffers": 29
+          },
+          {
+            "phase": "PSG and SCC",
+            "psgPeak": 0.10205451399087906,
+            "mixedPeak": 0.15855422616004944,
+            "psgMeanSquare": 0.009988696752128188,
+            "mixedMeanSquare": 0.013160976777955772
+          }
+        ]
+      },
+      {
+        "model": "MSX2",
+        "mapper": "Konami SCC",
+        "status": "passed",
+        "duration_ms": 21083,
+        "measurements": [
+          {
+            "phase": "SCC",
+            "frequencyHz": 440.1321338206354,
+            "peak": 0.05650000274181366,
+            "buffers": 29
+          },
+          {
+            "phase": "PSG and SCC",
+            "psgPeak": 0.10207126289606094,
+            "mixedPeak": 0.15855422616004944,
+            "psgMeanSquare": 0.00998882893524367,
+            "mixedMeanSquare": 0.013160489699818409
+          }
+        ]
+      },
+      {
+        "model": "MSX2",
+        "mapper": "Auto",
+        "status": "passed",
+        "duration_ms": 20449,
+        "measurements": [
+          {
+            "phase": "SCC",
+            "frequencyHz": 440.11151197113804,
+            "peak": 0.05650000274181366,
+            "buffers": 29
+          },
+          {
+            "phase": "PSG and SCC",
+            "psgPeak": 0.10207126289606094,
+            "mixedPeak": 0.15855422616004944,
+            "psgMeanSquare": 0.009988904819836154,
+            "mixedMeanSquare": 0.013178205378571133
+          }
+        ]
+      }
+    ],
+    "result": "passed",
+    "required_post_merge_verification": "complete",
+    "follow_up_issue": null
+  }
+}
