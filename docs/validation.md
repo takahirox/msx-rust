@@ -1,3 +1,55 @@
+# Issue #17 Weave BASIC compatibility validation
+
+Source: [Expand Weave BASIC compatibility with classic MSX BASIC programming features](https://github.com/takahirox/msx-rust/issues/17).
+Local pre-merge validation: 2026-10-20, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium. No publication or merge was performed.
+
+| Check | Actual result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | All 74 integration tests passed, including 17 BASIC tests |
+| `./scripts/build.sh` | Passed with pinned Rust and the existing macOS linker workaround below |
+| `node scripts/check-dist.mjs` | Passed; exact deployment inventory, C-BIOS hashes/notices, ROM headers, Wasm exports/imports and project-relative links |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| `npm test` | All 38 Chromium tests passed (1.4 minutes), including both new BASIC paths |
+| JavaScript syntax; `git diff --check` | Passed |
+
+Homebrew Rust initially shadowed the pinned toolchain and lacked its Wasm target.
+The pinned toolchain's linker then failed to locate its own `libLLVM.dylib`.
+Using the PATH selection in README and an ignored `target/weave-wasm-linker.sh`
+wrapper exporting the toolchain's library directory fixed both environment issues,
+without source/toolchain/CI modifications. This is the same local workaround
+already documented in [deployment.md](deployment.md#pre-merge-validation), using
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` to select the wrapper.
+
+The independently authored BASIC fixtures cover nested calls and caller loops,
+direct and numbered execution, END/STOP/error/BREAK cleanup, repeated RUN, arrays
+and bounds/types, ordered DATA and RESTORE, literal quoting, INPUT acceptance,
+atomic retry and interruption, and cooperative infinite-program execution.
+Graphics tests inspect actual VRAM and rendered VDP pixels in SCREEN 2/3,
+including circle outlines, boxes, relative coordinates, clipping, open/same-color
+fills and bounded repeated drawing. The three MIT-licensed examples are tested
+in Rust and through keyboard events in the compiled browser/Wasm environment.
+See [the language guide and public specification record](../README.md#weave-basic-and-firmware)
+for supported forms and deliberate deviations.
+
+Browser tests run examples at both `/` and `/msx-rust/`, independently recognize
+output glyphs and sample graphics pixels, retry INPUT, retain focus, interrupt
+partial input and repeated full-screen PAINT, and reset pending input. Existing
+MSX1/MSX2, C-BIOS, local firmware, cartridges, mapper, audio, editing, focus,
+fullscreen and responsive-layout regressions are included. Shapes screenshots
+are saved to `test-results/basic-shapes-root.png` and `basic-shapes-pages.png`.
+No proprietary ROM or third-party interpreter implementation was used.
+
+Required post-merge verification remains pending: after merge and deployment,
+record the actual GitHub Pages Actions run and commit, open
+<https://takahirox.github.io/msx-rust/>, boot MSX1, and run the scores and shapes
+examples with visible output. Local tests do not establish deployment success;
+this follow-up cannot block pre-merge approval. File defects as follow-up Issues.
+
+---
+
 # Issue #8 MegaROM validation record
 
 ## Integration with the merged Issue #7 UI
