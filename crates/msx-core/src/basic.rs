@@ -429,6 +429,7 @@ pub struct Console {
 }
 impl Console {
     pub fn setup(&mut self, vdp: &mut Vdp) {
+        vdp.basic_mode();
         vdp.registers[..8].copy_from_slice(&[0, 0x50, 0, 0, 1, 0x36, 7, 0xf4]);
         font::install(&mut vdp.vram, 0x800);
         vdp.vram[..960].fill(b' ');
@@ -510,6 +511,7 @@ pub struct Basic {
     loops: Vec<Loop>,
     pub running: bool,
     screen: u8,
+    foreground: u8,
     point: (i32, i32),
     yield_graphics: bool,
 }
@@ -750,7 +752,7 @@ impl Basic {
             "REM" | "DATA" => {}
             "HELP" => {
                 p.done()?;
-                self.console.write(vdp,"WEAVE BASIC: MSX-INSPIRED, ORIGINAL\nPRINT LET IF/THEN GOTO FOR/NEXT\nGOSUB/RETURN DIM A(10),S$(2,3)\nDATA 2,HELLO : READ A,S$ : RESTORE\nINPUT \"NAME\";N$\nLIST RUN NEW END STOP REM CLS\nSCREEN 0/1/2/3 COLOR FG,BG\nPSET (X,Y),C : LINE (X,Y)-(X,Y),C\nLINE (0,0)-(80,80),10,BF\nCIRCLE (128,96),40,10\nPAINT (128,96),10,15\nSOUND R,V BEEP VDP R,V VPOKE A,V\nESC: BREAK / ENTER: EXIT GRAPHICS\n");
+                self.console.write(vdp,"WEAVE BASIC: MSX-INSPIRED, ORIGINAL\nPRINT LET IF/THEN GOTO FOR/NEXT\nGOSUB/RETURN DIM A(10),S$(2,3)\nDATA 2,HELLO : READ A,S$ : RESTORE\nINPUT \"NAME\";N$\nLIST RUN NEW END STOP REM CLS\nSCREEN 0/1/2/3 COLOR FG,BG\nMSX2 ALSO: SCREEN 5/6/7/8\nPSET (X,Y),C : LINE (X,Y)-(X,Y),C\nLINE (0,0)-(80,80),10,BF\nCIRCLE (128,96),40,10\nPAINT (128,96),10,15\nSOUND R,V BEEP VDP R,V VPOKE A,V\nESC: BREAK / ENTER: EXIT GRAPHICS\n");
             }
             "PRINT" => {
                 let mut out = String::new();
@@ -1054,12 +1056,18 @@ impl Basic {
                     }
                     1 => vdp.vram[0x1800..0x1b00].fill(32),
                     2 => vdp.vram[..0x1800].fill(0),
-                    _ => vdp.vram[..0x800].fill(0),
+                    3 => vdp.vram[..0x800].fill(0),
+                    _ => vdp.vram.fill(0),
                 }
             }
             "SCREEN" => {
-                let mode = p.integer(3)? as u8;
+                let mode = p.integer(if vdp.msx2 { 8 } else { 3 })? as u8;
+                if mode == 4 {
+                    return Err("SUPPORTED SCREENS: 0-3, 5-8".into());
+                }
                 p.done()?;
+                vdp.basic_mode();
+                self.foreground = 15;
                 self.screen = mode;
                 self.point = (0, 0);
                 match mode {
@@ -1078,28 +1086,58 @@ impl Basic {
                             vdp.vram[0x1800 + i] = (i % 256) as u8;
                         }
                     }
-                    _ => {
+                    3 => {
                         vdp.registers[..8].copy_from_slice(&[0, 0x48, 6, 0, 0, 0x36, 7, 0xf4]);
                         vdp.vram[..0x800].fill(0);
                         for i in 0..768 {
                             vdp.vram[0x1800 + i] = ((i / 128) * 32 + i % 32) as u8;
                         }
                     }
+                    _ => {
+                        vdp.vram.fill(0);
+                        vdp.registers[0] = match mode {
+                            5 => 6,
+                            6 => 8,
+                            7 => 10,
+                            _ => 14,
+                        };
+                        vdp.registers[1] = 0x40;
+                        vdp.registers[2] = 0x1f; // displayed bitmap page zero
+                        vdp.registers[8] = 0x22; // opaque color zero, sprites disabled
+                        vdp.registers[9] = 0x80; // 212 non-interlaced lines
+                        self.foreground = if mode == 6 {
+                            3
+                        } else if mode == 8 {
+                            255
+                        } else {
+                            15
+                        };
+                    }
                 }
-                if mode != 0 {
+                if (1..=3).contains(&mode) {
                     vdp.vram[0x1b00] = 208;
                 }
             }
             "COLOR" => {
-                let fg = p.integer(15)?;
+                let limit = self.color_limit();
+                let fg = p.integer(limit)?;
                 p.expect(",")?;
-                let bg = p.integer(15)?;
+                let bg = p.integer(limit)?;
                 p.done()?;
-                vdp.registers[7] = ((fg << 4) | bg) as u8;
+                self.foreground = fg as u8;
+                vdp.registers[7] = if self.screen >= 5 {
+                    if self.screen == 6 {
+                        (bg * 5) as u8
+                    } else {
+                        bg as u8
+                    }
+                } else {
+                    ((fg << 4) | bg) as u8
+                };
             }
             "PSET" | "LINE" | "CIRCLE" | "PAINT" => {
-                if !matches!(self.screen, 2 | 3) {
-                    return Err("USE SCREEN 2 OR 3".into());
+                if !matches!(self.screen, 2 | 3 | 5..=8) {
+                    return Err("USE SCREEN 2, 3 OR MSX2 5-8".into());
                 }
                 let origin = self.point;
                 let start = if command == "LINE" && p.is("-") {
@@ -1123,18 +1161,23 @@ impl Basic {
                 } else {
                     0
                 };
-                let mut color = vdp.registers[7] >> 4;
+                let mut color = if self.screen >= 5 {
+                    self.foreground
+                } else {
+                    vdp.registers[7] >> 4
+                };
+                let limit = self.color_limit();
                 let mut border = None;
                 let mut box_mode = String::new();
                 if p.take(",") {
                     if !p.is(",") && p.p < tokens.len() {
-                        color = p.integer(15)? as u8;
+                        color = p.integer(limit)? as u8;
                     }
                     if p.take(",") {
                         if command == "LINE" {
                             box_mode = p.name()?;
                         } else if command == "PAINT" {
-                            border = Some(p.integer(15)? as u8);
+                            border = Some(p.integer(limit)? as u8);
                         } else {
                             return Err("SYNTAX ERROR".into());
                         }
@@ -1153,8 +1196,8 @@ impl Basic {
                             let (x0, x1) = (start.0.min(end.0), start.0.max(end.0));
                             let (y0, y1) = (start.1.min(end.1), start.1.max(end.1));
                             if box_mode == "BF" {
-                                for y in y0.max(0)..=y1.min(191) {
-                                    for x in x0.max(0)..=x1.min(255) {
+                                for y in y0.max(0)..=y1.min(self.dimensions().1 as i32 - 1) {
+                                    for x in x0.max(0)..=x1.min(self.dimensions().0 as i32 - 1) {
                                         self.pixel(vdp, x, y, color);
                                     }
                                 }
@@ -1294,6 +1337,23 @@ impl Basic {
             }
         }
     }
+    fn color_limit(&self) -> usize {
+        match self.screen {
+            6 => 3,
+            8 => 255,
+            _ => 15,
+        }
+    }
+    fn dimensions(&self) -> (usize, usize) {
+        (
+            if matches!(self.screen, 6 | 7) {
+                512
+            } else {
+                256
+            },
+            if self.screen >= 5 { 212 } else { 192 },
+        )
+    }
     fn pixel_offset(&self, x: usize, y: usize) -> usize {
         if self.screen == 2 {
             (y / 64) * 2048 + (y % 64 / 8) * 256 + (x / 8) * 8 + y % 8
@@ -1302,6 +1362,9 @@ impl Basic {
         }
     }
     fn pixel_color(&self, vdp: &Vdp, x: usize, y: usize) -> u8 {
+        if self.screen >= 5 {
+            return vdp.point(x, y);
+        }
         let offset = self.pixel_offset(x, y);
         if self.screen == 2 {
             let pair = vdp.vram[0x2000 + offset];
@@ -1317,10 +1380,15 @@ impl Basic {
         }
     }
     fn pixel(&self, vdp: &mut Vdp, x: i32, y: i32, color: u8) {
-        if !(0..256).contains(&x) || !(0..192).contains(&y) {
+        let (width, height) = self.dimensions();
+        if !(0..width as i32).contains(&x) || !(0..height as i32).contains(&y) {
             return;
         }
         let (x, y) = (x as usize, y as usize);
+        if self.screen >= 5 {
+            vdp.pset(x, y, color, 0);
+            return;
+        }
         let offset = self.pixel_offset(x, y);
         if self.screen == 2 {
             let bit = 0x80 >> (x % 8);
@@ -1361,11 +1429,12 @@ impl Basic {
         }
     }
     fn paint(&self, vdp: &mut Vdp, start: (i32, i32), color: u8, border: u8) {
-        if !(0..256).contains(&start.0) || !(0..192).contains(&start.1) {
+        let (width, height) = self.dimensions();
+        if !(0..width as i32).contains(&start.0) || !(0..height as i32).contains(&start.1) {
             return;
         }
         let scale = if self.screen == 3 { 4 } else { 1 };
-        let (width, height) = (256 / scale, 192 / scale);
+        let (width, height) = (width / scale, height / scale);
         // Snapshot boundaries before modifying TMS9918 color pairs. Visit each
         // logical pixel once, including when the fill and background colors match.
         let mut seen = vec![false; width * height];

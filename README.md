@@ -36,16 +36,16 @@ changes to **Keyboard active**; Tab moves back to the page controls. Enter:
 RUN
 ```
 
-The screen prints 1 through 5. `LIST` displays the program. Replace a numbered line
-by entering it again, or delete it by entering its number alone. Left/Right, Home,
-End, Backspace and Delete edit the current line. ASCII text can also be pasted.
-Escape interrupts execution. **Reset** clears the machine and program while keeping
-selected ROMs. **Built-in BASIC** also unloads both ROM inputs. **Pause / Resume**
-controls emulation. The compact toolbar also has **Open ROM**, **Eject**, and
-**Fullscreen**. Fullscreen keeps the toolbar accessible; **Exit fullscreen** or
-Escape returns to the page. Browsers without fullscreen support get a focused
-view with the same controls and exit options. There is no persistent program or
-ROM storage.
+The screen prints 1 through 5. `LIST` displays the program. Replace a numbered line by
+entering it again, or delete it by entering its number alone. Left/Right, Home, End,
+Backspace and Delete edit the current line. ASCII text can also be pasted. Escape
+interrupts execution. **Reset** clears the machine and program while keeping selected
+ROMs. **Use Weave BASIC** clears firmware overrides and ejects cartridges on either
+model. **Pause / Resume** controls emulation. The compact toolbar also has **Open
+ROM**, **Eject**, and **Fullscreen**. Fullscreen keeps the toolbar accessible; **Exit
+fullscreen** or Escape returns to the page. Browsers without fullscreen support get a
+focused view with the same controls and exit options. There is no persistent program
+or ROM storage.
 
 Try **BASIC example**, **Graphics demo**, or **Sound demo** beneath the display.
 The starters enter commands into the current built-in BASIC session, resume paused
@@ -62,18 +62,21 @@ interpreter, not original Microsoft MSX BASIC.
 
 ## MSX2
 
-Choose **Machine → MSX2**, then **Open ROM** to boot a supported cartridge with
-built-in **C-BIOS 0.29a**. This open-source, cartridge-oriented replacement BIOS
-executes on the emulated Z80. It provides **no original MSX BASIC**, and game
-compatibility is limited. Accepting a file or estimating its mapper does not prove
-that it boots. MSX1 retains Weave BASIC.
+Both **MSX1** and **MSX2** start in original, independent **Weave BASIC**.
+Selecting a machine clears incompatible ROMs and starts fresh BASIC. Under the
+default automatic policy, **Open ROM** switches to the matching bundled
+**C-BIOS 0.29a** (MSX1 main or MSX2 main + sub-ROM) before Z80 cartridge boot.
+**Eject** returns to fresh BASIC in the same model. **Reset** retains firmware,
+cartridge and mapper, restoring initial banks. Opening a cartridge or changing
+firmware resets execution and **discards the in-memory BASIC program**.
 
-Under **ROMs & advanced system options → MSX2 firmware**, select **Original
-diagnostic loader** to restore the previous minimal loader (no standard BIOS API),
-or C-BIOS to restore the default. Both choices eject the cartridge and clear local
-firmware selections. **Restore built-in C-BIOS** does the same. **Reset** keeps the
-active firmware/cartridge and restores mapper banks; **Eject** keeps the firmware.
-Changing machine models clears selected ROMs and resets to that model's default.
+Under **ROMs & advanced system options → Firmware policy**, explicitly selecting
+C-BIOS, the MSX2 **Original diagnostic loader**, or local firmware sets an override
+that survives Open ROM, Reset and Eject. C-BIOS is a separate cartridge BIOS with
+**no MSX BASIC**. The diagnostic loader has no standard BIOS API. Selecting either
+bundled override ejects cartridges and clears local firmware selections.
+**Use Weave BASIC** clears the override and cartridge, restoring automatic behavior.
+No Microsoft MSX BASIC 2.0 or commercial cartridge compatibility is claimed.
 
 Download our original **C-BIOS service-test cartridge** under advanced options and
 open it to exercise standard BIOS calls, expanded slots, video, keyboard and PSG.
@@ -160,14 +163,15 @@ numeric output uses compact decimal formatting rather than MSX's surrounding spa
   `STOP` prints BREAK with its program line; resumable `CONT` is unsupported.
   Execution yields each frame, including infinite `GOTO`/`RUN` programs.
 
-FOR loops with an initially exhausted range execute zero times (a deliberate
-deviation from MSX BASIC's initial iteration); NEXT accepts one variable at a time.
-Input is ASCII, up to 240 characters per editor line, with horizontal scrolling;
-lowercase glyphs display as uppercase. There are at most 64 nested loops.
-Use `PRINT` and `INPUT` in text mode. `SCREEN 0` is 40-column text, `SCREEN 1` is
-tile graphics, `SCREEN 2` is 256×192 graphics with the TMS9918A
-one-foreground/background-pair-per-eight-pixels restriction, and `SCREEN 3` uses
-4×4 color blocks. Graphics statements use the emulated VRAM in modes 2/3:
+FOR loops with an initially exhausted range execute zero times (a deliberate deviation
+from MSX BASIC's initial iteration); NEXT accepts one variable at a time. Input is
+ASCII, up to 240 characters per editor line, with horizontal scrolling; lowercase
+glyphs display as uppercase. There are at most 64 nested loops. Use `PRINT` and
+`INPUT` in text mode. `SCREEN 0` is 40-column text, `SCREEN 1` is tile graphics,
+`SCREEN 2` is 256×192 graphics with the TMS9918A
+one-foreground/background-pair-per-eight-pixels restriction, and `SCREEN 3` uses 4×4
+color blocks. Graphics statements use emulated VRAM in modes 2/3 and MSX2 bitmap modes
+5–8:
 
 ```basic
 PSET (128,96),10
@@ -194,6 +198,19 @@ drawing the group's background color clears the corresponding pattern bit.
 Color 0 displays as the VDP backdrop. `SCREEN` initializes colors and drawing
 position; `CLS` clears graphics without resetting the position.
 
+On MSX2, Weave BASIC additionally supports non-interlaced, page-zero bitmap
+`SCREEN 5` (256×212, palette 0–15), `SCREEN 6` (512×212, palette 0–3),
+`SCREEN 7` (512×212, palette 0–15) and `SCREEN 8` (256×212, direct GRB 0–255).
+`COLOR fg,bg` sets the default drawing color and backdrop; bitmap `CLS` clears to
+opaque color zero. SCREEN 8 packs green in bits 7–5, red in 4–2 and blue in 1–0
+(V9938 DAC levels). SCREEN 5/6/7 use the V9938 power-on palette. All existing
+PSET/LINE/CIRCLE/PAINT forms apply, with clipping to the dimensions above and
+bounded fill work (at most 108,544 pixels). `SCREEN` restores supported display
+settings; Enter or Escape returns to 40-column text. SCREEN 4, 80-column PRINT,
+bitmap text/INPUT, interlace, page selection, sprite commands and disk BASIC
+are outside this language subset. The V9938 hardware can support additional modes
+when programmed by cartridges. This is not full Microsoft MSX BASIC 2.0.
+
 Low-level `VDP register,value`, `VPOKE address,value`, and `SOUND register,value`
 use decimal parameters. `BEEP` sustains a tone until silenced.
 Still unsupported: `ELSE`, automatic arrays, integer/single/double type suffixes,
@@ -204,8 +221,8 @@ MSX BASIC-inspired language subset, not Microsoft's original BASIC.
 ### Original BASIC examples
 
 These examples, fixtures and interpreter additions are independently authored under
-this repository's MIT license. Copy/type each listing into a fresh built-in MSX1
-session (Reset or `NEW`), then enter `RUN`. They are also in
+this repository's MIT license. Copy/type each listing into a fresh Weave BASIC session
+on either machine (Reset or `NEW`), then enter `RUN`. They are also in
 [examples/basic](examples/basic) and the browser's **Keyboard & BASIC help**.
 
 Array/data processing with a subroutine:
@@ -257,17 +274,18 @@ disassembly, token table, or third-party interpreter code was used or bundled.
 ## ROM loading and legal guidance
 
 No proprietary BIOS, BASIC or game ROM is included. The emulator, original glyphs,
-cartridges and six generated ROMs are MIT licensed; the bundled C-BIOS main/sub
-pair is separately **BSD-2-Clause**, with its complete upstream copyrights,
-conditions and disclaimer in [CBIOS-LICENSE.txt](firmware/cbios/CBIOS-LICENSE.txt).
-[The pinned release record](firmware/cbios/CBIOS-PROVENANCE.txt) includes the official
-archive URL, exact version and archive/ROM SHA-256 hashes. See [LICENSE](LICENSE)
-and the [asset provenance inventory](firmware/ROM-LICENSE.txt).
-`./scripts/build.sh` generates the original ROMs and copies the two unmodified
-C-BIOS ROMs and notices into `dist/`. The core embeds the same pair in Wasm, so
-normal boot needs no separate firmware download or SourceForge connection.
-Rust has no external crate dependencies; Playwright is a development-only dependency
-under its upstream license and is not shipped in the site.
+cartridges and seven generated ROMs are MIT licensed; the bundled C-BIOS MSX1 main and
+MSX2 main/sub-ROMs are separately **BSD-2-Clause**, with its complete upstream
+copyrights, conditions and disclaimer in
+[CBIOS-LICENSE.txt](firmware/cbios/CBIOS-LICENSE.txt). [The pinned release
+record](firmware/cbios/CBIOS-PROVENANCE.txt) includes the official archive URL, exact
+version and archive/ROM SHA-256 hashes. See [LICENSE](LICENSE) and the [asset
+provenance inventory](firmware/ROM-LICENSE.txt). `./scripts/build.sh` generates the
+original ROMs and copies the three unmodified C-BIOS ROMs and notices into `dist/`.
+The core embeds the same binaries in Wasm, so normal boot needs no separate firmware
+download or SourceForge connection. Rust has no external crate dependencies;
+Playwright is a development-only dependency under its upstream license and is not
+shipped in the site.
 
 Expand **ROMs & advanced system options** to download the original **test cartridge**,
 then choose it with **Open ROM** in the toolbar. It displays a title and sprite;
@@ -317,23 +335,24 @@ SRAM/save hardware, SCC+, reversed ASCII registers and other mapper variants are
 unsupported; manual selection cannot establish that an unknown image uses none
 of these features.
 
-Loading a valid image resets the machine and banks. Reset retains selected ROMs
-and restores initial banks; Eject removes the cartridge; Built-in BASIC removes
-cartridge and system firmware. Failed imports leave the running machine and its
-bank selections intact. The Wasm transfer reserves memory before JavaScript creates
-a writable view, then moves that buffer into the core without another cartridge
-copy. Empty files, malformed dumps, unsupported mapping and resource failures are
-reported as nonfatal errors. Extremely large files remain subject to browser
-ArrayBuffer limits and the 32-bit Wasm address space.
+Loading a valid image resets the machine and banks. Reset retains selected ROMs and
+restores initial banks; Eject removes the cartridge and returns automatic mode to
+BASIC, retaining explicit firmware overrides; Use Weave BASIC clears the override and
+cartridge. Failed imports leave the running machine and its bank selections intact.
+The Wasm transfer reserves memory before JavaScript creates a writable view, then
+moves that buffer into the core without another cartridge copy. Empty files, malformed
+dumps, unsupported mapping and resource failures are reported as nonfatal errors.
+Extremely large files remain subject to browser ArrayBuffer limits and the 32-bit Wasm
+address space.
 
 Inference uses the same local bytes under MSX1 and MSX2 and never changes the
 machine model. A likely mapper does not identify a game, prove it boots, select
-its required BIOS/sub-ROM, or add SCC audio or other unsupported hardware.
+a compatible user BIOS/sub-ROM, or add SCC audio or other unsupported hardware.
 
 The original diagnostic loader initializes self-contained cartridges using their AB
-init pointer; many commercial cartridges need standard BIOS services. MSX2 now
-defaults to C-BIOS for that purpose, with limited compatibility. No commercial-game
-compatibility or manual copyrighted-game play-testing is required or claimed.
+init pointer; many commercial cartridges need standard BIOS services. Both models
+automatically select their matching C-BIOS for that purpose, with limited
+compatibility. No commercial-game compatibility or manual copyrighted-game play-testing is required or claimed.
 
 All mapper fixtures are generated, original MIT-licensed code in
 [`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
@@ -347,14 +366,15 @@ No fixture downloads or proprietary ROMs are required. These synthetic tests ver
 specified evidence handling, not universal detection accuracy on commercial ROMs.
 
 Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
-lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM. **Built-in BASIC** in that section
-unloads selected ROMs and returns to Weave BASIC in MSX1 mode. With a system ROM selected,
-the CPU executes it from reset, allowing original BIOS/BASIC behavior where
-compatible. Files are read using `File.arrayBuffer`, never uploaded or persisted.
-Do not commit or redistribute user ROMs unless you independently establish permission.
-Original proprietary Microsoft/ASCII BIOS/BASIC has not been validated here.
+lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM (generation byte 002Dh = 0). **Use Weave
+BASIC** in that section unloads selected ROMs and returns to Weave BASIC in the
+current model. With a system ROM selected, the CPU executes it from reset, allowing
+original BIOS/BASIC behavior where compatible. Files are read using
+`File.arrayBuffer`, never uploaded or persisted. Do not commit or redistribute user
+ROMs unless you independently establish permission. Original proprietary
+Microsoft/ASCII BIOS/BASIC has not been validated here.
 
-[C-BIOS](https://cbios.sourceforge.net/) 0.29a is bundled for MSX2, with **no original
+[C-BIOS](https://cbios.sourceforge.net/) 0.29a is bundled for MSX1 and MSX2, with **no original
 MSX BASIC**. No C-BIOS logo, BASIC, disk or music ROM is included. The historical
 [validation record](docs/validation.md) describes earlier external-firmware tests;
 [current bundled-path checks](docs/msx2.md#verification) require no user firmware.
@@ -386,11 +406,12 @@ width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
 details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
 
-The MSX2 browser tests run the default bundled C-BIOS path at both site roots,
-verify real standard-BIOS cartridge pixels, keyboard input and audio/silence, and
-check firmware switching, local pairs, privacy and restoration of MSX1. They also
-check 512/256-pixel modes, 212 lines, all 256 direct colors and sprite/command pixels.
-Screenshots go to `test-results/msx2-screen7.png` and `msx2-screen8.png`.
+The browser tests run automatic BASIC/cartridge transitions for both models at both
+site roots, verify real standard-BIOS cartridge pixels, keyboard input and
+audio/silence, and check firmware switching, local pairs, privacy and restoration of
+MSX1. They also check 512/256-pixel modes, 212 lines, all 256 direct colors and
+sprite/command pixels. Screenshots go to `test-results/msx2-screen7.png` and
+`msx2-screen8.png`.
 
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
 interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelopes,

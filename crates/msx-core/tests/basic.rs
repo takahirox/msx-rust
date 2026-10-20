@@ -80,7 +80,7 @@ fn syntax_and_runtime_errors_do_not_panic_or_hang() {
         ("A$=3", "TYPE MISMATCH"),
         ("PRINT (2+3", "EXPECTED )"),
         ("GOTO 99", "UNDEFINED LINE"),
-        ("PSET 0,0,1", "USE SCREEN 2 OR 3"),
+        ("PSET 0,0,1", "USE SCREEN 2, 3 OR MSX2 5-8"),
     ] {
         run(&mut b, &mut v, &mut p, line);
         assert!(
@@ -494,7 +494,7 @@ fn multicolor_fill_boxes_relative_points_and_graphics_errors() {
         ("SCREEN 2:LINE (0,0)-(1,1),10,Q", "SYNTAX ERROR"),
         ("SCREEN 2:LINE (40000,0)-(1,1)", "OUT OF RANGE"),
         ("SCREEN 2:LINE (32767,0)-STEP(1,0)", "OUT OF RANGE"),
-        ("LINE (0,0)-(1,1)", "USE SCREEN 2 OR 3"),
+        ("LINE (0,0)-(1,1)", "USE SCREEN 2, 3 OR MSX2 5-8"),
     ] {
         run(&mut b, &mut v, &mut p, line);
         ends(&b, &format!("?{error}\nREADY\n"));

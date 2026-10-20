@@ -229,10 +229,17 @@ fn firmware_boot_basic_edit_list_run_and_pixels() {
 fn original_cartridge_executes_z80_graphics_and_keyboard_tone() {
     let mut m = Machine::default();
     m.load_cartridge(&firmware::test_cartridge()).unwrap();
-    for _ in 0..4 {
+    for _ in 0..600 {
         m.frame();
+        if m.hardware.vdp.vram[0x1800..0x1b00]
+            .windows(b"MSX-RUST TEST CARTRIDGE".len())
+            .any(|s| s == b"MSX-RUST TEST CARTRIDGE")
+        {
+            break;
+        }
     }
-    assert_eq!(m.hardware.slots, 0xd4);
+    m.frame();
+    assert_eq!(m.hardware.slots & 0x0f, 4);
     assert!(m.cpu.pc >= 0x4010 && m.cpu.pc < 0x4800);
     let text = String::from_utf8_lossy(&m.hardware.vdp.vram[0x1800..0x1b00]);
     assert!(text.contains("MSX-RUST TEST CARTRIDGE"));
@@ -279,6 +286,7 @@ fn cartridge_sizes_mapping_and_invalid_load_preserves_machine() {
         let header = if size == 49152 { 0x4000 } else { 0 };
         rom[header..header + 2].copy_from_slice(b"AB");
         m.load_cartridge(&rom).unwrap();
+        m.hardware.slots = 0xd4;
         assert_eq!(m.hardware.read(0x4000), b'A');
         assert_eq!(m.hardware.read(0xbfff), 0x5a);
         m.hardware.write(0x4000, 0);
@@ -318,14 +326,22 @@ fn page_two_cartridge_header_boots_without_a_page_one_header() {
     }
 }
 #[test]
-fn cartridge_init_can_return_to_native_basic() {
+fn returning_cartridge_stays_under_cbios_until_eject() {
     let mut m = Machine::default();
     let mut rom = vec![0; 16384];
     rom[..4].copy_from_slice(&[b'A', b'B', 0x10, 0x40]);
     rom[0x10..0x16].copy_from_slice(&[0x3e, 0x5a, 0x32, 0x00, 0xc0, 0xc9]);
     m.load_cartridge(&rom).unwrap();
-    m.frame();
+    for _ in 0..600 {
+        m.frame();
+        if m.hardware.ram[0xc000] == 0x5a {
+            break;
+        }
+    }
     assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    assert!(m.basic.console.transcript.is_empty());
+    m.unload_cartridge();
+    m.frame();
     enter(&mut m, "PRINT 42");
     assert!(m.basic.console.transcript.ends_with("42\nREADY\n"));
 }

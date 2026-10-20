@@ -4,6 +4,8 @@
 ; Standard MSX cartridges and supplied BIOS ROMs use the Z80/hardware path.
         org 0
         jp 0100h
+        org 002dh
+        db 0            ; MSX1 generation; the MSX2 Weave BASIC profile sets 1
         org 0038h
         reti
         org 0066h

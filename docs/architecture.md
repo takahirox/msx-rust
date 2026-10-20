@@ -19,22 +19,25 @@ bus-supplied opcode (the MSX bus supplies FFh/RST 38h), IM 1 jumps to 38h, and I
 reads its vector through the memory map. RESET reconstructs CPU/peripherals/RAM,
 retaining selected ROMs and resetting the native interpreter's program.
 
-In MSX1, slots 0/1/2/3 are respectively system ROM/cartridge/empty/RAM. A8h selects a slot
-per 16 KiB page. Empty space reads FFh; RAM accepts memory writes and the cartridge
-slot decodes mapper registers. In built-in mode the boot ROM maps a cartridge into
-pages 1/2 and calls its AB init pointer. Reset restores mapper power-on banks.
-See the [mapper table and selection rules](../README.md#rom-loading-and-legal-guidance).
-With an external system ROM, normal reset mapping is restored and that ROM probes
-slots itself. A9h reads the active-low keyboard row selected by AAh; ABh handles
-PPI control and port-C bit set/reset. PSG registers 14/15 integrate joystick input.
-Printer and cassette data are absent. MSX2 expands slot 3 for sub-ROM and RAM;
-see the [MSX2 hardware, commands, timing limits and tests](msx2.md).
+In MSX1, slots 0/1/2/3 are respectively system ROM/cartridge/empty/RAM. A8h selects a
+slot per 16 KiB page. Empty space reads FFh; RAM accepts memory writes and the
+cartridge slot decodes mapper registers. Automatic policy boots Weave BASIC with no
+cartridge and installs the model-specific C-BIOS before booting a validated cartridge.
+C-BIOS discovers slots itself. The explicit MSX2 diagnostic loader maps pages 1/2 and
+calls the AB init pointer. Reset restores mapper power-on banks. See the [mapper table
+and selection rules](../README.md#rom-loading-and-legal-guidance). With an external
+system ROM, normal reset mapping is restored and that ROM probes slots itself. A9h
+reads the active-low keyboard row selected by AAh; ABh handles PPI control and port-C
+bit set/reset. PSG registers 14/15 integrate joystick input. Printer and cassette data
+are absent. MSX2 expands slot 3 for sub-ROM and RAM; see the [MSX2 hardware, commands,
+timing limits and tests](msx2.md).
 
-The MSX1 boot ROM's private F0/F1 service interface is specific to Weave BASIC. This
-is a native Rust interpreter invoked by Z80 firmware, not an MSX BASIC ROM port.
-Cartridge and external-BIOS CPU execution are independent of this interpreter.
-No external BIOS APIs are trapped, replaced or patched. This distinction is visible
-in the UI, README, assembly listing, and license inventory.
+The Weave BASIC boot ROM's private F0/F1 service interface is specific to Weave BASIC.
+This is a native Rust interpreter invoked by Z80 firmware, not an MSX BASIC ROM port.
+Both models enable these ports only for active Weave BASIC. Cartridge and
+external-BIOS CPU execution are independent of this interpreter. No external BIOS APIs
+are trapped, replaced or patched. This distinction is visible in the UI, README,
+assembly listing, and license inventory.
 
 ## CPU tests and vectors
 

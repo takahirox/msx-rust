@@ -1,4 +1,4 @@
-use msx_core::{cpu::Bus, firmware, Machine, Mapper, Model};
+use msx_core::{cpu::Bus, firmware, Firmware, Machine, Mapper, Model};
 
 fn boot(m: &mut Machine) {
     for _ in 0..600 {
@@ -21,9 +21,10 @@ fn pixel(m: &Machine, x: usize, y: usize) -> &[u8] {
 fn bundled_cbios_executes_standard_services_and_expanded_slots_on_z80() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
+    m.load_cartridge(&firmware::cbios_test_cartridge()).unwrap();
     assert_eq!(m.hardware.bios, firmware::CBIOS_MSX2_MAIN);
     assert_eq!(m.hardware.subrom, firmware::CBIOS_MSX2_SUB);
-    assert!(!m.hardware.builtin); // No native BASIC service ports.
+    assert_eq!(m.hardware.firmware, Firmware::Cbios); // No native BASIC service ports.
     assert_eq!(m.hardware.secondary[3], 0); // BIOS must discover RAM itself.
     m.load_cartridge(&firmware::cbios_test_cartridge()).unwrap();
     boot(&mut m);
@@ -76,7 +77,7 @@ fn bundled_cbios_executes_standard_services_and_expanded_slots_on_z80() {
 #[test]
 fn firmware_switches_release_cartridge_banks_and_restore_msx1_basic() {
     let mut m = Machine::default();
-    assert!(m.use_cbios().is_err());
+    m.use_cbios().unwrap();
     m.set_model(Model::Msx2);
     // A banked ROM makes stale mapper state observable after switching firmware.
     let mut rom = vec![0; 65536];
@@ -84,12 +85,12 @@ fn firmware_switches_release_cartridge_banks_and_restore_msx1_basic() {
     m.load_cartridge_with_mapper(&rom, Mapper::Konami).unwrap();
     m.hardware.output(0xa8, 0xd4);
     m.hardware.write(0x8000, 7);
-    m.use_builtin();
-    assert!(m.hardware.builtin);
+    m.use_diagnostic().unwrap();
+    assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
     assert!(m.hardware.cartridge.is_empty());
     assert_eq!(m.hardware.bios, firmware::msx2_bios());
     m.use_cbios().unwrap();
-    assert!(!m.hardware.builtin);
+    assert_eq!(m.hardware.firmware, Firmware::Cbios);
     assert!(m.hardware.cartridge.is_empty());
     m.load_cartridge(&firmware::cbios_test_cartridge()).unwrap();
     boot(&mut m);
@@ -109,7 +110,7 @@ fn firmware_switches_release_cartridge_banks_and_restore_msx1_basic() {
     m.set_model(Model::Msx1);
     assert!(m.hardware.subrom.is_empty());
     assert!(m.hardware.cartridge.is_empty());
-    assert!(m.hardware.builtin);
+    assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
     m.frame();
     assert!(m.basic.console.transcript.contains("READY"));
     for key in b"PRINT 42\r" {

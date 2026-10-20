@@ -86,6 +86,16 @@ impl Vdp {
         // Keep the large buffers stable across resets.
         *self = Self::with_buffers(pixels, vram, msx2);
     }
+    /// Establish the supported BASIC video subset without stale extended mode,
+    /// scroll, command or sprite state from a prior SCREEN/VDP statement.
+    pub(crate) fn basic_mode(&mut self) {
+        self.command = None;
+        self.command_cycles = 0;
+        self.registers.fill(0);
+        if self.msx2 {
+            self.palette = default_palette();
+        }
+    }
     pub fn irq(&self) -> bool {
         (self.status & 0x80 != 0 && self.registers[1] & 0x20 != 0)
             || (self.msx2 && self.statuses[1] & 1 != 0 && self.registers[0] & 0x10 != 0)
@@ -485,11 +495,11 @@ impl Vdp {
             (255 >> (8 - bits)) as u8,
         )
     }
-    fn point(&self, x: usize, y: usize) -> u8 {
+    pub(crate) fn point(&self, x: usize, y: usize) -> u8 {
         let (a, shift, mask) = self.bitmap_address(x, y);
         (self.at(a) >> shift) & mask
     }
-    fn pset(&mut self, x: usize, y: usize, value: u8, op: u8) {
+    pub(crate) fn pset(&mut self, x: usize, y: usize, value: u8, op: u8) {
         let (a, shift, mask) = self.bitmap_address(x, y);
         let src = value & mask;
         if op & 8 != 0 && src == 0 {

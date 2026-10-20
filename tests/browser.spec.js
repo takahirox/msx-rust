@@ -172,7 +172,7 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   await (await chooser).setFiles('dist/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('test-cartridge.rom');
   await expect(page.locator('#example')).toBeDisabled();
-  await expect(page.locator('#starter-help')).toContainText('Built-in BASIC');
+  await expect(page.locator('#starter-help')).toContainText('Use Weave BASIC');
   await expect(page.locator('#eject')).toBeEnabled();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(20);
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
@@ -193,7 +193,7 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBe(256*192);
   expect(requests.filter(r => r.method !== 'GET')).toEqual([]);
   expect(requests.filter(r => !r.url.startsWith('http://127.0.0.1:41873/'))).toEqual([]);
-  await page.getByRole('button', { name: 'Built-in BASIC', exact: true }).click();
+  await page.getByRole('button', { name: 'Use Weave BASIC', exact: true }).click();
   await enter(page, 'PRINT "BACK"');
   await expect(page.locator('#transcript')).toContainText('BACK\nREADY');
   expect(errors).toEqual([]);
@@ -352,7 +352,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     await page.locator('#mapper').selectOption(mapper);
     await page.locator('#cartridge').setInputFiles(fixture);
     await backdrop(page, '212,193,84');
-    await page.getByRole('button', { name: 'Built-in BASIC', exact: true }).click();
+    await page.getByRole('button', { name: 'Use Weave BASIC', exact: true }).click();
     await expect(page.locator('#transcript')).toContainText('READY');
     expect(requests.every(r => r.method === 'GET' && r.url.startsWith('http://127.0.0.1:41873/'))).toBe(true);
     expect(errors).toEqual([]);
@@ -476,9 +476,10 @@ function boundedMemoryWasm(bytes, maxPages) {
 }
 
 test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
-  // 3.5625 MiB permits the upload but not the old reset's replacement framebuffer.
-  // One extra 64 KiB page accounts for the embedded 48 KiB C-BIOS pair.
-  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 57);
+  // 3.6875 MiB permits the upload but not the old reset's replacement framebuffer.
+  // Accounts for both bundled main ROMs and preallocated firmware buffers;
+  // still too small for a second cartridge copy or replacement framebuffer.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 59);
   await page.addInitScript(base64 => {
     const instantiate = WebAssembly.instantiate.bind(WebAssembly);
     WebAssembly.instantiate = async (...args) => {
@@ -498,7 +499,7 @@ test('a reserved 2 MiB cartridge installs and resets without extra memory', asyn
   const fixture = megaRom(2048, '2');
   await page.locator('#cartridge').setInputFiles(fixture);
   await expect.poll(() => page.evaluate(() => window.lastUpload)).toEqual({ length: 2 * 1024 * 1024, reserved: true });
-  await expect(page.locator('#status')).toHaveText(`Running · Weave BASIC · ${fixture.name} (ASCII8)`);
+  await expect(page.locator('#status')).toHaveText(`Running · MSX1 C-BIOS 0.29a · cartridge BIOS (no BASIC) · ${fixture.name} (ASCII8)`);
   await backdrop(page, '212,193,84');
   await page.locator('#screen').focus();
   await page.keyboard.down('Space');
@@ -540,6 +541,15 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   const errors = await boot(page);
   await page.locator('#advanced-panel > summary').click();
   await page.locator('#mapper').selectOption('2');
+  await enter(page, '10 PRINT 86');
+  // A failed transfer for a cartridge or local firmware must retain BASIC too.
+  for (const [input, file] of [['cartridge', megaRom(64, '2')], ['bios', 'dist/cbios_main_msx1.rom']]) {
+    await page.evaluate(() => { window.failReservation = true; });
+    await page.locator(`#${input}`).setInputFiles(file);
+    await expect(page.locator('#status')).toContainText('memory');
+    await expect(page.locator('#firmware')).toHaveValue('auto');
+    await enter(page, 'RUN'); await expect(page.locator('#transcript')).toContainText('86\nREADY');
+  }
   await page.locator('#cartridge').setInputFiles(megaRom(64, '2'));
   await backdrop(page, '212,193,84');
   for (const flag of ['failReservation', 'failFileRead']) {
@@ -605,7 +615,7 @@ for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [320, 640]]
     await expect(page.getByText('Touch typing and an on-screen keyboard are not supported.', { exact: false })).toBeVisible();
     await page.locator('#advanced-panel > summary').click();
     await expect(page.getByLabel('Local system ROM (32 KiB)')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Built-in BASIC', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use Weave BASIC', exact: true })).toBeVisible();
     await page.locator('#transcript-panel > summary').click();
     await expect(page.locator('#transcript')).toBeVisible();
     await expectScreenFits(page);

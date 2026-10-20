@@ -1,4 +1,4 @@
-use msx_core::{cpu::Bus, firmware, vdp::Vdp, Machine, Model};
+use msx_core::{cpu::Bus, firmware, vdp::Vdp, Firmware, Machine, Model};
 fn reg(v: &mut Vdp, r: u8, b: u8) {
     v.control(b);
     v.control(0x80 | r);
@@ -374,7 +374,7 @@ fn sprite2_per_line_color_combine_collision_and_ninth() {
 fn expanded_slot_register_subrom_protection_and_reset() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
-    m.use_builtin();
+    m.use_diagnostic().unwrap();
     let h = &mut m.hardware;
     h.output(0xa8, 0xff);
     h.write(0xffff, 0xff);
@@ -396,7 +396,7 @@ fn expanded_slot_register_subrom_protection_and_reset() {
     assert_eq!(m.hardware.ram[0], 0);
     assert!(m.load_bios(&vec![0; 32768]).is_err());
     assert!(m.load_msx2_firmware(&[0; 5], &[0; 4]).is_err());
-    assert!(m.hardware.builtin);
+    assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
     m.set_model(Model::Msx1);
     assert_eq!(m.hardware.vdp.vram.len(), 16384);
     m.hardware.output(0xa8, 255);
@@ -407,7 +407,7 @@ fn expanded_slot_register_subrom_protection_and_reset() {
 fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
-    m.use_builtin();
+    m.use_diagnostic().unwrap();
     m.load_cartridge(&firmware::msx2_cartridge()).unwrap();
     for _ in 0..15 {
         m.frame();
@@ -472,8 +472,8 @@ fn external_main_and_subrom_execute_real_slot_interactions() {
     m.reset();
     m.frame();
     assert_eq!(m.hardware.ram[0xc101], 0x37);
-    m.use_builtin();
-    assert!(m.hardware.builtin);
+    m.use_diagnostic().unwrap();
+    assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
     assert!(m.hardware.cartridge.is_empty());
 }
 #[test]

@@ -12,6 +12,7 @@ fn image(size: usize) -> Vec<u8> {
 fn machine(mapper: Mapper) -> Machine {
     let mut m = Machine::default();
     m.load_cartridge_owned(image(128 * 1024), mapper).unwrap();
+    m.hardware.slots = 0xd4; // Register tests select the cartridge without booting the CPU.
     m
 }
 fn windows(m: &mut Machine) -> [u8; 4] {
@@ -123,6 +124,7 @@ fn scc_exact_register_decoding_overlay_and_different_mirrors() {
     m.hardware.write(0x9000, 14);
     assert_eq!(m.hardware.read(0x9800), 14);
     m.reset();
+    m.hardware.slots = 0xd4;
     assert_eq!(m.hardware.read(0x9800), 2);
 }
 #[test]
@@ -145,6 +147,7 @@ fn reset_slots_replacement_ejection_and_system_rom() {
         m.hardware.write(0x7000, 9);
         m.hardware.write(0x9000, 9);
         m.reset();
+        m.hardware.slots = 0xd4;
         assert_eq!(windows(&mut m), initial);
         // Hidden ASCII pages read open bus; Konami mirror behavior is tested separately.
         if matches!(kind, Mapper::Ascii8 | Mapper::Ascii16) {
@@ -189,12 +192,12 @@ fn cartridge_installation_clears_previous_hardware_state() {
     m.load_cartridge_owned(image(2 * 1024 * 1024), Mapper::Ascii8)
         .unwrap();
     assert!(m.hardware.ram.iter().all(|&b| b == 0));
-    assert_eq!(m.hardware.slots, 0xd4);
+    assert_eq!(m.hardware.slots, 0xf0);
     assert_eq!(m.hardware.ppi_c, 0);
     assert_eq!(m.hardware.ppi_control, 0x82);
     assert_eq!(m.hardware.keyboard, [255; 11]);
     assert_eq!(m.hardware.joystick, 0x3f);
-    assert_eq!(m.hardware.input(0xf0), 0);
+    assert_eq!(m.hardware.input(0xf0), 255);
     assert_eq!(m.hardware.vdp.vram, [0; 16384]);
     assert_eq!(m.hardware.vdp.registers, [0; 64]);
     assert!(m.hardware.vdp.pixels.iter().all(|&b| b == 0));
@@ -227,6 +230,7 @@ fn large_images_reach_last_bank_without_truncation() {
         *rom.last_mut().unwrap() = 0x5a;
         let mut m = Machine::default();
         m.load_cartridge_owned(rom, kind).unwrap();
+        m.hardware.slots = 0xd4;
         m.hardware.write(
             if kind == Mapper::Ascii8 {
                 0x7800
