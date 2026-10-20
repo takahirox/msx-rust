@@ -98,9 +98,11 @@ Manual override is available for these cases. Scores are evidence weights, not
 statistical probabilities; no universal accuracy is claimed from synthetic tests.
 
 The same bytes produce the same result under MSX1/MSX2; inference never switches
-profiles or installs BIOS/sub-ROM firmware. Mapper detection does not supply SCC
-audio, SRAM, SCC+, disks, extended mappers or BIOS services. Correct banking alone
-does not establish cartridge boot compatibility with the selected hardware.
+profiles or installs BIOS/sub-ROM firmware. Classic SCC audio is provided by the
+selected Konami SCC hardware, not inferred from a game identity. SRAM, SCC+/SCC-I,
+disks and extended mappers remain unsupported; inference cannot establish which
+BIOS services a cartridge needs. Correct banking alone does not establish
+cartridge boot compatibility with the selected hardware.
 
 ## Verification
 

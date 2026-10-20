@@ -131,8 +131,10 @@ Eject cannot reload its cartridge. Actual host-wide memory exhaustion was not
 attempted. These fixtures contain original MIT-licensed bytes only, with no external
 ROM downloads or additional deployable ROM assets.
 
-SCC sound/register hardware, SRAM mapper variants and universal game compatibility
-are not claimed. Issue #8 originally limited Auto to plain layouts. The current
+At the time of Issue #8, SCC sound/register hardware was not implemented;
+[classic SCC support and its validation](scc.md) were added for Issue #23.
+SRAM mapper variants and universal game compatibility are not claimed.
+Issue #8 originally limited Auto to plain layouts. The current
 [Auto detector](mapper-detection.md) also estimates supported MegaROM mappers;
 uncertain images still require manual selection. See the [mapper table and compatibility limits](../README.md#rom-loading-and-legal-guidance).
 Optional external C-BIOS, third-party games, other browsers and physical audio

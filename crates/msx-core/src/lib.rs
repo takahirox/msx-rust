@@ -8,6 +8,7 @@ pub mod firmware;
 pub mod font;
 pub mod psg;
 pub mod rtc;
+pub mod scc;
 pub mod vdp;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub struct Hardware {
     pub joystick: u8,
     pub vdp: Vdp,
     pub psg: Psg,
+    scc: scc::Scc,
     pub firmware: Firmware,
     keys: VecDeque<u8>,
     services: VecDeque<u8>,
@@ -77,6 +79,7 @@ impl Default for Hardware {
             joystick: 0x3f,
             vdp: Vdp::default(),
             psg: Psg::default(),
+            scc: scc::Scc::default(),
             firmware: Firmware::WeaveBasic,
             keys: VecDeque::new(),
             services: VecDeque::new(),
@@ -102,6 +105,7 @@ impl Hardware {
         self.release_keys();
         self.vdp.reset();
         self.psg.reset();
+        self.scc = scc::Scc::default();
         self.keys.clear();
         self.services.clear();
         // A real BIOS probes slots itself. Our firmware boots AB cartridges in their initial banks.
@@ -143,6 +147,7 @@ impl Bus for Hardware {
         let a = address as usize;
         match self.slot(address) {
             (0, 0) => self.bios.get(a).copied().unwrap_or(255),
+            (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
             (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
             (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[a],
@@ -155,6 +160,7 @@ impl Bus for Hardware {
             return;
         }
         match self.slot(address) {
+            (1, 0) if self.mapping.scc_access(address) => self.scc.write(address, value),
             (1, 0) => self.mapping.write(address, value),
             (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[address as usize] = value,
             _ => {}
@@ -415,7 +421,10 @@ impl Machine {
     pub fn step(&mut self) -> u32 {
         let cycles = self.cpu.step(&mut self.hardware);
         self.hardware.vdp.tick(cycles);
-        self.hardware.psg.tick(cycles);
+        let h = &mut self.hardware;
+        let audible = h.mapping.scc_access(0x9800) && h.slot(0x9800) == (1, 0);
+        let scc = (h.mapping.kind == Mapper::KonamiScc).then_some((&mut h.scc, audible));
+        h.psg.tick_with_scc(cycles, scc);
         if self.hardware.model == Model::Msx2 {
             self.hardware.rtc.tick(cycles);
         }

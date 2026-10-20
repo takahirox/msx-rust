@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-const expected = ['cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
+const expected = ['scc-test-cartridge.rom','cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
 assert.deepEqual((await readdir('dist')).sort(), [...expected, 'demos'].sort(), 'Unexpected deployment files; review their provenance.');
 for (const file of expected) assert((await readFile(`dist/${file}`)).length > 0, `Empty ${file}`);
 for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt', 'ROM-LICENSE.txt']]) {
@@ -12,6 +12,9 @@ assert.deepEqual(WebAssembly.Module.imports(module), []);
 for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy']) {
   assert(WebAssembly.Module.exports(module).some(e => e.name === name), `Missing Wasm export ${name}`);
 }
+const scc = await readFile('dist/scc-test-cartridge.rom');
+assert.equal(scc.length, 65536);
+assert.equal(scc.subarray(0,2).toString(), 'AB');
 const cartridge = await readFile('dist/test-cartridge.rom');
 assert.equal(cartridge.length, 16384);
 assert.equal(cartridge.subarray(0,2).toString(), 'AB');
@@ -38,7 +41,7 @@ for (const file of ['CBIOS-LICENSE.txt', 'CBIOS-PROVENANCE.txt']) {
 const biosTest = await readFile('dist/cbios-test-cartridge.rom');
 assert.equal(biosTest.length, 16384); assert.equal(biosTest.subarray(0,2).toString(), 'AB');
 const html = await readFile('dist/index.html','utf8');
-for (const file of ['app.js','style.css','test-cartridge.rom','msx2-test-cartridge.rom','cbios-test-cartridge.rom','cbios-msx1-test-cartridge.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) assert(html.includes(file));
+for (const file of ['scc-test-cartridge.rom','app.js','style.css','test-cartridge.rom','msx2-test-cartridge.rom','cbios-test-cartridge.rom','cbios-msx1-test-cartridge.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) assert(html.includes(file));
 assert(!html.includes('src="/') && !html.includes('href="/'), 'Assets must work under a Pages project subpath.');
 const hash = data => createHash('sha256').update(data).digest('hex');
 const manifestBytes = await readFile('demos/manifest.json');

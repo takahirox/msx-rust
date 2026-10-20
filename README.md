@@ -1,8 +1,9 @@
 # msx-rust
 
 An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
-keyboard and joystick input, Web Audio PSG sound, local ROM loading, and a usable
-open-source BASIC environment. The core has no third-party dependencies or browser APIs.
+keyboard and joystick input, Web Audio PSG and classic SCC sound, local ROM loading,
+and a usable open-source BASIC environment. The core has no third-party dependencies
+or browser APIs.
 
 **Demo target:** <https://takahirox.github.io/msx-rust/>. Publication and post-merge
 verification are pending; this URL is a deployment target, not a claim of a live site.
@@ -142,6 +143,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | Memory (MSX1) | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain/MegaROM cartridge in slot 1 |
 | MSX2 | V9938, 128 KiB VRAM, 64 KiB RAM, expanded slot 3 with sub-ROM in 3-0 and RAM in 3-3, deterministic RTC; [coverage](docs/msx2.md) |
 | TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
+| Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, PSG joystick 1 input; arrows + Z/X are directions/triggers |
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
@@ -150,10 +152,10 @@ This is an initial implementation, not a claim of universal MSX software compati
 Instruction-level timing is used; individual bus phases, MSX M1 wait states, analog
 video/overscan, VDP access contention, and undocumented CPU silicon quirks are not
 accurately modeled. Sprite status at raster/off-screen edges and unusual combined
-VDP modes are not compatibility guarantees. There are no disk/tape drives or SCC
-audio. MSX2 coverage and optional peripheral limits are documented separately.
-ROM-only ASCII8, ASCII16, Konami and Konami SCC banking is supported;
-SRAM and other mapper variants are not.
+VDP modes are not compatibility guarantees. There are no disk/tape drives,
+SCC+/SCC-I or FM audio expansions. MSX2 coverage and optional peripheral limits
+are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
+with classic SCC audio are supported; SRAM and other mapper variants are not.
 
 ## Weave BASIC and firmware
 
@@ -354,8 +356,9 @@ Choose **Cartridge mapper** under **ROMs & advanced system options** before sele
 - **Plain** uses the same header validation. Small images mirror in 4000h–BFFFh;
   48 KiB images start at 0000h. These lengths describe a mapping format, not an
   upload cap.
-- **ASCII8**, **ASCII16**, **Konami**, and **Konami SCC** explicitly select ROM-only
-  MegaROM hardware, bypassing heuristic choice while keeping format validation.
+- **ASCII8**, **ASCII16**, **Konami Standard**, and **Konami SCC** explicitly select
+  MegaROM hardware (Konami SCC includes classic wavetable audio), bypassing
+  heuristic choice while keeping format validation.
   Use the ROM author's documentation to choose; arbitrary or ambiguous images
   cannot be identified reliably. Change the mapper and select
   the same file again to retry. Changing the picker alone leaves the running
@@ -374,10 +377,12 @@ mirror smaller ROMs. Images beyond the hardware address range need a different
 or extended mapper; they are rejected with an explanation. ASCII mappings are
 unmapped outside 4000h–BFFFh. Konami mirrors page 1 into page 0 and page 2 into
 page 3; SCC swaps those mirrors. Only writes through the selected cartridge slot
-change banks. **SCC sound/register hardware is not implemented**: selecting bank
-3Fh in the third SCC window hides ROM at 9800h–9FFFh, which reads FFh and ignores
-SCC writes. This supports SCC mapper address decoding, not full SCC-game compatibility.
-SRAM/save hardware, SCC+, reversed ASCII registers and other mapper variants are
+change banks. **Classic SCC audio is supported**: selecting bank 3Fh in the third
+SCC window exposes waveform RAM and sound registers at 9800h–9FFFh. Five independent
+voices share four waveforms (channels 4/5 share storage), and mix with PSG. Konami
+Standard has different banking and no SCC. See [the SCC register map, timing,
+accuracy limits and tests](docs/scc.md).
+SRAM/save hardware, SCC+/SCC-I, reversed ASCII registers and other mapper variants are
 unsupported; manual selection cannot establish that an unknown image uses none
 of these features.
 
@@ -393,16 +398,24 @@ address space.
 
 Inference uses the same local bytes under MSX1 and MSX2 and never changes the
 machine model. A likely mapper does not identify a game, prove it boots, select
-a compatible user BIOS/sub-ROM, or add SCC audio or other unsupported hardware.
+a compatible user BIOS/sub-ROM, or add unsupported hardware.
 
 The original diagnostic loader initializes self-contained cartridges using their AB
 init pointer; many commercial cartridges need standard BIOS services. Both models
 automatically select their matching C-BIOS for that purpose, with limited
 compatibility. No commercial-game compatibility or manual copyrighted-game play-testing is required or claimed.
 
-All mapper fixtures are generated, original MIT-licensed code in
+Download the original **SCC test cartridge** in advanced options and open it with
+Konami SCC or Auto on either model. After enabling audio and focusing the display,
+hold Space for a 440 Hz SCC square, Up for all five SCC voices, Left for PSG,
+or combine Left with Space/Up. Right disables the SCC overlay. Release keys for
+silence; Reset restarts it and Eject returns to BASIC. Its code and synthetic
+waveforms are original MIT-licensed data; no music or game assets are included.
+
+Mapper fixtures are generated, original MIT-licensed code in
 [`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
-[`detection.rs`](crates/msx-core/tests/detection.rs) and
+[`detection.rs`](crates/msx-core/tests/detection.rs),
+[`scc_fixture.rs`](crates/msx-core/src/firmware/scc_fixture.rs) and
 [`browser.spec.js`](tests/browser.spec.js). Run the verification commands below to
 test legally distributable images: browser fixtures of 64, 128, 256, 512 and
 1024 KiB use Auto, switch to code in the last bank, display a backdrop and respond
@@ -462,7 +475,8 @@ sprite/command pixels. Screenshots go to `test-results/msx2-screen7.png` and
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
 interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelopes,
 slots/PPI, plain and bank-switched cartridge execution, BASIC syntax/runtime tests,
-and supplied-ROM boot tests. See [test methodology and hardware references](docs/architecture.md)
+classic SCC register/timing/mixing/lifecycle tests, and supplied-ROM boot tests.
+See [test methodology and hardware references](docs/architecture.md)
 and the [manual smoke flow and actual results](docs/validation.md).
 See the [UI redesign validation and screenshots](docs/ui-validation.md) for Issue #7.
 

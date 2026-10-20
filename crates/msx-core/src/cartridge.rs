@@ -1,4 +1,4 @@
-//! ROM-only cartridge mappings. SRAM variants and SCC sound hardware are not implemented.
+//! Cartridge ROM mappings, including classic SCC activation. SRAM is unsupported.
 
 mod detect;
 pub use detect::{detect_mapper, Candidate, Confidence, Detection};
@@ -127,9 +127,9 @@ impl Mapping {
             _ if !(0x4000..0xc000).contains(&a) => return 0xff,
             _ => a,
         };
-        // Unimplemented SCC registers read open bus, never underlying ROM.
-        // The SCC overlay itself exists only at 9800h–9FFFh, not in its ROM mirror.
-        if self.scc_enabled && (0x9800..0xa000).contains(&(address as usize)) {
+        // Hardware routes live SCC accesses to the chip. Static mapper inference
+        // has no wave RAM: keep the overlay opaque rather than tracing hidden ROM.
+        if self.scc_access(address) {
             return 0xff;
         }
         let (bank, offset) = if self.kind == Mapper::Ascii16 {
@@ -144,6 +144,9 @@ impl Mapping {
             )
         };
         rom[(bank + offset) & (rom.len() - 1)]
+    }
+    pub fn scc_access(&self, address: u16) -> bool {
+        self.kind == Mapper::KonamiScc && self.scc_enabled && (0x9800..0xa000).contains(&address)
     }
     pub fn write(&mut self, address: u16, value: u8) {
         let index = match self.kind {
