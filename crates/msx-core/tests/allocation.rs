@@ -63,3 +63,25 @@ fn firmware_commits_reuse_memory_and_cartridge_reservation_failure_is_atomic() {
     }
 }
 thread_local! { static FAIL_SIZE: Cell<usize> = const { Cell::new(0) }; }
+
+#[test]
+fn demo_model_display_allocation_failure_preserves_running_basic() {
+    for fail_size in [512 * 424 * 4, 131072] {
+        let mut m = Machine::default();
+        m.frame();
+        m.basic.submit("10 PRINT 73").unwrap();
+        let rom = firmware::msx2_cartridge();
+        let pc = m.cpu.pc;
+        let pixels = m.hardware.vdp.pixels.clone();
+        FAIL_SIZE.with(|s| s.set(fail_size));
+        let result = m.load_cartridge_for_model_owned(rom, Mapper::Plain, Model::Msx2);
+        FAIL_SIZE.with(|s| s.set(0));
+        assert!(result.unwrap_err().contains("memory"));
+        assert_eq!(m.hardware.model, Model::Msx1);
+        assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
+        assert_eq!(m.boot_policy, BootPolicy::Automatic);
+        assert_eq!(m.cpu.pc, pc);
+        assert_eq!(m.hardware.vdp.pixels, pixels);
+        assert!(m.basic.program.contains_key(&10));
+    }
+}

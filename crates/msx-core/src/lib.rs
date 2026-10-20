@@ -344,7 +344,29 @@ impl Machine {
     /// Takes ownership of a staged upload, avoiding another full MegaROM copy.
     /// Validation finishes before the running machine is changed.
     pub fn load_cartridge_owned(&mut self, rom: Vec<u8>, mapper: Mapper) -> Result<(), String> {
+        self.load_cartridge_for_model_owned(rom, mapper, self.hardware.model)
+    }
+    /// Validate and reserve a curated cartridge and its model before committing.
+    /// Explicit local/diagnostic firmware cannot be moved to an incompatible model.
+    pub fn load_cartridge_for_model_owned(
+        &mut self,
+        rom: Vec<u8>,
+        mapper: Mapper,
+        model: Model,
+    ) -> Result<(), String> {
         let mapping = Mapping::validate(&rom, mapper)?;
+        if model != self.hardware.model {
+            if self.boot_policy == BootPolicy::Explicit && self.hardware.firmware != Firmware::Cbios
+            {
+                return Err("This demo needs a different machine. Choose Use Weave BASIC to clear the explicit firmware override first.".into());
+            }
+            let vdp = Vdp::try_new(model == Model::Msx2)?;
+            self.hardware.model = model;
+            self.hardware.vdp = vdp;
+            self.hardware.rtc = rtc::Rtc::default();
+            // An explicit C-BIOS policy survives, using the matching model's BIOS.
+            self.install_firmware(Firmware::Cbios);
+        }
         if self.boot_policy == BootPolicy::Automatic {
             self.install_firmware(Firmware::Cbios);
         }

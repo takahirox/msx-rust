@@ -150,6 +150,26 @@ pub extern "C" fn msx_cancel_upload() {
 }
 #[no_mangle]
 pub extern "C" fn msx_load(length: u32, system: u32, mapper: u32) -> u32 {
+    load(length, system, mapper, None)
+}
+/// The same staged cartridge path, with an atomic declared-model transition.
+#[no_mangle]
+pub extern "C" fn msx_load_demo(length: u32, mapper: u32, model: u32) -> u32 {
+    let model = match model {
+        0 => Model::Msx1,
+        1 => Model::Msx2,
+        _ => {
+            APP.with(|a| {
+                let mut a = a.borrow_mut();
+                a.upload.clear();
+                a.error = "Unsupported demo machine.".into();
+            });
+            return 0;
+        }
+    };
+    load(length, 0, mapper, Some(model))
+}
+fn load(length: u32, system: u32, mapper: u32, model: Option<Model>) -> u32 {
     APP.with(|a| {
         let mut a = a.borrow_mut();
         let rom = std::mem::take(&mut a.upload);
@@ -176,7 +196,9 @@ pub extern "C" fn msx_load(length: u32, system: u32, mapper: u32) -> u32 {
                 } else {
                     requested
                 };
-                a.machine.load_cartridge_owned(rom, selected)?;
+                let model = model.unwrap_or(a.machine.hardware.model);
+                a.machine
+                    .load_cartridge_for_model_owned(rom, selected, model)?;
                 a.detected_mapper = selected as u32;
                 Ok(())
             })

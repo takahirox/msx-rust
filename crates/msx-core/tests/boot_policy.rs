@@ -217,3 +217,63 @@ fn bitmap_primitives_pack_pixels_clip_and_restore_text_on_msx2() {
         assert!(m.basic.console.transcript.contains("91\nREADY"));
     }
 }
+
+#[test]
+fn declared_model_cartridges_commit_atomically_and_preserve_explicit_policy() {
+    let mut m = Machine::default();
+    m.frame();
+    enter(&mut m, "10 PRINT 42");
+    let pc = m.cpu.pc;
+    let pixels = m.hardware.vdp.pixels.clone();
+    assert!(m
+        .load_cartridge_for_model_owned(vec![0; 17], Mapper::Plain, Model::Msx2)
+        .is_err());
+    assert_eq!(m.hardware.model, Model::Msx1);
+    assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
+    assert_eq!(m.cpu.pc, pc);
+    assert_eq!(m.hardware.vdp.pixels, pixels);
+    assert!(m.basic.program.contains_key(&10));
+    m.load_cartridge_for_model_owned(firmware::msx2_cartridge(), Mapper::Plain, Model::Msx2)
+        .unwrap();
+    assert_eq!(m.hardware.model, Model::Msx2);
+    assert_eq!(m.hardware.firmware, Firmware::Cbios);
+    assert_eq!(m.boot_policy, BootPolicy::Automatic);
+    assert!(m.basic.program.is_empty());
+    m.unload_cartridge();
+    m.frame();
+    assert_eq!(m.hardware.model, Model::Msx2);
+    assert!(m.basic.console.transcript.contains("READY"));
+    m.use_cbios().unwrap();
+    m.load_cartridge_for_model_owned(
+        firmware::cbios_msx1_test_cartridge(),
+        Mapper::Plain,
+        Model::Msx1,
+    )
+    .unwrap();
+    assert_eq!(m.hardware.bios, firmware::CBIOS_MSX1_MAIN);
+    assert_eq!(m.boot_policy, BootPolicy::Explicit);
+    boot_cart(&mut m);
+    m.unload_cartridge();
+    assert_eq!(m.hardware.firmware, Firmware::Cbios);
+    m.load_bios(firmware::CBIOS_MSX1_MAIN).unwrap();
+    m.load_cartridge(firmware::CBIOS_MSX1_MAIN).unwrap_err(); // A BIOS is not a cartridge.
+    let pc = m.cpu.pc;
+    assert!(m
+        .load_cartridge_for_model_owned(firmware::msx2_cartridge(), Mapper::Plain, Model::Msx2)
+        .unwrap_err()
+        .contains("override"));
+    assert_eq!(m.hardware.model, Model::Msx1);
+    assert_eq!(m.hardware.firmware, Firmware::User);
+    assert_eq!(m.cpu.pc, pc);
+    m.set_model(Model::Msx2);
+    m.use_diagnostic().unwrap();
+    m.load_cartridge_for_model_owned(firmware::msx2_cartridge(), Mapper::Plain, Model::Msx2)
+        .unwrap();
+    let cartridge = m.hardware.cartridge.clone();
+    assert!(m
+        .load_cartridge_for_model_owned(firmware::test_cartridge(), Mapper::Plain, Model::Msx1)
+        .is_err());
+    assert_eq!(m.hardware.cartridge, cartridge);
+    assert_eq!(m.hardware.model, Model::Msx2);
+    assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
+}

@@ -195,7 +195,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#transcript')).toContainText('42');
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0,0]);
     const pageUrl = new URL(path, 'http://127.0.0.1:41873');
-    const assets = ['', 'app.js', 'style.css', 'msx_wasm.wasm'].map(file => new URL(file, pageUrl).href);
+    const assets = ['', 'app.js', 'style.css', 'msx_wasm.wasm', 'demos/manifest.json'].map(file => new URL(file, pageUrl).href);
     expect(requests.filter(r => r.method !== 'GET' || r.body || !assets.includes(r.url))).toEqual([]);
     expect(errors).toEqual([]);
   });

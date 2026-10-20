@@ -207,7 +207,8 @@ test('deployment assets are complete and Wasm has no imports', async ({ page }) 
   for (const name of ['app.js', 'style.css', 'test-cartridge.rom', 'weave-boot.rom']) expect((await page.request.get(`/${name}`)).ok()).toBe(true);
 });
 
-// Opt-in real BIOS integration. No third-party ROM is bundled or fetched by tests.
+// Opt-in external BIOS integration. Curated licensed games are tested separately;
+// this optional path never downloads user firmware.
 if (process.env.MSX_TEST_BIOS) {
   test('locally supplied C-BIOS boots the authored cartridge in the browser', async ({ page }) => {
     const errors = await boot(page);

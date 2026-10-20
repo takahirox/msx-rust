@@ -60,6 +60,50 @@ system options** for BIOS loading and compatibility/legal details, or **BASIC te
 transcript** for the full built-in interpreter output. Weave BASIC is our original
 interpreter, not original Microsoft MSX BASIC.
 
+## Demo ROMs
+
+Choose a title in **Demo ROMs** below the display, then **Play demo**. No local
+ROM or account is needed. The app selects the declared machine and Plain mapper,
+boots the bundled C-BIOS and focuses the display. plustaker starts immediately;
+press Space/Z at YOKO’s start prompt:
+
+| Demo | Machine | Play |
+| --- | --- | --- |
+| plustaker, by m@3 | MSX1 | Arrows move; Space/Z fires or restarts; shoot falling blocks and collect characters for combos. |
+| YOKO (yokosht), by m@3 | MSX1 | Arrows move; Space/Z starts/fires or restarts; C uses a stocked bomb. Dodge enemies in a side-scrolling shooter. |
+| Original MSX2 diagnostic | MSX2 | Hold 8 for 256-color video, 7 for 512-wide palette video; Space plays a tone after Enable audio. |
+
+YOKO's on-screen “A” means the fire button. Prefer Space/Z and C: the existing
+browser X mapping also presses joystick trigger 2, so it can fire and use a bomb
+together. A physical keyboard is required. Enable audio separately to hear PSG.
+
+Switching demos replaces the cartridge and discards unsaved BASIC. **Reset**
+restarts the cartridge; **Eject** returns to BASIC in the same model under automatic
+policy. **Use Weave BASIC** clears explicit firmware overrides and the cartridge.
+Explicit C-BIOS remains selected across demo/model changes. Local firmware and
+the diagnostic loader are retained for same-model demos; a cross-model demo is
+rejected with the session unchanged until you clear that override. **Open ROM**
+and the BASIC starters remain available. Failed fetches, integrity checks or
+unsupported imports preserve the running session; retry Play demo.
+
+The two unmodified third-party ROMs retain their upstream **MIT** licenses. The
+[manifest](demos/manifest.json) pins official source/download revisions, sizes,
+SHA-256 hashes and metadata; [redistribution and asset audit](demos/PROVENANCE.txt)
+records the binary, graphics, font, music and runtime review. The selector links
+individual licenses and sources. These are verified local static assets; no
+third-party runtime downloads are made. Free downloads and online playability do
+not by themselves grant redistribution rights. Westen House was excluded because
+independent permission for credited third-party routines could not be verified.
+The emulator's MIT license does not relicense others' ROMs.
+
+The browser suite observes both games' actual MSX1 Canvas output and input-driven
+sprite movement, plus MSX2 diagnostic video/input, at `/` and `/msx-rust/`. It also
+checks Reset/Eject/BASIC, switching, explicit firmware, failed/tampered assets and
+stale asynchronous imports. Tests step the real Wasm CPU deterministically for
+gameplay assertions. They do not establish game completion, full audio accuracy,
+physical hardware behavior or MSX2 backward compatibility for these MSX1 games.
+Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
+
 ## MSX2
 
 Both **MSX1** and **MSX2** start in original, independent **Weave BASIC**.
@@ -273,7 +317,9 @@ disassembly, token table, or third-party interpreter code was used or bundled.
 
 ## ROM loading and legal guidance
 
-No proprietary BIOS, BASIC or game ROM is included. The emulator, original glyphs,
+No proprietary BIOS, BASIC or commercial game ROM is included. Curated third-party
+games retain their upstream licenses; see [Demo ROMs](#demo-roms).
+The emulator, original glyphs,
 cartridges and seven generated ROMs are MIT licensed; the bundled C-BIOS MSX1 main and
 MSX2 main/sub-ROMs are separately **BSD-2-Clause**, with its complete upstream
 copyrights, conditions and disclaimer in

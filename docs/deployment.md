@@ -36,7 +36,8 @@ The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 `dist/`, copies only the web entry files and license notices, then generates the
 seven original boot/test ROMs from Rust source. It also copies only the three pinned
 C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
-The complete deployable inventory is **18 files**:
+It also copies the checked-in `demos/` directory without network access.
+The complete deployable inventory is **25 files**:
 
 - `index.html`, `style.css`, `app.js`
 - `msx_wasm.wasm`
@@ -45,12 +46,16 @@ The complete deployable inventory is **18 files**:
 - `cbios-test-cartridge.rom`, `cbios-msx1-test-cartridge.rom`
 - `cbios_main_msx1.rom`, `cbios_main_msx2.rom`, `cbios_sub.rom`
 - `LICENSE`, `ROM-LICENSE.txt`, `CBIOS-LICENSE.txt`, `CBIOS-PROVENANCE.txt`
+- `demos/manifest.json`, `demos/PROVENANCE.txt`, `demos/plustakermsx.rom`, `demos/yokosht.rom`
+- `demos/PLUSTAKER-LICENSE.txt`, `demos/YOKO-LICENSE.txt`, `demos/Z88DK-LICENSE.txt`
 
 The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the original
 MIT-licensed firmware, glyphs and cartridges, and separately BSD-2-Clause C-BIOS. No
-proprietary BIOS/BASIC, games, other third-party ROMs, sources or npm packages are
-shipped. The three unmodified official release binaries are also embedded in the
-core/Wasm, so automatic cartridge boot in either model needs no firmware network
+proprietary BIOS/BASIC or commercial games are shipped. The two third-party
+MSX1 demo games retain their own MIT licenses and z88dk runtime notice; see the
+[per-binary and asset redistribution audit](../demos/PROVENANCE.txt) and
+[pinned manifest](../demos/manifest.json). No npm packages are shipped.
+The three unmodified official release binaries are also embedded in the core/Wasm, so automatic cartridge boot in either model needs no firmware network
 request or SourceForge access. All assets can be served locally without external
 network access; browser tests never download firmware at runtime.
 
@@ -66,8 +71,10 @@ No logo, BASIC, music or disk ROM is needed or distributed. The app links the no
 and downloadable independent service-test cartridge under advanced options.
 `scripts/check-dist.mjs` rejects missing, empty or unexpected output files and checks
 Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes, unchanged
-license/provenance records and relative HTML links. Only `dist/` is uploaded by the
-Pages workflow.
+license/provenance records and relative HTML links. It also validates the exact
+demo inventory, ROM hashes/sizes and byte-identical license/provenance files, plus
+required source attribution. Missing, extra or modified assets fail the check.
+Only `dist/` is uploaded by the Pages workflow.
 
 All module, stylesheet and Wasm URLs are relative; there is no client-side router.
 Browser tests start two isolated Python static servers: the ordinary local site
@@ -132,6 +139,48 @@ fix node; no push, repository setting change or production deployment was made.
 Local builds and browser tests do not establish that production publishing works;
 the live checks below remain pending.
 
+## Demo ROMs validation (Issue #21)
+
+Validated locally on 2026-10-20, macOS arm64, Rust 1.99.0, Node.js 24.12.0,
+Playwright 1.64.1 / Chromium. The build used the same local linker wrapper
+explained above; the workflow needs no change.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 84 tests passed |
+| `./scripts/build.sh` | Passed; all game bytes are checked in, no third-party ROM downloads |
+| `node scripts/check-dist.mjs` | Passed; exact 25-file deployment, pinned ROM and notice hashes, source attribution, relative URLs and Wasm exports |
+| `npm test` | All 50 tests passed in 4.3 minutes, including both site roots and previous BASIC/mapper/audio/focus/fullscreen/mobile workflows |
+| `npm test -- demos.spec.js --output target/demo-final-results` | All seven demo tests passed again in 29.5 seconds after final selector alignment and explicit game-Eject coverage |
+| `git diff --cached --check` | Passed; upstream notice text preserved with documented whitespace normalization |
+
+The demo tests execute the real compiled Wasm CPU/VDP, with deterministic frame
+stepping for game assertions. They observe original game HUD/sprite pixels and
+upward player movement from keyboard/joystick input, fire shots, reset both games,
+switch cartridges/models, eject to same-model BASIC, and exercise local imports
+and explicit firmware precedence. They reject missing/corrupt/invalid assets and
+catalogs without losing the previous program or model; a delayed fetch cannot
+replace a newer cartridge after Eject. Requests stay within the static site's
+own root and no storage/upload/analytics path is used.
+
+Inspected screenshots retained in this commit:
+[plustaker](demo-evidence/plustaker.png), [YOKO](demo-evidence/yoko.png),
+[MSX2 SCREEN 8](demo-evidence/msx2.png), and
+[320px Pages-prefix layout](demo-evidence/mobile.png).
+Both games show running scenes after input; the diagnostic shows the emulated
+color ramp, sprite and command output. The suite also verifies SCREEN 7 output
+and restoration through Reset. Full captures remain in `test-results/demo-*.png`
+and the CI `browser-evidence` artifact when the workflow runs.
+
+Official game ROMs were compared byte-for-byte with the pinned upstream Git
+objects. Each retained upstream license was checked for complete copyright,
+permission and disclaimer text. Whitespace normalization is recorded in the
+[redistribution audit](../demos/PROVENANCE.txt); game ROMs are unmodified.
+Live deployment and its Actions run/commit have not been verified in this node;
+Issue #21's required post-merge checks remain pending below.
+
 ## One-time repository owner setup
 
 In `takahirox/msx-rust`, open **Settings → Pages → Build and deployment → Source**
@@ -168,6 +217,13 @@ the Pages publishing source, environment rules and deployment job logs. The
 `github-pages` environment and deployment step expose the actual published URL.
 
 ## Required post-merge verification (pending)
+
+Issue #21 additionally requires verifying Demo ROMs on the actual deployed site:
+record the Actions run and deployed commit, launch a third-party MSX1 game and
+the original MSX2 diagnostic, observe video and working input, check Reset/Eject/
+BASIC restoration, and fetch all manifest ROM/license URLs without errors. File
+live-site defects as separate follow-up Issues. This remains pending until after
+merge; local screenshots and prefix tests do not establish deployment success.
 
 After this integration is reviewed and merged:
 

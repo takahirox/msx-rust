@@ -21,6 +21,8 @@ let mainFile;
 let subFile;
 let cartridge = '';
 let importGeneration = 0;
+let demos;
+let catalogLoading = false;
 let previousTime;
 let accumulator = 0;
 function frameMilliseconds() { return 1000 * wasm.msx_frame_cycles() / 3579545; }
@@ -35,6 +37,8 @@ function updateControls() {
   const native = ready && wasm.msx_firmware() === 0;
   for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware', 'firmware']) $(id).disabled = !ready || loading;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
+  $('demo').disabled = !ready || loading || !demos;
+  $('play-demo').disabled = !ready || loading || catalogLoading;
   $('eject').disabled = !ready || !cartridge;
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
@@ -197,11 +201,7 @@ async function load(file, isSystem) {
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 0xffffffff) throw new Error('The image is empty or exceeds this browser/Wasm address space.');
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (generation !== importGeneration) return;
-    const pointer = wasm.msx_upload(bytes.length);
-    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    // Obtain the buffer only AFTER reservation: memory growth detaches old views.
-    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
-    if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0, mapper)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    uploadRom(bytes, isSystem ? 1 : 0, mapper);
     if (isSystem) localName = file.name;
     else {
       const selected = wasm.msx_detected_mapper();
@@ -220,6 +220,89 @@ async function load(file, isSystem) {
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
+// Both local files and curated static assets use the same staged Rust cartridge API.
+function uploadRom(bytes, kind, mapper, targetModel) {
+  const pointer = wasm.msx_upload(bytes.length);
+  if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+  new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+  const ok = targetModel === undefined ? wasm.msx_load(bytes.length, kind, mapper) : wasm.msx_load_demo(bytes.length, mapper, targetModel);
+  if (!ok) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+}
+const mapperIds = { Plain: 1, ASCII8: 2, ASCII16: 3, Konami: 4, 'Konami SCC': 5 };
+const localAsset = path => typeof path === 'string' && /^(?:demos\/)?[a-zA-Z0-9_.-]+$/.test(path) && !path.includes('..');
+async function staticAsset(path) {
+  if (!localAsset(path)) throw new Error('Invalid demo asset path.');
+  const response = await fetch(path, { mode: 'same-origin', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}. Reload or try another demo.`);
+  return response;
+}
+function describeDemo() {
+  const demo = demos?.find(item => item.id === $('demo').value);
+  if (!demo) return;
+  $('demo-description').textContent = `${demo.model} · ${demo.mapper} · ${demo.description}`;
+  $('demo-controls-help').textContent = `Controls: ${demo.controls}`;
+  const license = document.createElement('a');
+  license.href = demo.licenseFile; license.textContent = demo.license;
+  const source = document.createElement('a');
+  source.href = demo.source; source.textContent = 'Source';
+  $('demo-credit').replaceChildren(document.createTextNode(`${demo.creator} · `), license, document.createTextNode(' · '), source);
+}
+async function loadCatalog() {
+  catalogLoading = true; updateControls();
+  try {
+    const manifest = await (await staticAsset('demos/manifest.json')).json();
+    if (manifest.version !== 1 || !Array.isArray(manifest.demos) || !manifest.demos.length) throw new Error('Invalid demo manifest.');
+    for (const demo of manifest.demos) {
+      if (!['MSX1', 'MSX2'].includes(demo.model) || !Object.hasOwn(mapperIds, demo.mapper)
+          || !localAsset(demo.file) || !localAsset(demo.licenseFile)
+          || !/^[a-f0-9]{64}$/.test(demo.sha256) || !Number.isSafeInteger(demo.size) || demo.size <= 0
+          || ![demo.id, demo.title, demo.creator, demo.description, demo.controls, demo.license].every(value => typeof value === 'string' && value.length)
+          || !demo.source?.startsWith('https://github.com/')) throw new Error('Invalid demo metadata.');
+    }
+    demos = manifest.demos;
+    $('demo').replaceChildren(...demos.map(demo => new Option(demo.title, demo.id)));
+    describeDemo();
+    $('demo-message').textContent = '';
+    $('play-demo').textContent = 'Play demo';
+  } catch (error) {
+    $('demo-message').textContent = `Demos unavailable: ${error.message} Your session is unchanged. Retry to reload the catalog.`;
+    $('play-demo').textContent = 'Retry demos';
+  } finally { catalogLoading = false; updateControls(); }
+}
+$('demo').addEventListener('change', describeDemo);
+$('play-demo').addEventListener('click', async () => {
+  if (!ready || loading || catalogLoading) return;
+  if (!demos) { await loadCatalog(); return; }
+  const demo = demos.find(item => item.id === $('demo').value);
+  if (!demo) return;
+  const generation = ++importGeneration;
+  loading = true; updateControls();
+  status(`Loading ${demo.title}…`);
+  try {
+    const bytes = new Uint8Array(await (await staticAsset(demo.file)).arrayBuffer());
+    if (generation !== importGeneration) return;
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+    if (generation !== importGeneration) return;
+    if (bytes.length !== demo.size || digest !== demo.sha256) throw new Error('Demo integrity check failed (size/SHA-256). Reload or try another demo.');
+    const targetModel = demo.model === 'MSX2' ? 1 : 0;
+    uploadRom(bytes, 0, mapperIds[demo.mapper], targetModel);
+    if (model !== targetModel) {
+      model = targetModel;
+      // Only clear staged local file choices after a successful profile transition.
+      mainFile = subFile = undefined;
+      $('bios').value = ''; $('subrom').value = '';
+      updateModelControls();
+    }
+    cartridge = `${demo.title} (${demo.mapper})`;
+    $('cartridge').value = '';
+    $('demo-message').textContent = '';
+    restart(() => {});
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`Demo load failed: ${error.message} Session unchanged: ${system}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
+  } finally { if (generation === importGeneration) { loading = false; updateControls(); } }
+});
 // International MSX keyboard matrix (US key placement). Matrix keys continue
 // to work with a user BIOS; text/editor events are consumed only by our firmware.
 const matrix = new Map();
@@ -302,15 +385,19 @@ $('tone').addEventListener('click', async () => { try { await enableAudio(); ton
 function updateFirmwareSelection() {
   $('firmware-selection').textContent = `Main: ${mainFile?.name || 'missing'} · Sub-ROM: ${subFile?.name || 'missing'}. Apply to restart with this pair.`;
 }
+function updateModelControls() {
+  $('model').value = String(model);
+  $('firmware').querySelector('[value=diagnostic]').disabled = !model;
+  $('msx2-firmware').hidden = !model;
+  $('builtin').textContent = 'Use Weave BASIC';
+  updateFirmwareSelection();
+}
 $('model').addEventListener('change', () => {
   model = Number($('model').value);
   firmware = 'auto'; $('firmware').value = firmware;
   localName = '';
   clearRomSelections();
-  $('firmware').querySelector('[value=diagnostic]').disabled = !model;
-  $('msx2-firmware').hidden = !model;
-  $('builtin').textContent = 'Use Weave BASIC';
-  updateFirmwareSelection();
+  updateModelControls();
   restart(() => wasm.msx_model(model));
 });
 $('cartridge').addEventListener('change', event => load(event.target.files[0], false));
@@ -351,6 +438,7 @@ try {
   ready = true;
   updateStatus();
   requestAnimationFrame(frame);
+  loadCatalog();
 } catch (error) {
   ready = false;
   updateControls();

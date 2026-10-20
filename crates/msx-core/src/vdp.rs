@@ -46,6 +46,24 @@ impl Default for Vdp {
     }
 }
 impl Vdp {
+    pub(crate) fn try_new(msx2: bool) -> Result<Self, String> {
+        let mut pixels = Vec::new();
+        let mut vram = Vec::new();
+        let pixel_count = if msx2 {
+            512 * 424 * 4
+        } else {
+            WIDTH * HEIGHT * 4
+        };
+        let vram_count = if msx2 { 131072 } else { 16384 };
+        pixels
+            .try_reserve_exact(pixel_count)
+            .map_err(|_| "Not enough memory for the demo display.")?;
+        vram.try_reserve_exact(vram_count)
+            .map_err(|_| "Not enough memory for the demo VRAM.")?;
+        pixels.resize(pixel_count, 0);
+        vram.resize(vram_count, 0);
+        Ok(Self::with_buffers(pixels, vram, msx2))
+    }
     pub fn new(msx2: bool) -> Self {
         let pixels = vec![
             0;

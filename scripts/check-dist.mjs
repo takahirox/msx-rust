@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const expected = ['cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
-assert.deepEqual((await readdir('dist')).sort(), expected.sort(), 'Unexpected deployment files; review their provenance.');
+assert.deepEqual((await readdir('dist')).sort(), [...expected, 'demos'].sort(), 'Unexpected deployment files; review their provenance.');
 for (const file of expected) assert((await readFile(`dist/${file}`)).length > 0, `Empty ${file}`);
+for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt', 'ROM-LICENSE.txt']]) {
+  assert.deepEqual(await readFile(`dist/${file}`), await readFile(source), `Modified project notice: ${file}`);
+}
 const module = await WebAssembly.compile(await readFile('dist/msx_wasm.wasm'));
 assert.deepEqual(WebAssembly.Module.imports(module), []);
-for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy']) {
+for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy']) {
   assert(WebAssembly.Module.exports(module).some(e => e.name === name), `Missing Wasm export ${name}`);
 }
 const cartridge = await readFile('dist/test-cartridge.rom');
@@ -37,4 +40,55 @@ assert.equal(biosTest.length, 16384); assert.equal(biosTest.subarray(0,2).toStri
 const html = await readFile('dist/index.html','utf8');
 for (const file of ['app.js','style.css','test-cartridge.rom','msx2-test-cartridge.rom','cbios-test-cartridge.rom','cbios-msx1-test-cartridge.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) assert(html.includes(file));
 assert(!html.includes('src="/') && !html.includes('href="/'), 'Assets must work under a Pages project subpath.');
-console.log('Deployment inventory, ROM headers/sizes, subpath links and import-free Wasm verified.');
+const hash = data => createHash('sha256').update(data).digest('hex');
+const manifestBytes = await readFile('demos/manifest.json');
+assert.deepEqual(await readFile('dist/demos/manifest.json'), manifestBytes);
+const manifest = JSON.parse(manifestBytes);
+assert.equal(manifest.version, 1);
+assert.equal(new Set(manifest.demos.map(d => d.id)).size, manifest.demos.length);
+assert(manifest.demos.filter(d => d.model === 'MSX1' && d.kind === 'game').length >= 2);
+assert(manifest.demos.some(d => d.model === 'MSX2' && d.kind === 'diagnostic'));
+const demoFiles = new Set(['manifest.json']);
+for (const demo of manifest.demos) {
+  for (const key of ['title', 'creator', 'description', 'controls', 'license', 'licenseFile', 'source', 'download', 'version', 'changes']) assert(demo[key]?.length, `Missing ${key}: ${demo.id}`);
+  assert(['MSX1', 'MSX2'].includes(demo.model));
+  assert(['Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'].includes(demo.mapper));
+  assert(/^(demos\/)?[a-zA-Z0-9-]+\.rom$/.test(demo.file));
+  assert(/^[a-f0-9]{64}$/.test(demo.sha256));
+  const rom = await readFile(`dist/${demo.file}`);
+  assert.equal(rom.length, demo.size, `Demo size: ${demo.id}`);
+  assert.equal(hash(rom), demo.sha256, `Demo SHA-256: ${demo.id}`);
+  assert.equal(rom.subarray(0, 2).toString(), 'AB');
+  if (demo.kind === 'game') {
+    assert.equal(demo.license, 'MIT'); // Changing the curated licenses requires a compliance review here.
+    assert(/^[a-f0-9]{40}$/.test(demo.version));
+    assert(demo.source.includes(`/tree/${demo.version}`));
+    assert(demo.download.startsWith('https://raw.githubusercontent.com/'));
+    assert(demo.download.includes(`/${demo.version}/MSX1/BIN/`));
+    assert.deepEqual(rom, await readFile(demo.file));
+    demoFiles.add(demo.file.slice('demos/'.length));
+    assert(demo.notices.includes('demos/Z88DK-LICENSE.txt'));
+    const license = await readFile(`dist/${demo.licenseFile}`, 'utf8');
+    assert(license.includes('Copyright') && license.includes('m@3') && license.includes('Permission is hereby granted'));
+  }
+  assert(demo.notices.includes(demo.licenseFile) && demo.notices.includes('demos/PROVENANCE.txt'));
+  for (const file of demo.notices) {
+    assert(/^(demos\/)?[a-zA-Z0-9.-]+$/.test(file));
+    assert((await readFile(`dist/${file}`)).length > 0);
+    if (file.startsWith('demos/')) assert(manifest.noticeHashes[file], `Unpinned notice: ${file}`);
+  }
+}
+for (const [file, digest] of Object.entries(manifest.noticeHashes)) {
+  assert(/^demos\/[A-Z0-9-]+\.txt$/.test(file));
+  assert(/^[a-f0-9]{64}$/.test(digest));
+  assert.equal(hash(await readFile(file)), digest, `Modified license/provenance: ${file}`);
+  assert.deepEqual(await readFile(`dist/${file}`), await readFile(file));
+  demoFiles.add(file.slice('demos/'.length));
+}
+for (const directory of ['demos', 'dist/demos']) assert.deepEqual((await readdir(directory)).sort(), [...demoFiles].sort(), `Unaccounted demo assets in ${directory}`);
+const provenance = await readFile('dist/demos/PROVENANCE.txt', 'utf8');
+for (const demo of manifest.demos.filter(d => d.kind === 'game')) {
+  assert(provenance.includes(demo.source) && provenance.includes(demo.creator.split(' (')[0]));
+}
+assert(html.includes('demos/PROVENANCE.txt'));
+console.log('Deployment inventory, pinned demo ROM/notice hashes, provenance, subpath links and import-free Wasm verified.');
