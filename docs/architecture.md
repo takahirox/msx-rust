@@ -2,14 +2,14 @@
 
 ## Boundaries
 
-`msx-core` owns the CPU, address bus, VDP, PSG, firmware, line editor and BASIC.
+`msx-core` owns the CPU, address bus, VDP, PSG, SCC, firmware, line editor and BASIC.
 It is ordinary Rust using the standard library with zero crate dependencies.
 `msx-wasm` exports a small C-style ABI for frames, pixels, samples, keyboard events,
 ROM staging and errors. JavaScript owns browser APIs only. All ROM generators are
 ordinary Rust functions, with no assembler, downloaded artifact, or external ROM
 needed to build or boot.
 
-`Machine::step` executes a Z80 instruction and advances VDP and PSG time by its
+`Machine::step` executes a Z80 instruction and advances VDP, PSG and SCC time by its
 T-states. `Machine::frame` preserves instruction overshoot between calls and runs
 228 × 262 T-states per NTSC frame (MSX2 PAL uses 313 lines), generating roughly 736 audio samples. The VDP renders
 active scanlines and raises VBlank after 192 or 212 lines. Interrupt requests remain asserted
@@ -122,5 +122,8 @@ executes from it on every supported mapper. Browser tests generate larger images
 in memory and select them through the real file input, verify pixels and Space
 responses after successful and failed imports, and restore plain cartridges and
 BASIC. A separate raw Wasm test verifies memory growth and invalid transfer lengths,
-mapper IDs and unrepresentable allocation sizes. SCC registers/audio and SRAM are
-explicitly outside this implementation.
+mapper IDs and unrepresentable allocation sizes. SRAM is unsupported.
+
+Classic SCC registers/audio are independently implemented from public hardware
+experiments and register documentation, without emulator implementation code. See
+[the sources, register map, mixer, accuracy limits and original fixture](scc.md).

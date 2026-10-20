@@ -186,7 +186,8 @@ Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
 ports read FFh. Raster effects depending on exact hardware timing, changing bitmap
 layouts during an active command, undocumented mixed modes and edge-case sprite
 priority are not compatibility guarantees. No MSX2+, turbo R, disk/tape drives,
-SCC audio, SRAM cartridges or game-specific patches are added.
+SCC+/SCC-I, FM audio expansions, SRAM cartridges or game-specific patches are added.
+Classic K051649 SCC audio is supported on both models; see [SCC details](scc.md).
 
 Auto mapper inference uses the same local content analysis as MSX1 and never changes
 the selected model. Estimates can be wrong; choose a documented mapper manually

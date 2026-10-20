@@ -116,11 +116,12 @@ fn scc_exact_register_decoding_overlay_and_different_mirrors() {
     assert_eq!(m.hardware.read(0xe100), 9);
     m.hardware.write(0x97ff, 0xff); // low six bits enable SCC
     assert_eq!(m.hardware.read(0x97ff), 15);
-    assert_eq!(m.hardware.read(0x9800), 0xff);
+    assert_eq!(m.hardware.read(0x9800), 0);
     assert_eq!(m.hardware.read(0x9fff), 0xff);
     assert_eq!(m.hardware.read(0x1800), 15); // ROM mirror has no SCC overlay
-    m.hardware.write(0x9800, 0);
-    assert_eq!(m.hardware.read(0x9800), 0xff);
+    m.hardware.write(0x98e0, 0); // Reading the deformation register latched FF.
+    m.hardware.write(0x9800, 0x81);
+    assert_eq!(m.hardware.read(0x9800), 0x81);
     m.hardware.write(0x9000, 14);
     assert_eq!(m.hardware.read(0x9800), 14);
     m.reset();

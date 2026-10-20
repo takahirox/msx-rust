@@ -65,6 +65,46 @@ fn firmware_commits_reuse_memory_and_cartridge_reservation_failure_is_atomic() {
 thread_local! { static FAIL_SIZE: Cell<usize> = const { Cell::new(0) }; }
 
 #[test]
+fn cartridge_reservation_failure_preserves_active_scc_and_psg() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let rom = firmware::scc_test_cartridge();
+        let mut machines = [Machine::default(), Machine::default()];
+        for m in &mut machines {
+            m.set_model(model);
+            m.load_cartridge_with_mapper(&rom, Mapper::KonamiScc)
+                .unwrap();
+            for _ in 0..600 {
+                m.frame();
+                if m.hardware.ram[0xc000] == 0xa5 {
+                    break;
+                }
+            }
+            assert_eq!(m.hardware.ram[0xc000], 0xa5);
+            m.hardware.key(8, 5, true);
+            m.hardware.key(8, 4, true);
+            m.frame();
+        }
+        FAIL_SIZE.with(|s| s.set(rom.len()));
+        let result = machines[0].load_cartridge_with_mapper(&rom, Mapper::KonamiScc);
+        FAIL_SIZE.with(|s| s.set(0));
+        assert!(result.unwrap_err().contains("Not enough memory"));
+        for m in &mut machines {
+            m.frame();
+        }
+        assert_eq!(
+            machines[0].hardware.psg.samples,
+            machines[1].hardware.psg.samples
+        );
+        assert!(machines[0]
+            .hardware
+            .psg
+            .samples
+            .iter()
+            .any(|x| x.abs() > 0.1));
+    }
+}
+
+#[test]
 fn demo_model_display_allocation_failure_preserves_running_basic() {
     for fail_size in [512 * 424 * 4, 131072] {
         let mut m = Machine::default();
