@@ -288,7 +288,13 @@ fn malformed_unsupported_and_ambiguous_loads_preserve_the_active_machine() {
     let mut m = Machine::default();
     m.load_cartridge_owned(banked(Mapper::Ascii8, 131072), Mapper::Auto)
         .unwrap();
-    m.frame();
+    for _ in 0..600 {
+        m.frame();
+        if m.hardware.ram[0xc000] == 0x5a {
+            break;
+        }
+    }
+    assert_eq!(m.hardware.ram[0xc000], 0x5a);
     m.cpu.pc = 0x8123;
     m.hardware.ram[0xc001] = 0x33;
     let before = m.hardware.cartridge.clone();

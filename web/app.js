@@ -13,8 +13,9 @@ let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
 let model = 0;
-let firmware = 'cbios';
-const cbiosName = 'C-BIOS 0.29a · cartridge BIOS (no BASIC)';
+let firmware = 'auto';
+let localName = '';
+function cbiosName() { return `${model ? 'MSX2' : 'MSX1'} C-BIOS 0.29a · cartridge BIOS (no BASIC)`; }
 const diagnosticName = 'Original cartridge loader + diagnostic sub-ROM';
 let mainFile;
 let subFile;
@@ -31,7 +32,7 @@ function status(message, kind = 'info') {
   $('status').dataset.kind = kind;
 }
 function updateControls() {
-  const native = model === 0 && system === 'Weave BASIC' && !cartridge;
+  const native = ready && wasm.msx_firmware() === 0;
   for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware', 'firmware']) $(id).disabled = !ready || loading;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
   $('eject').disabled = !ready || !cartridge;
@@ -39,7 +40,7 @@ function updateControls() {
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
   $('tone').setAttribute('aria-pressed', String(tone));
-  $('starter-help').textContent = native ? 'One click, then make it your own.' : 'Select MSX1 and Built-in BASIC in ROMs & advanced system options to try these.';
+  $('starter-help').textContent = native ? 'One click, then make it your own.' : 'Choose Use Weave BASIC in ROMs & advanced system options to try these on either machine.';
 }
 function updateAudioState() {
   const running = audioEnabled && audioContext?.state === 'running';
@@ -153,7 +154,7 @@ async function enableAudio() {
   return audioContext;
 }
 function command(text) {
-  if (!ready) return;
+  if (!ready || wasm.msx_firmware() !== 0) return;
   if (pendingText.length + text.length > 16384) { status('Paste is too large (maximum 16 KiB).', 'error'); return; }
   resume();
   updateStatus();
@@ -161,8 +162,12 @@ function command(text) {
   screen.focus();
 }
 function updateStatus() {
+  const active = wasm.msx_firmware();
+  firmware = wasm.msx_boot_policy() === 0 ? 'auto' : ['auto', 'cbios', 'diagnostic', 'local'][active];
+  $('firmware').value = firmware;
+  system = ['Weave BASIC', cbiosName(), diagnosticName, `user BIOS · ${localName}`][active];
   updateControls();
-  status(`${paused ? 'Paused' : 'Running'} · ${model ? 'MSX2 · ' : ''}${system}${cartridge ? ` · ${cartridge}` : ''}`);
+  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${cartridge ? ` · ${cartridge}` : ''}`);
 }
 function restart(action) {
   importGeneration++;
@@ -197,7 +202,7 @@ async function load(file, isSystem) {
     // Obtain the buffer only AFTER reservation: memory growth detaches old views.
     new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
     if (!wasm.msx_load(bytes.length, isSystem ? 1 : 0, mapper)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    if (isSystem) system = file.name;
+    if (isSystem) localName = file.name;
     else {
       const selected = wasm.msx_detected_mapper();
       const name = ['Auto', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][selected];
@@ -266,15 +271,13 @@ function clearRomSelections() {
   $('bios').value = ''; $('subrom').value = ''; $('cartridge').value = '';
   updateFirmwareSelection();
 }
-function restoreFirmware(selected = 'cbios') {
+function restoreFirmware(selected = 'auto') {
   if (!ready || loading) return;
-  // Both built-in pairs are already in Wasm; no async fetch can partially switch them.
-  if (model && selected === 'cbios') {
-    if (!wasm.msx_cbios()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  if (selected === 'cbios' || selected === 'diagnostic') {
+    const ok = selected === 'cbios' ? wasm.msx_cbios() : wasm.msx_diagnostic();
+    if (!ok) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
   } else wasm.msx_builtin();
-  firmware = selected;
-  $('firmware').value = selected;
-  system = model ? (selected === 'cbios' ? cbiosName : diagnosticName) : 'Weave BASIC';
+  localName = '';
   clearRomSelections();
   restart(() => {});
 }
@@ -301,12 +304,12 @@ function updateFirmwareSelection() {
 }
 $('model').addEventListener('change', () => {
   model = Number($('model').value);
-  firmware = 'cbios'; $('firmware').value = firmware;
-  system = model ? cbiosName : 'Weave BASIC';
+  firmware = 'auto'; $('firmware').value = firmware;
+  localName = '';
   clearRomSelections();
-  $('msx2-builtins').hidden = !model;
+  $('firmware').querySelector('[value=diagnostic]').disabled = !model;
   $('msx2-firmware').hidden = !model;
-  $('builtin').textContent = model ? 'Restore built-in C-BIOS' : 'Built-in BASIC';
+  $('builtin').textContent = 'Use Weave BASIC';
   updateFirmwareSelection();
   restart(() => wasm.msx_model(model));
 });
@@ -331,7 +334,7 @@ $('apply-firmware').addEventListener('click', async () => {
     const transfer = new Uint8Array(wasm.memory.buffer, pointer >>> 0, 49152);
     transfer.set(new Uint8Array(main)); transfer.set(new Uint8Array(sub), 32768);
     if (!wasm.msx_load(49152, 2, 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    system = `${mainFile.name} + ${subFile.name}`;
+    localName = `${mainFile.name} + ${subFile.name}`;
     firmware = 'local'; $('firmware').value = firmware;
     restart(() => {});
   } catch (error) {

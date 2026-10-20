@@ -61,6 +61,36 @@ pub extern "C" fn msx_cbios() -> u32 {
         }
     })
 }
+/// Active firmware comes from the core, including automatic transitions.
+#[no_mangle]
+pub extern "C" fn msx_firmware() -> u32 {
+    APP.with(|a| match a.borrow().machine.hardware.firmware {
+        msx_core::Firmware::WeaveBasic => 0,
+        msx_core::Firmware::Cbios => 1,
+        msx_core::Firmware::Diagnostic => 2,
+        msx_core::Firmware::User => 3,
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_boot_policy() -> u32 {
+    APP.with(|a| (a.borrow().machine.boot_policy == msx_core::BootPolicy::Explicit) as u32)
+}
+#[no_mangle]
+pub extern "C" fn msx_diagnostic() -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        match a.machine.use_diagnostic() {
+            Ok(()) => {
+                a.error.clear();
+                1
+            }
+            Err(error) => {
+                a.error = error;
+                0
+            }
+        }
+    })
+}
 #[no_mangle]
 pub extern "C" fn msx_eject() {
     APP.with(|a| a.borrow_mut().machine.unload_cartridge());

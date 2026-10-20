@@ -4,7 +4,7 @@ async function boot(page, path = '/') {
   await page.goto(path);
   await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
   await page.locator('#model').selectOption('1');
-  await expect(page.locator('#status')).toContainText('MSX2 · C-BIOS 0.29a');
+  await expect(page.locator('#status')).toContainText('MSX2 · Weave BASIC');
 }
 async function pixel(page, x, y) {
   return page.locator('#screen').evaluate((canvas, [x,y]) => Array.from(canvas.getContext('2d').getImageData(x,y,1,1).data).slice(0,3), [x,y]);
@@ -95,7 +95,7 @@ test('MSX2 firmware imports are atomic, paired, validated and reversible', async
   await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
   await page.locator('#subrom').setInputFiles({name:'short-sub.rom',mimeType:'application/octet-stream',buffer:Buffer.alloc(7)});
   await page.locator('#apply-firmware').click();await expect(page.locator('#status')).toContainText('16 KiB');
-  await page.locator('#builtin').click();await expect(page.locator('#status')).toContainText('C-BIOS 0.29a');
+  await page.locator('#builtin').click();await expect(page.locator('#status')).toContainText('Weave BASIC');
   await expect(page.locator('#eject')).toBeDisabled();
   await expect(page.locator('#bios')).toHaveValue('');await expect(page.locator('#subrom')).toHaveValue('');
   await page.locator('#model').selectOption('0');await expect(page.locator('#transcript')).toContainText('READY');
@@ -139,9 +139,9 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       navigator.sendBeacon = () => { throw new Error('Unexpected beacon'); };
     });
     await boot(page, path);
-    await expect(page.locator('#transcript')).toHaveText('');
+    await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#advanced-panel > summary').click();
-    await expect(page.locator('#firmware')).toHaveValue('cbios');
+    await expect(page.locator('#firmware')).toHaveValue('auto');
     await expect(page.locator('#msx2-builtins')).toContainText('no original MSX BASIC');
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('Auto: Plain');
@@ -186,7 +186,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
     await servicePattern(page);
     await page.locator('#eject').click();
-    await expect(page.locator('#status')).toHaveText('Running · MSX2 · C-BIOS 0.29a · cartridge BIOS (no BASIC)');
+    await expect(page.locator('#status')).toHaveText('Running · MSX2 C-BIOS 0.29a · cartridge BIOS (no BASIC)');
     await expect(page.locator('#transcript')).toHaveText('');
     await page.locator('#model').selectOption('0');
     await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');

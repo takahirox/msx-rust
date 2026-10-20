@@ -34,40 +34,40 @@ installs the toolchain specified by the repository before the build runs.
 
 The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 `dist/`, copies only the web entry files and license notices, then generates the
-six original boot/test ROMs from Rust source. It also copies only the two pinned
+seven original boot/test ROMs from Rust source. It also copies only the three pinned
 C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
-The complete deployable inventory is **16 files**:
+The complete deployable inventory is **18 files**:
 
 - `index.html`, `style.css`, `app.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
 - `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
-- `cbios-test-cartridge.rom`
-- `cbios_main_msx2.rom`, `cbios_sub.rom`
+- `cbios-test-cartridge.rom`, `cbios-msx1-test-cartridge.rom`
+- `cbios_main_msx1.rom`, `cbios_main_msx2.rom`, `cbios_sub.rom`
 - `LICENSE`, `ROM-LICENSE.txt`, `CBIOS-LICENSE.txt`, `CBIOS-PROVENANCE.txt`
 
-The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the
-original MIT-licensed firmware, glyphs and cartridges, and separately BSD-2-Clause
-C-BIOS. No proprietary BIOS/BASIC, games, other third-party ROMs, sources or npm
-packages are shipped. The two unmodified official release binaries are also
-embedded in the core/Wasm, so choosing default MSX2 needs no firmware network
+The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the original
+MIT-licensed firmware, glyphs and cartridges, and separately BSD-2-Clause C-BIOS. No
+proprietary BIOS/BASIC, games, other third-party ROMs, sources or npm packages are
+shipped. The three unmodified official release binaries are also embedded in the
+core/Wasm, so automatic cartridge boot in either model needs no firmware network
 request or SourceForge access. All assets can be served locally without external
 network access; browser tests never download firmware at runtime.
 
 [CBIOS-PROVENANCE.txt](../firmware/cbios/CBIOS-PROVENANCE.txt) records the original
-SourceForge release/archive URLs, version 0.29a, archive size and SHA-256, both ROM
-sizes/hashes and exact slot mapping. [CBIOS-LICENSE.txt](../firmware/cbios/CBIOS-LICENSE.txt)
-reproduces the complete License section from that release's `doc/cbios.txt`, with
-all copyright holders, both redistribution conditions and disclaimer. Its binary
-redistribution condition requires these notices in accompanying materials;
-retain both records with the site and Wasm/ROM redistributions. C-BIOS remains
-separate from the repository's MIT license. No logo, BASIC, music or disk ROM is
-needed or distributed. The app links the notices and downloadable independent
-service-test cartridge under advanced options.
-`scripts/check-dist.mjs` rejects missing, empty or unexpected output files and
-checks Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes,
-unchanged license/provenance records and relative HTML links. Only `dist/` is
-uploaded by the Pages workflow.
+SourceForge release/archive URLs, version 0.29a, archive size and SHA-256, all three
+ROM sizes/hashes and exact slot mapping.
+[CBIOS-LICENSE.txt](../firmware/cbios/CBIOS-LICENSE.txt) reproduces the complete
+License section from that release's `doc/cbios.txt`, with all copyright holders, both
+redistribution conditions and disclaimer. Its binary redistribution condition requires
+these notices in accompanying materials; retain both records with the site and
+Wasm/ROM redistributions. C-BIOS remains separate from the repository's MIT license.
+No logo, BASIC, music or disk ROM is needed or distributed. The app links the notices
+and downloadable independent service-test cartridge under advanced options.
+`scripts/check-dist.mjs` rejects missing, empty or unexpected output files and checks
+Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes, unchanged
+license/provenance records and relative HTML links. Only `dist/` is uploaded by the
+Pages workflow.
 
 All module, stylesheet and Wasm URLs are relative; there is no client-side router.
 Browser tests start two isolated Python static servers: the ordinary local site

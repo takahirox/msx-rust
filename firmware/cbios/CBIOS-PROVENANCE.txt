@@ -5,7 +5,9 @@ Archive: https://downloads.sourceforge.net/project/cbios/cbios/0.29/cbios-0.29a.
 Archive filename: cbios-0.29a.zip (2018-09-23), 269374 bytes
 Archive SHA-256: c585a2f4a10b397e460a95043d59ac79cf4442fbb45a6e14a1e27ef9febaed73
 
-Only these two ROMs are copied from cbios-0.29a/roms/:
+Only these three ROMs are copied from cbios-0.29a/roms/:
+cbios_main_msx1.rom — 32768 bytes, international keyboard, 60 Hz MSX1
+SHA-256: 921d35edf143f1fde8e53570f92f85e05854610d6a5ea76cce881f2f9040cd9c
 cbios_main_msx2.rom — 32768 bytes, international keyboard, 60 Hz MSX2
 SHA-256: 8767fca1a1ca5928496bb6185a0e951c66d68f65361305134a25f7912085766b
 cbios_sub.rom — 16384 bytes, MSX2 sub-ROM
@@ -20,7 +22,9 @@ Binary redistributions must retain CBIOS-LICENSE.txt in their documentation or
 other accompanying materials. Our static build includes it, this record and
 ROM-LICENSE.txt, with links from the app. No upstream code was modified.
 
-The Rust core embeds exactly this pair (also inside the Wasm binary). Main ROM:
+The Rust core embeds these three binaries (also inside the Wasm binary), selecting
+the main ROM for the active model. MSX1 has unexpanded slot 3 RAM and no sub-ROM.
+The MSX2 pair retains its layout. Main ROM:
 unexpanded primary slot 0, 0000h–7FFFh. Sub-ROM: expanded slot 3-0, 0000h–3FFFh.
 Slot 1 holds cartridges; slot 3-3 holds fixed 64 KiB RAM. No logo, BASIC, disk,
 MSX-MUSIC, vendor extension, regional variant or proprietary firmware is bundled.
@@ -32,7 +36,14 @@ original MSX BASIC, and compatibility remains limited.
 
 Builds and tests use only checked-in bytes; no runtime or test-time SourceForge
 access is needed. The standalone ROM files and notices are copied to dist/ for
-inventory, download and attribution; the browser boots the embedded Wasm pair
-without extra firmware fetches. User firmware is never incorporated into builds,
+inventory, download and attribution; the browser boots the embedded Wasm firmware
+without extra firmware fetches. Both models start Weave BASIC without a cartridge;
+automatic cartridge imports select the corresponding C-BIOS before Z80 reset.
+User firmware is never incorporated into builds,
 uploaded, logged or persisted. No commercial game is a fixture or compatibility
 claim. See README.md, docs/msx2.md and docs/deployment.md in the source repository.
+
+Issue #19 verification (2026-10-20): downloaded the official archive above;
+archive size/hash and all three ROMs match exactly. Compared the complete License
+section in doc/cbios.txt with CBIOS-LICENSE.txt; the existing notices apply to the
+MSX1 ROM as well. The MSX1 binary is unmodified.

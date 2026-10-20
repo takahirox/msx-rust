@@ -1,21 +1,20 @@
 # MSX2 firmware and machine profile
 
-MSX2 uses the same Rust machine/CPU/VDP engine as MSX1 (Issue
-[#11](https://github.com/takahirox/msx-rust/issues/11)). Issue
-[#15](https://github.com/takahirox/msx-rust/issues/15) makes **C-BIOS 0.29a** the
-default firmware when selecting **Machine → MSX2**. Use **Open ROM** to boot a
-supported cartridge without providing firmware. C-BIOS is an open-source,
-cartridge-oriented replacement BIOS with **no original MSX BASIC** and limited
-compatibility; importing a cartridge or inferring its mapper does not prove boot.
-Changing models clears incompatible ROM selections and resets the machine.
-Reset keeps the active model, firmware pair and cartridge, and restores mapper
-banks. MSX1 and its original Weave BASIC service remain available.
+MSX2 uses the same Rust CPU/VDP engine and independently authored Weave BASIC
+interpreter as MSX1. Issue [#19](https://github.com/takahirox/msx-rust/issues/19)
+makes both models start in automatic Weave BASIC with no cartridge. Opening a
+supported cartridge switches to the model's C-BIOS before Z80 initialization;
+Eject returns to fresh BASIC in the same model. Reset retains the cartridge,
+mapper and active firmware policy. Switching models clears all ROM selections
+and restores automatic BASIC. Switching firmware discards the in-memory program.
+C-BIOS is a separate cartridge BIOS, with no original Microsoft MSX BASIC.
 
 ## Built-in firmware and provenance
 
 The bundled international/60 Hz pair is copied unchanged from the official
 [C-BIOS 0.29a release](https://sourceforge.net/projects/cbios/files/cbios/0.29/).
-Only `cbios_main_msx2.rom` (32 KiB) and `cbios_sub.rom` (16 KiB) are included.
+`cbios_main_msx2.rom` (32 KiB) and `cbios_sub.rom` (16 KiB) form the MSX2 pair.
+The same release supplies `cbios_main_msx1.rom` (32 KiB) for MSX1 cartridges.
 No logo/extension ROM is needed for this profile's slot initialization, no-cartridge
 message or verified cartridge boot. No original Microsoft/ASCII ROM, C-BIOS BASIC,
 disk or music ROM, or copyrighted game is distributed.
@@ -31,18 +30,50 @@ Both notices ship with the standalone ROM files and the Wasm binary in `dist/`;
 [the inventory](../firmware/ROM-LICENSE.txt) identifies each asset. Builds, Rust tests
 and browser tests use checked-in bytes and need no SourceForge connection.
 
-The core embeds the pair directly into Wasm. Selecting MSX2 starts at Z80 reset
+The core embeds the firmware directly into Wasm. Automatic MSX2 cartridge boot starts at Z80 reset
 with secondary selector 00h; C-BIOS discovers expanded slots, RAM and AB cartridge
 headers itself. The normal browser path loads only local static app assets, with
 no extra firmware fetch. There are no browser BIOS substitutes or native BIOS
 traps. The Weave BASIC private service ports are disabled with C-BIOS.
 
-Under **ROMs & advanced system options → MSX2 firmware**, choose C-BIOS or
-**Original diagnostic loader**. Choosing either clears the cartridge and staged
-local files, resets banks/input/audio, and boots that firmware. **Restore built-in
-C-BIOS** selects the default and clears local firmware. **Reset** retains firmware
-and cartridge; **Eject** keeps firmware but removes the cartridge. Changing models
-clears both and restores that model's default (Weave BASIC for MSX1).
+Under **ROMs & advanced system options → Firmware policy**, explicitly selecting
+C-BIOS, **Original diagnostic loader** or local firmware overrides automatic
+switching. An override survives cartridge Open ROM, Reset and Eject. Selecting
+a bundled override clears cartridge and staged local files. **Use Weave BASIC**
+clears the override, ejects cartridges, and restores automatic behavior.
+
+## Weave BASIC on MSX2
+
+The same original interpreter, editor, cooperative execution, arrays, DATA,
+GOSUB/RETURN, INPUT, SCREEN 0–3, graphics and PSG commands work on both models.
+The private F0h/F1h services run only with active Weave BASIC, never with C-BIOS,
+the diagnostic loader or local firmware. MSX2 BASIC maps expanded slot 3-3 RAM
+before Z80 boot and initializes V9938 mode/scroll/sprite state for its display.
+
+| SCREEN | Drawing coordinates | Colors |
+| --- | --- | --- |
+| 5 | x=0–255, y=0–211 | 0–15, V9938 power-on palette |
+| 6 | x=0–511, y=0–211 | 0–3, first four palette entries |
+| 7 | x=0–511, y=0–211 | 0–15, V9938 power-on palette |
+| 8 | x=0–255, y=0–211 | 0–255, packed GRB (GGGRRRBB) |
+
+PSET, LINE (including B/BF/STEP), CIRCLE and PAINT use packed bitmap VRAM and
+clip outside these coordinates. COLOR sets default foreground and backdrop;
+CLS clears bitmap VRAM to opaque zero. SCREEN initializes page zero, 212 lines,
+no interlace, power-on palette and no sprites. Enter/Escape restores SCREEN 0.
+The [README language guide](../README.md#weave-basic-and-firmware) defines the
+shared semantics and bounds. SCREEN 4, bitmap PRINT/INPUT, screen variants,
+interlace/pages and disk support are not implemented in the BASIC language;
+this is not Microsoft MSX BASIC 2.0 compatibility.
+
+```basic
+10 SCREEN 7
+20 LINE (8,8)-(503,203),15,B
+30 CIRCLE (256,106),60,15
+40 PAINT (256,106),10,15
+50 END
+RUN
+```
 
 Download the **original C-BIOS service-test cartridge** from advanced options and
 open it through **Open ROM**. It displays `C-BIOS SERVICE TEST` through CHPUT, draws
@@ -77,7 +108,7 @@ browser only transfers the Rust framebuffer to Canvas.
 The optional **Original diagnostic loader** is the previous minimal AB loader and
 diagnostic sub-ROM, with no BASIC prompt or standard BIOS services. With no
 cartridge it waits on a blue backdrop. It is retained for isolated hardware tests.
-All six generated ROMs are independently authored and MIT licensed; C-BIOS is
+All seven generated ROMs are independently authored and MIT licensed; C-BIOS is
 separately licensed as described above.
 
 ![Original diagnostic in SCREEN 7](msx2-evidence/screen7.png)
@@ -194,12 +225,57 @@ The separate diagnostic retains SCREEN 7/8, 212-line, sprite, command and 256-co
 checks. Screenshots are saved as `test-results/cbios-services-root.png` and
 `cbios-services-pages.png`, alongside the existing MSX2 diagnostic evidence.
 
+`tests/boot_policy.rs` covers both models' automatic transitions, standard BIOS
+services and input/video/audio, explicit overrides, invalid-import preservation,
+MSX2 BASIC INPUT/arrays/DATA/subroutines/cooperative execution, joystick/PSG, and
+SCREEN 5–8 packed drawing. `tests/allocation.rs` forces a real cartridge allocation
+failure and denies allocation throughout firmware/cartridge/reset commits to
+verify that reserved buffers suffice. Both main-ROM generations are checked.
+
+`tests/boot-policy.spec.js` runs both models at both site roots through the real
+Wasm application and Open ROM file picker. It checks BASIC program execution,
+INPUT, invalid-load program preservation, visible SCREEN 0–3 and MSX2 SCREEN 5–8,
+standard C-BIOS service pixels and keyboard input, Reset/Eject and explicit/local
+firmware precedence. A deferred local pair and concurrent ROM import cannot undo
+Eject. The browser regression suite also forces transfer-allocation/file-read
+failures during BASIC, local firmware import and cartridge execution. Screenshots
+are emitted as `test-results/basic-msx{1,2}-screen{mode}-{root,pages}.png`.
+
 The older `check_bios` example remains available for optional lawfully obtained
 local firmware testing; it is not needed by any automated gate:
 
 ```sh
 cargo run --locked --release --example check_bios -- /local/main.rom /local/sub.rom
 ```
+
+### Issue #19 validation
+
+Validated locally on 2026-10-20, macOS arm64, pinned Rust 1.99.0, Node.js
+24.12.0, Playwright 1.64.1 / Chromium:
+
+| Check | Observed result |
+| --- | --- |
+| Official C-BIOS 0.29a archive | Archive size/hash and all three ROM bytes/hashes verified; complete upstream License section matches the retained notice exactly |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 82 tests passed, including both C-BIOS boot paths, BASIC bitmap/input/audio tests and forced allocation failure |
+| `./scripts/build.sh` | Passed with the already documented macOS PATH/linker wrapper below; no toolchain or system changes |
+| `node scripts/check-dist.mjs` | Exact 18-file inventory, all three C-BIOS hashes, notices, headers, relative links and import-free Wasm passed |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| `npm test` | 43 tests passed in 3.9 minutes, including both models at root and project paths, allocation failures and deferred/concurrent imports |
+| `npm test -- tests/boot-policy.spec.js` | Final five focused tests passed in 59.8 seconds after strengthening failed-load program execution assertions and capturing clean screenshots |
+| `git diff --check`; local documentation links | Passed |
+
+The full browser run preserves the original MSX1/MSX2 CPU, mapper, graphics,
+PSG, privacy, responsive UI and deployment regressions. The focused boot-policy
+suite also produces the BASIC mode screenshots below. Tests execute only original,
+redistributable fixtures and bundled C-BIOS; no proprietary ROM or human gameplay
+was used. The first local build selected Homebrew Rust 1.94 instead of the pinned
+compiler; selecting the documented rustup PATH and linker wrapper resolved the
+existing host setup issue. Required live Pages verification remains pending.
+
+![Weave BASIC INPUT and visible program output on MSX2](msx2-evidence/weave-basic.png)
+![Weave BASIC SCREEN 8 drawing on MSX2](msx2-evidence/weave-screen8.png)
 
 ### Issue #15 validation
 
@@ -240,11 +316,10 @@ No third-party emulator implementation or specification example program was copi
 
 ## Required post-merge verification — pending
 
-After merge, verify the actual GitHub Pages deployment at
-<https://takahirox.github.io/msx-rust/>. Record its deployment run/commit and observed
-URL, confirm relative Wasm/static firmware asset loads and license links, select
-MSX2 with default C-BIOS and boot the independent service-test cartridge through
-the browser file input. Verify its pixels, Space/input/audio and absence of client
-errors; record the deployment run and results. Local tests cannot establish that publication succeeded. No push, PR, merge,
-comment or production verification is performed by this implementation node;
-report live failures through new Issues.
+After merge, verify <https://takahirox.github.io/msx-rust/>. Record deployment
+run, merged commit, live URL and observed outcome. In both models, start Weave
+BASIC, run an original program with visible output, import the redistributable
+service-test cartridge through Open ROM, verify C-BIOS execution, then Eject to
+a usable BASIC prompt. Confirm deployed Wasm/assets and notices load without
+errors. Local checks cannot prove publication. This remains pending; this node
+does not push, open PRs, merge, comment or perform post-merge verification.

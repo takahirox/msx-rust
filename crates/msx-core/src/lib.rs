@@ -16,6 +16,21 @@ pub enum Model {
     Msx1,
     Msx2,
 }
+/// Automatic transitions apply only until an explicit firmware selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BootPolicy {
+    #[default]
+    Automatic,
+    Explicit,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Firmware {
+    #[default]
+    WeaveBasic,
+    Cbios,
+    Diagnostic,
+    User,
+}
 use basic::Basic;
 use cpu::{Bus, Cpu};
 use psg::Psg;
@@ -38,7 +53,7 @@ pub struct Hardware {
     pub joystick: u8,
     pub vdp: Vdp,
     pub psg: Psg,
-    pub builtin: bool,
+    pub firmware: Firmware,
     keys: VecDeque<u8>,
     services: VecDeque<u8>,
 }
@@ -46,7 +61,9 @@ impl Default for Hardware {
     fn default() -> Self {
         Self {
             model: Model::Msx1,
-            subrom: Vec::new(),
+            // Reserve firmware capacity once: all later firmware switches and
+            // cartridge commits reuse buffers and cannot fail allocation.
+            subrom: Vec::with_capacity(16384),
             secondary: [0; 4],
             rtc: rtc::Rtc::default(),
             ram: vec![0; 65536],
@@ -60,7 +77,7 @@ impl Default for Hardware {
             joystick: 0x3f,
             vdp: Vdp::default(),
             psg: Psg::default(),
-            builtin: true,
+            firmware: Firmware::WeaveBasic,
             keys: VecDeque::new(),
             services: VecDeque::new(),
         }
@@ -74,7 +91,9 @@ impl Hardware {
         self.mapping = Mapping::new(self.mapping.kind);
         self.slots = 0xf0;
         self.secondary = [0; 4];
-        if self.model == Model::Msx2 && self.builtin {
+        if self.model == Model::Msx2
+            && matches!(self.firmware, Firmware::WeaveBasic | Firmware::Diagnostic)
+        {
             self.secondary[3] = 0xff;
         }
         self.rtc.selected = 0;
@@ -86,7 +105,7 @@ impl Hardware {
         self.keys.clear();
         self.services.clear();
         // A real BIOS probes slots itself. Our firmware boots AB cartridges in their initial banks.
-        if self.builtin && !self.cartridge.is_empty() {
+        if self.firmware == Firmware::Diagnostic && !self.cartridge.is_empty() {
             self.slots = 0xd4;
         }
     }
@@ -165,7 +184,7 @@ impl Bus for Hardware {
                 .unwrap_or(255),
             0xaa => self.ppi_c,
             0xab => self.ppi_control,
-            0xf0 if self.builtin && self.model == Model::Msx1 => self.keys.pop_front().unwrap_or(0),
+            0xf0 if self.firmware == Firmware::WeaveBasic => self.keys.pop_front().unwrap_or(0),
             _ => 255,
         }
     }
@@ -193,7 +212,7 @@ impl Bus for Hardware {
                     }
                 }
             }
-            0xf1 if self.builtin && self.model == Model::Msx1 => self.services.push_back(value),
+            0xf1 if self.firmware == Firmware::WeaveBasic => self.services.push_back(value),
             _ => {}
         }
     }
@@ -205,6 +224,10 @@ pub struct Machine {
     pub cpu: Cpu,
     pub hardware: Hardware,
     pub basic: Basic,
+    pub boot_policy: BootPolicy,
+    // Original diagnostic images, prepared before any running state exists.
+    diagnostic_main: Vec<u8>,
+    diagnostic_sub: Vec<u8>,
     frame_debt: i32,
 }
 impl Default for Machine {
@@ -213,6 +236,9 @@ impl Default for Machine {
             cpu: Cpu::new(),
             hardware: Hardware::default(),
             basic: Basic::default(),
+            boot_policy: BootPolicy::Automatic,
+            diagnostic_main: firmware::msx2_bios(),
+            diagnostic_sub: firmware::msx2_subrom(),
             frame_debt: 0,
         }
     }
@@ -223,25 +249,56 @@ impl Machine {
         self.hardware.model = model;
         self.hardware.vdp = Vdp::new(model == Model::Msx2);
         self.hardware.rtc = rtc::Rtc::default();
-        if model == Model::Msx2 {
-            self.use_cbios().expect("MSX2 profile selected");
-        } else {
-            self.use_builtin();
-        }
+        self.use_builtin();
     }
-    /// Restore the bundled cartridge BIOS, releasing local firmware and cartridges.
-    /// C-BIOS executes entirely as Z80 code and enables no native BASIC services.
+    /// Restore an explicit bundled cartridge BIOS selection, releasing cartridges.
     pub fn use_cbios(&mut self) -> Result<(), String> {
-        if self.hardware.model != Model::Msx2 {
-            return Err("Select MSX2 before selecting C-BIOS.".into());
-        }
-        self.hardware.bios = firmware::CBIOS_MSX2_MAIN.to_vec();
-        self.hardware.subrom = firmware::CBIOS_MSX2_SUB.to_vec();
-        self.hardware.builtin = false;
-        self.hardware.cartridge = Vec::new();
+        self.install_firmware(Firmware::Cbios);
+        self.boot_policy = BootPolicy::Explicit;
+        self.hardware.cartridge.clear();
         self.hardware.mapping = Mapping::default();
         self.reset();
         Ok(())
+    }
+    /// Retain the original MSX2 diagnostic loader as an explicit override.
+    pub fn use_diagnostic(&mut self) -> Result<(), String> {
+        if self.hardware.model != Model::Msx2 {
+            return Err("Select MSX2 before selecting its diagnostic loader.".into());
+        }
+        self.install_firmware(Firmware::Diagnostic);
+        self.boot_policy = BootPolicy::Explicit;
+        self.hardware.cartridge.clear();
+        self.hardware.mapping = Mapping::default();
+        self.reset();
+        Ok(())
+    }
+    // BIOS is always 32 KiB; sub-ROM capacity is retained even on MSX1. No
+    // allocation occurs here, so an already validated cartridge commits atomically.
+    fn install_firmware(&mut self, firmware: Firmware) {
+        let h = &mut self.hardware;
+        h.subrom.clear();
+        match firmware {
+            Firmware::WeaveBasic => firmware::write_bios(&mut h.bios),
+            Firmware::Cbios => {
+                h.bios.copy_from_slice(if h.model == Model::Msx2 {
+                    firmware::CBIOS_MSX2_MAIN
+                } else {
+                    firmware::CBIOS_MSX1_MAIN
+                });
+                if h.model == Model::Msx2 {
+                    h.subrom.extend_from_slice(firmware::CBIOS_MSX2_SUB);
+                }
+            }
+            Firmware::Diagnostic => {
+                h.bios.copy_from_slice(&self.diagnostic_main);
+                h.subrom.extend_from_slice(&self.diagnostic_sub);
+            }
+            Firmware::User => unreachable!("local firmware uses validated buffers"),
+        }
+        if h.model == Model::Msx2 && firmware == Firmware::WeaveBasic {
+            h.bios[0x2d] = 1;
+        }
+        h.firmware = firmware;
     }
     /// Install a complete MSX2 firmware set atomically. No component is committed
     /// to the running machine until both lengths have been validated.
@@ -257,9 +314,11 @@ impl Machine {
         if main[0x2d] != 1 || &sub[..2] != b"CD" {
             return Err("Expected an MSX2 main ROM (generation byte 002Dh = 1) and a CD-header MSX2 sub-ROM. Select a matching firmware pair.".into());
         }
-        self.hardware.bios = main.to_vec();
-        self.hardware.subrom = sub.to_vec();
-        self.hardware.builtin = false;
+        self.hardware.bios.copy_from_slice(main);
+        self.hardware.subrom.clear();
+        self.hardware.subrom.extend_from_slice(sub);
+        self.hardware.firmware = Firmware::User;
+        self.boot_policy = BootPolicy::Explicit;
         self.reset();
         Ok(())
     }
@@ -286,12 +345,18 @@ impl Machine {
     /// Validation finishes before the running machine is changed.
     pub fn load_cartridge_owned(&mut self, rom: Vec<u8>, mapper: Mapper) -> Result<(), String> {
         let mapping = Mapping::validate(&rom, mapper)?;
+        if self.boot_policy == BootPolicy::Automatic {
+            self.install_firmware(Firmware::Cbios);
+        }
         self.hardware.cartridge = rom;
         self.hardware.mapping = mapping;
         self.reset();
         Ok(())
     }
     pub fn unload_cartridge(&mut self) {
+        if self.boot_policy == BootPolicy::Automatic {
+            self.install_firmware(Firmware::WeaveBasic);
+        }
         self.hardware.cartridge = Vec::new();
         self.hardware.mapping = Mapping::default();
         self.reset();
@@ -303,33 +368,25 @@ impl Machine {
         if rom.len() != 32768 {
             return Err("Select a 32 KiB MSX1 BIOS/BASIC system ROM.".into());
         }
-        self.hardware.bios = rom.to_vec();
-        self.hardware.builtin = false;
+        if rom[0x2d] != 0 {
+            return Err("Select an MSX1 system ROM (generation byte 002Dh = 0).".into());
+        }
+        self.hardware.bios.copy_from_slice(rom);
+        self.hardware.firmware = Firmware::User;
+        self.boot_policy = BootPolicy::Explicit;
         self.reset();
         Ok(())
     }
-    /// Restore Weave BASIC (MSX1) or the original diagnostic loader (MSX2).
+    /// Clear the override and cartridge, returning to automatic Weave BASIC.
     pub fn use_builtin(&mut self) {
-        self.hardware.bios = if self.hardware.model == Model::Msx2 {
-            firmware::msx2_bios()
-        } else {
-            firmware::bios()
-        };
-        self.hardware.subrom = if self.hardware.model == Model::Msx2 {
-            firmware::msx2_subrom()
-        } else {
-            Vec::new()
-        };
-        self.hardware.builtin = true;
-        self.hardware.cartridge = Vec::new();
+        self.install_firmware(Firmware::WeaveBasic);
+        self.boot_policy = BootPolicy::Automatic;
+        self.hardware.cartridge.clear();
         self.hardware.mapping = Mapping::default();
         self.reset();
     }
     pub fn text_key(&mut self, key: u8) {
-        if self.hardware.builtin
-            && self.hardware.model == Model::Msx1
-            && self.hardware.keys.len() < 256
-        {
+        if self.hardware.firmware == Firmware::WeaveBasic && self.hardware.keys.len() < 256 {
             self.hardware.keys.push_back(key);
         }
     }
@@ -357,7 +414,7 @@ impl Machine {
             let c = self.step();
             self.frame_debt -= c as i32;
         }
-        if self.hardware.builtin && self.hardware.model == Model::Msx1 {
+        if self.hardware.firmware == Firmware::WeaveBasic {
             self.basic
                 .pump(&mut self.hardware.vdp, &mut self.hardware.psg, 200);
         }

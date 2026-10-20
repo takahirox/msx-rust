@@ -3,7 +3,13 @@
 use crate::font;
 pub fn bios() -> Vec<u8> {
     let mut rom = vec![0xff; 32768];
+    write_bios(&mut rom);
+    rom
+}
+pub(crate) fn write_bios(rom: &mut [u8]) {
+    rom.fill(0xff);
     rom[..3].copy_from_slice(&[0xc3, 0x00, 0x01]); // JP 0100h
+    rom[0x2d] = 0; // MSX1 generation (MSX2 profile sets this to 1).
     rom[0x38..0x3a].copy_from_slice(&[0xed, 0x4d]);
     rom[0x66..0x68].copy_from_slice(&[0xed, 0x45]);
     let boot = [
@@ -18,7 +24,6 @@ pub fn bios() -> Vec<u8> {
         0xf7, // poll at 013Bh
     ];
     rom[0x100..0x100 + boot.len()].copy_from_slice(&boot);
-    rom
 }
 /// A self-contained plain 16 KiB cartridge. Only standard VDP/PPI/PSG ports are used.
 /// Shows text and a sprite; holds a 440 Hz tone while Space is pressed.
@@ -326,6 +331,8 @@ pub fn msx2_cartridge() -> Vec<u8> {
 }
 /// Unmodified international/60 Hz C-BIOS 0.29a binaries. BSD-2-Clause;
 /// provenance and complete notices are in firmware/cbios/, separate from MIT.
+pub const CBIOS_MSX1_MAIN: &[u8; 32768] =
+    include_bytes!("../../../firmware/cbios/cbios_main_msx1.rom");
 pub const CBIOS_MSX2_MAIN: &[u8; 32768] =
     include_bytes!("../../../firmware/cbios/cbios_main_msx2.rom");
 pub const CBIOS_MSX2_SUB: &[u8; 16384] = include_bytes!("../../../firmware/cbios/cbios_sub.rom");
@@ -336,26 +343,39 @@ pub const CBIOS_MSX2_SUB: &[u8; 16384] = include_bytes!("../../../firmware/cbios
 /// SCREEN 1 has an original striped tile at (0,16). Space changes (8,16) from
 /// black to white and plays a tone. C200h-C202h hold the slot/input/pass results.
 pub fn cbios_test_cartridge() -> Vec<u8> {
+    cbios_service_cartridge(true)
+}
+pub fn cbios_msx1_test_cartridge() -> Vec<u8> {
+    cbios_service_cartridge(false)
+}
+fn cbios_service_cartridge(msx2: bool) -> Vec<u8> {
     let mut rom = vec![0; 16384];
     rom[..4].copy_from_slice(&[b'A', b'B', 0x10, 0x40]);
     let mut code = vec![0xf3, 0x31, 0x00, 0xf0]; // DI; LD SP,F000h
     let fail = [0xc2, 0x00, 0x43]; // JP NZ,4300h
 
-    // C-BIOS must have discovered expanded slot 3 before calling AB init.
-    code.extend_from_slice(&[0x3a, 0xc4, 0xfc, 0xe6, 0x80, 0xfe, 0x80]);
-    code.extend_from_slice(&fail);
-    // Read the expanded sub-ROM, try a protected write, then read it again.
-    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
-    code.extend_from_slice(&fail);
-    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0x1e, 0x00, 0xcd, 0x14, 0x00]);
-    code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
-    code.extend_from_slice(&fail);
-    // Write/read expanded RAM in slot 3-3, while main BIOS stays in page zero.
-    code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0x1e, 0x5a, 0xcd, 0x14, 0x00]);
-    code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0xcd, 0x0c, 0x00, 0xfe, 0x5a]);
-    code.extend_from_slice(&fail);
-    // EXTROM INIPLT, then CHGMOD SCREEN 1 (also calls the sub-ROM).
-    code.extend_from_slice(&[0xdd, 0x21, 0x41, 0x01, 0xcd, 0x5f, 0x01]);
+    if msx2 {
+        // C-BIOS must have discovered expanded slot 3 before calling AB init.
+        code.extend_from_slice(&[0x3a, 0xc4, 0xfc, 0xe6, 0x80, 0xfe, 0x80]);
+        code.extend_from_slice(&fail);
+        // Read the expanded sub-ROM, try a protected write, then read it again.
+        code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
+        code.extend_from_slice(&fail);
+        code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0x1e, 0x00, 0xcd, 0x14, 0x00]);
+        code.extend_from_slice(&[0x3e, 0x83, 0x21, 0x00, 0x00, 0xcd, 0x0c, 0x00, 0xfe, b'C']);
+        code.extend_from_slice(&fail);
+        // Write/read expanded RAM in slot 3-3, while main BIOS stays in page zero.
+        code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0x1e, 0x5a, 0xcd, 0x14, 0x00]);
+        code.extend_from_slice(&[0x3e, 0x8f, 0x21, 0x00, 0xc2, 0xcd, 0x0c, 0x00, 0xfe, 0x5a]);
+        code.extend_from_slice(&fail);
+        // EXTROM INIPLT (MSX2 only).
+        code.extend_from_slice(&[0xdd, 0x21, 0x41, 0x01, 0xcd, 0x5f, 0x01]);
+    } else {
+        // Unexpanded MSX1 RAM via standard WRSLT/RDSLT.
+        code.extend_from_slice(&[0x3e, 3, 0x21, 0x00, 0xc2, 0x1e, 0x5a, 0xcd, 0x14, 0]);
+        code.extend_from_slice(&[0x3e, 3, 0x21, 0x00, 0xc2, 0xcd, 0x0c, 0, 0xfe, 0x5a]);
+        code.extend_from_slice(&fail);
+    }
     code.extend_from_slice(&[0x3e, 1, 0xcd, 0x5f, 0, 0x3e, 12, 0xcd, 0xa2, 0]);
     for ch in b"C-BIOS SERVICE TEST" {
         code.extend_from_slice(&[0x3e, *ch, 0xcd, 0xa2, 0]);
