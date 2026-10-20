@@ -251,6 +251,28 @@ impl<'a> Parser<'a> {
             Err("OUT OF RANGE".into())
         }
     }
+    fn starts_point(&self) -> bool {
+        if !self.is("(") {
+            return self.is("STEP");
+        }
+        // A comma inside the outer parentheses distinguishes (x,y) from
+        // a parenthesized x expression in the legacy PSET x,y form.
+        let mut depth = 0;
+        for token in &self.tokens[self.p..] {
+            match token {
+                Token::Op(op) if op == "(" => depth += 1,
+                Token::Op(op) if op == ")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+                Token::Op(op) if op == "," && depth == 1 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
     fn point(&mut self, origin: (i32, i32)) -> Result<(i32, i32), String> {
         let relative = self.take("STEP");
         self.expect("(")?;
@@ -1084,7 +1106,7 @@ impl Basic {
                 let origin = self.point;
                 let start = if command == "LINE" && p.is("-") {
                     origin
-                } else if command == "PSET" && !p.is("(") && !p.is("STEP") {
+                } else if command == "PSET" && !p.starts_point() {
                     let x = p.coordinate()?;
                     p.expect(",")?;
                     (x, p.coordinate()?)

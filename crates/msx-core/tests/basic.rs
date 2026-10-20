@@ -337,6 +337,32 @@ fn pixel(v: &Vdp, x: usize, y: usize) -> &[u8] {
     &v.pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 3]
 }
 #[test]
+fn pset_distinguishes_parenthesized_expressions_from_coordinate_pairs() {
+    for mode in [2, 3] {
+        for coordinates in [
+            "(10+1),20",
+            "((10+1)),(10*2)",
+            "(5)*2+1,20",
+            "(A(1,2)),20",
+            "(11,20)",
+            "((10+1),(10*2))",
+            "(A(1,2),20)",
+            "STEP(11,20)",
+        ] {
+            let (mut b, mut v, mut p) = fixture();
+            run(
+                &mut b,
+                &mut v,
+                &mut p,
+                &format!("DIM A(1,2):A(1,2)=11:SCREEN {mode}:PSET {coordinates},10"),
+            );
+            assert!(!b.console.transcript.contains('?'), "{coordinates}");
+            v.render();
+            assert_eq!(pixel(&v, 11, 20), PALETTE[10], "{mode}: {coordinates}");
+        }
+    }
+}
+#[test]
 fn original_shapes_draw_and_fill_real_vram_with_clipping() {
     let (mut b, mut v, mut p) = fixture();
     program(&mut b, include_str!("../../../examples/basic/shapes.bas"));
