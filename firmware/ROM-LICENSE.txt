@@ -2,6 +2,12 @@ msx-rust firmware and asset inventory
 Copyright (c) 2026 msx-rust contributors. MIT license (see LICENSE).
 The original assets below are MIT licensed. The separately listed C-BIOS ROMs
 are BSD-2-Clause, not MIT; retain their complete accompanying notices.
+The separately curated game ROMs in demos/ retain their own upstream licenses:
+see demos/manifest.json and demos/PROVENANCE.txt for exact versions, hashes,
+binary/asset redistribution audits and required license materials.
+plustakermsx.rom and yokosht.rom are unmodified official MIT-licensed binaries
+by m@3 (mazone-ma3), not original emulator assets. Their MIT notices and z88dk
+runtime license ship in dist/demos/ and are linked from Demo ROMs.
 
 cbios_main_msx1.rom, cbios_main_msx2.rom, cbios_sub.rom: unmodified official C-BIOS 0.29a,
 embedded in the core/Wasm and also distributed as standalone ROM files.
@@ -43,8 +49,10 @@ Font: original 5x7 glyph drawings in crates/msx-core/src/font.rs, emitted into
 VRAM and the test cartridge. MIT licensed; no BIOS or external font was copied.
 
 Web UI: original HTML, CSS and JavaScript, using browser-provided system fonts.
-No images, audio recordings, third-party runtime libraries or proprietary ROMs
-are included. Sound is synthesized by the original PSG implementation.
+No external images, audio recordings, browser runtime libraries or proprietary
+ROMs are included. The curated cartridges contain their separately licensed
+game data and Z80 runtime routines. Sound is synthesized by the original PSG
+implementation.
 
 Source: https://github.com/takahirox/msx-rust
 Build: cargo run -p msx-core --example assets -- OUTPUT_DIRECTORY

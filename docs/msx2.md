@@ -5,8 +5,8 @@ interpreter as MSX1. Issue [#19](https://github.com/takahirox/msx-rust/issues/19
 makes both models start in automatic Weave BASIC with no cartridge. Opening a
 supported cartridge switches to the model's C-BIOS before Z80 initialization;
 Eject returns to fresh BASIC in the same model. Reset retains the cartridge,
-mapper and active firmware policy. Switching models clears all ROM selections
-and restores automatic BASIC. Switching firmware discards the in-memory program.
+mapper and active firmware policy. Selecting a machine manually clears all ROM
+selections and restores automatic BASIC. Switching firmware discards the in-memory program.
 C-BIOS is a separate cartridge BIOS, with no original Microsoft MSX BASIC.
 
 ## Built-in firmware and provenance
@@ -17,7 +17,9 @@ The bundled international/60 Hz pair is copied unchanged from the official
 The same release supplies `cbios_main_msx1.rom` (32 KiB) for MSX1 cartridges.
 No logo/extension ROM is needed for this profile's slot initialization, no-cartridge
 message or verified cartridge boot. No original Microsoft/ASCII ROM, C-BIOS BASIC,
-disk or music ROM, or copyrighted game is distributed.
+disk or music ROM, or proprietary game is distributed. Separately licensed
+MSX1 games are available through [Demo ROMs](../README.md#demo-roms); their
+[binary/asset audit](../demos/PROVENANCE.txt) records redistribution rights.
 
 [CBIOS-PROVENANCE.txt](../firmware/cbios/CBIOS-PROVENANCE.txt) records the original
 archive URL, exact version, archive and binary SHA-256 hashes, byte counts and
@@ -88,7 +90,9 @@ inferred from this fixture.
 
 ## Try the original diagnostic
 
-Under **ROMs & advanced system options**, download **our original MSX2 diagnostic
+Choose **MSX2 diagnostic → Play demo** in Demo ROMs for a direct launch with
+automatic model selection. Alternatively, under **ROMs & advanced system options**,
+download **our original MSX2 diagnostic
 cartridge**, then select it with **Open ROM**. It runs with C-BIOS or the original
 diagnostic loader; no external firmware is needed.
 It starts in SCREEN 7 (512×212), programs the extended palette, fills a page above

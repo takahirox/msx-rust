@@ -42,6 +42,18 @@
       <span id="input-help">Physical keyboard required · Esc stops BASIC</span>
     </div>
   </section>
+  <section class="demos" aria-label="Demo ROMs">
+    <div class="demo-controls">
+      <label for="demo">Demo ROMs</label>
+      <select id="demo" disabled aria-describedby="demo-description demo-controls-help"><option>Loading demos…</option></select>
+      <button id="play-demo" disabled>Play demo</button>
+    </div>
+    <p id="demo-description"></p>
+    <p id="demo-controls-help"></p>
+    <p id="demo-credit"></p>
+    <p id="demo-message" role="status" aria-live="polite"></p>
+    <p class="attribution">Bundled with redistribution permission. Launching restarts execution and discards unsaved BASIC. <a href="demos/PROVENANCE.txt">Licenses, sources &amp; provenance</a></p>
+  </section>
   <section class="starters" aria-label="BASIC starters">
     <div><h2>Try something</h2><p id="starter-help">One click, then make it your own.</p></div>
     <div class="starter-actions" role="group" aria-describedby="starter-help">
