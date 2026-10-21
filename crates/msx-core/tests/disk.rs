@@ -325,6 +325,98 @@ fn updating_steps_preserve_track_mismatch_for_reads_and_writes() {
 }
 
 #[test]
+fn seek_preserves_head_offset_for_reads_and_writes() {
+    let mut f = drive(368640);
+    f.write(0, 0x40); // physical 1, Track 0
+    wait(&mut f);
+    // Equal Track/Data emits no steps; subsequent seeks move by Data - Track.
+    for (destination, physical_track) in [(0, 1), (5, 6), (2, 3)] {
+        f.write(3, destination);
+        f.write(0, 0x10);
+        wait(&mut f);
+        assert_eq!(f.read(1), destination);
+        assert_eq!(f.read(0) & 0x11, 0);
+        for command in [0x80, 0xa0] {
+            f.write(0, command);
+            wait(&mut f);
+            assert!(f.irq);
+            assert!(!f.drq);
+            assert_eq!(f.read(0), 0x10);
+            f.write(3, 0x5a);
+        }
+        assert!(!f.disk.as_ref().unwrap().dirty);
+        assert!(f.disk.as_ref().unwrap().bytes().iter().all(|b| *b == 0));
+
+        // The head really moved by the register delta, independently of Track.
+        f.write(1, physical_track);
+        f.write(0, 0x80);
+        f.tick(BYTE_CYCLES);
+        assert!(f.drq);
+        assert_eq!(f.read(3), 0);
+        f.write(0, 0xd0);
+        f.write(1, destination);
+    }
+}
+
+#[test]
+fn type_one_verify_checks_resulting_track_and_media_geometry() {
+    for verify in [0, 4] {
+        for (command, track, expected_track, physical_track) in [
+            (0x00, 20, 0, 0), // restore repairs a mismatch
+            (0x10, 5, 7, 7),
+            (0x10, 4, 7, 8), // seek preserves a mismatch
+            (0x10, 6, 7, 6),
+            (0x10, 8, 7, 4),
+            (0x10, 7, 7, 5), // seek with no steps preserves a mismatch
+            (0x20, 6, 6, 6),
+            (0x20, 5, 5, 6),
+            (0x30, 5, 6, 6),
+            (0x30, 4, 5, 6),
+            (0x40, 6, 6, 6),
+            (0x40, 5, 5, 6),
+            (0x50, 5, 6, 6),
+            (0x50, 4, 5, 6),
+            (0x60, 4, 4, 4),
+            (0x60, 5, 5, 4),
+            (0x70, 5, 4, 4),
+            (0x70, 6, 5, 4),
+        ] {
+            let mut f = drive(368640);
+            f.write(3, 5);
+            f.write(0, 0x10); // physical 5; remembered direction is in
+            wait(&mut f);
+            f.write(1, track);
+            f.write(3, 7);
+            f.write(0, command | verify);
+            assert_eq!(f.read(0) & 1, 1);
+            wait(&mut f);
+            assert!(f.irq);
+            assert!(!f.drq);
+            assert_eq!(f.read(1), expected_track);
+            let error = if verify != 0 && expected_track != physical_track {
+                0x10
+            } else {
+                0
+            };
+            assert_eq!(f.read(0) & 0x11, error, "command={:02x}", command | verify);
+            // Verification failure still completes the movement and register update.
+            f.write(1, physical_track);
+            f.write(0, 0x80);
+            f.tick(BYTE_CYCLES);
+            assert!(f.drq);
+        }
+        for (size, error) in [(368640, 0x10), (737280, 0)] {
+            let mut f = drive(size);
+            f.write(4, 1);
+            f.write(0, verify); // restore on a missing/present side
+            wait(&mut f);
+            assert!(f.irq);
+            assert_eq!(f.read(0) & 0x11, if verify != 0 { error } else { 0 });
+        }
+    }
+}
+
+#[test]
 fn independent_360k_z80_boot_sector_reads_and_writes_through_diskio() {
     // This fixture is separate from the supplied demo generator. It is a hand-
     // authored program in sector zero, executed at C000h after firmware boot.

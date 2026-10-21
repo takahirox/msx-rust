@@ -67,6 +67,7 @@ pub struct Controller {
     track_target: Option<u8>,
     direction_in: bool,
     type_one: bool,
+    verify: bool,
     transfer: Transfer,
     delay: u32,
     deadline: u32,
@@ -94,6 +95,7 @@ impl Default for Controller {
             track_target: None,
             direction_in: true,
             type_one: true,
+            verify: false,
             transfer: Transfer::Idle,
             delay: 0,
             deadline: 0,
@@ -238,16 +240,23 @@ impl Controller {
             return;
         }
         if self.type_one {
+            self.verify = cmd & 4 != 0;
             self.target = match cmd & 0xe0 {
                 0 => {
                     if cmd & 0x10 == 0 {
                         self.direction_in = false;
                         0
                     } else {
-                        if self.data != self.physical_track {
-                            self.direction_in = self.data > self.physical_track;
+                        // SEEK emits steps until Track equals Data; it cannot
+                        // discover or repair a pre-existing physical head offset.
+                        if self.data != self.track {
+                            self.direction_in = self.data > self.track;
                         }
-                        self.data
+                        if self.data >= self.track {
+                            self.physical_track.saturating_add(self.data - self.track)
+                        } else {
+                            self.physical_track.saturating_sub(self.track - self.data)
+                        }
                     }
                 }
                 0x20 => {
@@ -267,7 +276,8 @@ impl Controller {
                 }
             };
             self.track_target = match cmd & 0xe0 {
-                0 => Some(self.target), // restore/seek set the register to the destination
+                0 if cmd & 0x10 == 0 => Some(0), // restore uses the track-zero sensor
+                0 => Some(self.data),
                 _ if cmd & 0x10 == 0 => None,
                 // Updating steps change the register independently of the head.
                 _ if self.direction_in => Some(self.track.wrapping_add(1)),
@@ -380,7 +390,11 @@ impl Controller {
                         if let Some(track) = self.track_target {
                             self.track = track;
                         }
-                        self.finish(0);
+                        let verified = self.track == self.physical_track
+                            && self.disk.as_ref().is_some_and(|disk| {
+                                disk.offset(self.physical_track, self.side, 1).is_some()
+                            });
+                        self.finish(if self.verify && !verified { 0x10 } else { 0 });
                     }
                 } else {
                     self.drq = true;

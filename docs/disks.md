@@ -95,7 +95,11 @@ Supported WD command families: restore, seek, step, step-in, step-out (track upd
 bit honored); single/multiple read and write sector; force interrupt (immediate,
 ready transitions and index condition). Busy ignores new commands except force
 interrupt. Seek is bounded to 0..79; the physical head and track register are
-separate. Side compare is honored when enabled. Multi-record transfers increment
+separate. SEEK moves the head by the difference between Data and Track, so equal
+registers cause no movement and existing head/register offsets persist. Type I
+commands with V set verify the resulting Track against the physical head and the
+mounted track/side geometry, reporting seek error on a mismatch; V clear skips
+that check. Side compare is honored when enabled. Multi-record transfers increment
 the sector register and terminate with record-not-found after sector 9 rather than
 silently crossing a track. Unsupported read-address/read-track/write-track/format
 commands return record-not-found. CRC/deleted marks and density controls are outside
