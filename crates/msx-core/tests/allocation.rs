@@ -165,3 +165,21 @@ fn sram_reservation_failure_preserves_unsaved_cartridge_and_reset_does_not_alloc
         assert!(result.unwrap_err().contains("AB"));
     }
 }
+
+#[test]
+fn disk_mount_boot_and_reset_commit_without_allocating() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut m = Machine::default();
+        m.set_model(model);
+        let staged = firmware::demo_disk();
+        let rom = m.hardware.disk_rom.as_ptr();
+        DENY.with(|s| s.set(true));
+        m.mount_disk(staged, true).unwrap();
+        m.boot_disk().unwrap();
+        m.reset();
+        m.eject_disk().unwrap();
+        DENY.with(|s| s.set(false));
+        assert_eq!(m.hardware.disk_rom.as_ptr(), rom);
+        assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
+    }
+}

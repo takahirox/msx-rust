@@ -22,6 +22,7 @@ const diagnosticName = 'Original cartridge loader + diagnostic sub-ROM';
 let mainFile;
 let subFile;
 let cartridge = '';
+let diskName = '';
 let activeSave;
 let importGeneration = 0;
 let demos;
@@ -44,6 +45,7 @@ function updateControls() {
   $('play-demo').disabled = !ready || loading || catalogLoading;
   $('eject').disabled = !ready || !cartridge;
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
+  updateDisk();
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
@@ -112,6 +114,7 @@ function render() {
   if (screen.width !== width || screen.height !== height) { screen.width = width; screen.height = height; }
   const pixels = new Uint8ClampedArray(wasm.memory.buffer, wasm.msx_pixels(), width * height * 4);
   context.putImageData(new ImageData(pixels, width, height), 0, 0);
+  updateDisk();
   const text = readString(wasm.msx_transcript(), wasm.msx_transcript_len());
   if ($('transcript').textContent !== text) $('transcript').textContent = text;
 }
@@ -173,9 +176,9 @@ function updateStatus() {
   const active = wasm.msx_firmware();
   firmware = wasm.msx_boot_policy() === 0 ? 'auto' : ['auto', 'cbios', 'diagnostic', 'local'][active];
   $('firmware').value = firmware;
-  system = ['Weave BASIC', cbiosName(), diagnosticName, `user BIOS · ${localName}`][active];
+  system = ['Weave BASIC', cbiosName(), diagnosticName, `user BIOS · ${localName}`, 'Weave disk firmware · drive A: boot'][active];
   updateControls();
-  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${cartridge ? ` · ${cartridge}` : ''}`);
+  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}`);
 }
 function restart(action) {
   importGeneration++;
@@ -227,6 +230,68 @@ async function load(file, isSystem) {
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
+// Disk imports share the ROM generation token and staging allocation. Firmware is
+// already built into Wasm, so no asynchronous firmware fetch can partially boot.
+function updateDisk() {
+  const flags = ready ? wasm.msx_disk_flags() : 0;
+  const mounted = Boolean(flags & 1);
+  for (const id of ['open-dsk', 'disk']) $(id).disabled = !ready || loading;
+  for (const id of ['boot-disk', 'export-disk', 'disk-protected']) $(id).disabled = !ready || loading || !mounted;
+  // Eject is also a cancellation boundary, like cartridge Eject.
+  $('eject-disk').disabled = !ready || !mounted;
+  if (mounted) $('disk-protected').checked = Boolean(flags & 2);
+  const bootError = ready && wasm.msx_disk_boot_state() === 2 ? ' · boot failed: this firmware requires a WV boot sector; check media or use the original demo' : '';
+  const text = mounted ? `Drive A: ${diskName} · ${wasm.msx_disk_len() / 1024} KiB · ${flags & 2 ? 'read-only' : 'writable'} · ${flags & 4 ? 'unsaved modifications — export to keep' : 'no unsaved modifications'}${bootError}` : 'Drive A: empty';
+  if ($('disk-status').textContent !== text) $('disk-status').textContent = text;
+}
+$('open-dsk').addEventListener('click', () => $('disk').click());
+$('disk').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const generation = ++importGeneration;
+  loading = true; updateControls();
+  try {
+    if (!/\.dsk$/i.test(file.name) || ![368640, 737280].includes(file.size)) throw new Error('Use a raw .dsk of exactly 360 or 720 KiB (80 tracks, 1/2 sides, 9 sectors of 512 bytes). DMK/FDI and truncated images are unsupported.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    if (!wasm.msx_mount_disk(bytes.length, $('disk-protected').checked ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    diskName = file.name;
+    status('Disk mounted in drive A:. Choose Boot disk to restart with original disk firmware.');
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`DSK import failed: ${error.message} Session and previous disk unchanged.`, 'error');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    event.target.value = '';
+  }
+});
+$('boot-disk').addEventListener('click', () => {
+  persistSave();
+  if (!wasm.msx_boot_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  restart(() => {});
+});
+$('eject-disk').addEventListener('click', () => {
+  if (!wasm.msx_eject_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  diskName = '';
+  restart(() => {});
+});
+$('disk-protected').addEventListener('change', () => { wasm.msx_disk_protect($('disk-protected').checked ? 1 : 0); updateDisk(); });
+$('export-disk').addEventListener('click', () => {
+  const bytes = new Uint8Array(wasm.memory.buffer, wasm.msx_disk() >>> 0, wasm.msx_disk_len()).slice();
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = diskName.replace(/\.dsk$/i, '') + '-modified.dsk'; link.click();
+  wasm.msx_disk_exported(); updateDisk();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+window.addEventListener('beforeunload', event => {
+  if (ready && wasm.msx_disk_flags() & 4) { event.preventDefault(); event.returnValue = ''; }
+});
+
 // Save failures have their own persistent status, independent of emulator messages.
 function saveStatus(message) { $('save-status').textContent = message; }
 function sramBytes() { return new Uint8Array(wasm.memory.buffer, wasm.msx_sram() >>> 0, wasm.msx_sram_len()).slice(); }

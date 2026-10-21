@@ -98,3 +98,17 @@ select { max-width: 100%; margin-bottom: 14px; padding: 10px; border: 1px solid 
 .demos p { margin: .45rem 0 0; font-size: .85rem; line-height: 1.5; }
 #demo-credit, #demo-controls-help { color: var(--muted, #a9afb8); }
 #demo-message:empty { display: none; }
+
+.disk-controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; min-height: 44px; }
+#disk-status { flex-basis: 100%; font-size: 13px; overflow-wrap: anywhere; }
+.disk-help { font-size: .85rem; line-height: 1.5; }
+
+.disk-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+@media (max-width: 600px) { .disk-controls { padding: 10px; } }
+/* Keep a useful display height in landscape fullscreen; controls remain
+   keyboard reachable and the drive row scrolls horizontally when needed. */
+@media (max-height: 500px) {
+  .computer:fullscreen .disk-controls, .computer.focus-view .disk-controls { flex-wrap: nowrap; overflow-x: auto; padding: 4px 10px; }
+  .computer:fullscreen .disk-controls > *, .computer.focus-view .disk-controls > * { flex-shrink: 0; }
+  .computer:fullscreen #disk-status, .computer.focus-view #disk-status { flex-basis: auto; white-space: nowrap; }
+}

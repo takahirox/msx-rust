@@ -2,6 +2,7 @@
 pub mod basic;
 pub mod cartridge;
 pub mod cpu;
+pub mod disk;
 pub use cartridge::Mapper;
 use cartridge::Mapping;
 pub mod firmware;
@@ -31,6 +32,7 @@ pub enum Firmware {
     Cbios,
     Diagnostic,
     User,
+    Disk,
 }
 use basic::Basic;
 use cpu::{Bus, Cpu};
@@ -43,6 +45,8 @@ pub struct Hardware {
     pub subrom: Vec<u8>,
     pub secondary: [u8; 4],
     pub rtc: rtc::Rtc,
+    pub fdc: disk::Controller,
+    pub disk_rom: Vec<u8>,
     pub ram: Vec<u8>,
     pub bios: Vec<u8>,
     pub cartridge: Vec<u8>,
@@ -68,6 +72,8 @@ impl Default for Hardware {
             subrom: Vec::with_capacity(16384),
             secondary: [0; 4],
             rtc: rtc::Rtc::default(),
+            fdc: disk::Controller::default(),
+            disk_rom: firmware::disk_rom(),
             ram: vec![0; 65536],
             bios: firmware::bios(),
             cartridge: Vec::new(),
@@ -91,6 +97,7 @@ impl Hardware {
     /// of memory while allocating replacement RAM, firmware or video buffers.
     fn reset(&mut self) {
         self.ram.fill(0);
+        self.fdc.reset();
         self.mapping.reset();
         self.slots = 0xf0;
         self.secondary = [0; 4];
@@ -147,6 +154,12 @@ impl Bus for Hardware {
         let a = address as usize;
         match self.slot(address) {
             (0, 0) => self.bios.get(a).copied().unwrap_or(255),
+            (2, 0) if self.firmware == Firmware::Disk && (0x7ff8..=0x7fff).contains(&address) => {
+                self.fdc.read((address - 0x7ff8) as u8)
+            }
+            (2, 0) if self.firmware == Firmware::Disk && (0x4000..0x8000).contains(&address) => {
+                self.disk_rom[(address - 0x4000) as usize]
+            }
             (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
             (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
@@ -160,6 +173,9 @@ impl Bus for Hardware {
             return;
         }
         match self.slot(address) {
+            (2, 0) if self.firmware == Firmware::Disk && (0x7ff8..=0x7fff).contains(&address) => {
+                self.fdc.write((address - 0x7ff8) as u8, value)
+            }
             (1, 0) if self.mapping.scc_access(address) => self.scc.write(address, value),
             (1, 0) => self.mapping.write(address, value),
             (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[address as usize] = value,
@@ -295,6 +311,7 @@ impl Machine {
                     h.subrom.extend_from_slice(firmware::CBIOS_MSX2_SUB);
                 }
             }
+            Firmware::Disk => firmware::write_disk_boot(&mut h.bios, h.model == Model::Msx2),
             Firmware::Diagnostic => {
                 h.bios.copy_from_slice(&self.diagnostic_main);
                 h.subrom.extend_from_slice(&self.diagnostic_sub);
@@ -427,6 +444,35 @@ impl Machine {
         self.hardware.mapping = Mapping::default();
         self.reset();
     }
+    /// Mount a private staged image without changing execution, slots or firmware.
+    pub fn mount_disk(&mut self, bytes: Vec<u8>, protected: bool) -> Result<(), String> {
+        let disk = disk::Disk::new(bytes, protected)?;
+        self.hardware.fdc.mount(disk)
+    }
+    /// Original firmware owns slot 2 and takes boot priority; cartridge/SRAM stay parked.
+    pub fn boot_disk(&mut self) -> Result<(), String> {
+        if self.hardware.fdc.disk.is_none() {
+            return Err("Mount a DSK in drive A: first.".into());
+        }
+        if self.boot_policy == BootPolicy::Explicit {
+            return Err("Disk boot needs the original disk firmware. Choose Use Weave BASIC to clear the explicit firmware override first.".into());
+        }
+        self.install_firmware(Firmware::Disk);
+        self.reset();
+        Ok(())
+    }
+    pub fn eject_disk(&mut self) -> Result<(), String> {
+        self.hardware.fdc.eject()?;
+        if self.hardware.firmware == Firmware::Disk {
+            self.install_firmware(if self.hardware.cartridge.is_empty() {
+                Firmware::WeaveBasic
+            } else {
+                Firmware::Cbios
+            });
+            self.reset();
+        }
+        Ok(())
+    }
     pub fn text_key(&mut self, key: u8) {
         if self.hardware.firmware == Firmware::WeaveBasic && self.hardware.keys.len() < 256 {
             self.hardware.keys.push_back(key);
@@ -435,6 +481,7 @@ impl Machine {
     pub fn step(&mut self) -> u32 {
         let cycles = self.cpu.step(&mut self.hardware);
         self.hardware.vdp.tick(cycles);
+        self.hardware.fdc.tick(cycles);
         let h = &mut self.hardware;
         let audible = h.mapping.scc_access(0x9800) && h.slot(0x9800) == (1, 0);
         let scc = (h.mapping.kind == Mapper::KonamiScc).then_some((&mut h.scc, audible));

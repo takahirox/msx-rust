@@ -1,6 +1,9 @@
 //! Original firmware/cartridge generators (MIT) and separately licensed C-BIOS binaries.
 //! See firmware/boot.asm for the exact boot routine, including the native BASIC ABI.
 use crate::font;
+mod disk;
+pub(crate) use disk::write_disk_boot;
+pub use disk::{demo_disk, disk_rom};
 mod scc_fixture;
 mod sram_fixture;
 pub use scc_fixture::scc_test_cartridge;

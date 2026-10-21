@@ -149,6 +149,17 @@ for (const site of sites) {
     test.setTimeout(60000);
     await start(page,site);await open(page,7);await boot(page);await increment(page);
     const saved=await backup(page);
+    // Disk priority parks the cartridge and its SRAM; Reset and failed imports
+    // cannot corrupt it, and Eject disk resumes the same C-BIOS cartridge.
+    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#boot-disk').click(); await advance(page,100);
+    expect(await backup(page)).toEqual(saved);
+    await page.locator('#reset').click(); await advance(page,100);
+    expect(await backup(page)).toEqual(saved);
+    await page.locator('#disk').setInputFiles(file('bad.dsk',Buffer.alloc(17)));
+    await expect(page.locator('#status')).toContainText('previous disk unchanged');
+    expect(await backup(page)).toEqual(saved);
+    await page.locator('#eject-disk').click(); await boot(page,5);
     // Replacement saves outgoing data before the demo's declared-model change.
     await expect(page.locator('#play-demo')).toBeEnabled();
     await page.locator('#demo').selectOption('plustaker');await page.locator('#play-demo').click();

@@ -105,6 +105,29 @@ gameplay assertions. They do not establish game completion, full audio accuracy,
 physical hardware behavior or MSX2 backward compatibility for these MSX1 games.
 Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
 
+## Floppy disks
+
+**Open DSK → Boot disk** mounts a private raw 360/720 KiB image in drive A: and
+boots original, MIT-licensed Z80 disk firmware through a WD2793-compatible
+controller. Download the original bootable disk demo below the browser display,
+open it, boot and press Space. Read-only is the default; uncheck it and press Space
+to write, then **Export modified DSK** to keep changes. Reset retains media and
+changes; export is required before ejecting or replacing modified media. Disk
+images stay in this page's memory and are never uploaded or persisted.
+
+Both MSX1 and MSX2 are supported. A fresh page still starts MSX2 Weave BASIC.
+Mounting alone leaves execution unchanged. Boot disk takes priority over a parked
+cartridge; Open ROM restores automatic C-BIOS cartridge boot. An explicit firmware
+override must be cleared with Use Weave BASIC before disk boot; that action keeps
+the mounted image. C-BIOS alone cannot boot disks. This milestone supplies a
+limited original boot contract and disk driver, without MSX-DOS or Disk BASIC;
+it does not claim arbitrary disk-game compatibility. Standard raw DSK cannot
+represent arbitrary copy-protected tracks. External software may require additional
+lawful firmware/OS software that is not bundled.
+
+See [exact geometry, slot/register wiring, boot/driver ABI, limitations, source,
+provenance and validation](docs/disks.md).
+
 ## MSX2
 
 Each fresh page load starts **MSX2** in original, independent **Weave BASIC**,
@@ -327,7 +350,7 @@ disassembly, token table, or third-party interpreter code was used or bundled.
 No proprietary BIOS, BASIC or commercial game ROM is included. Curated third-party
 games retain their upstream licenses; see [Demo ROMs](#demo-roms).
 The emulator, original glyphs,
-cartridges and seven generated ROMs are MIT licensed; the bundled C-BIOS MSX1 main and
+cartridges, original disk firmware/demo and generated ROMs are MIT licensed; the bundled C-BIOS MSX1 main and
 MSX2 main/sub-ROMs are separately **BSD-2-Clause**, with its complete upstream
 copyrights, conditions and disclaimer in
 [CBIOS-LICENSE.txt](firmware/cbios/CBIOS-LICENSE.txt). [The pinned release

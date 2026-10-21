@@ -30,6 +30,15 @@
       </div>
       <button id="fullscreen" aria-pressed="false" title="Expand the emulator; Escape exits">Fullscreen</button>
     </div>
+    <div class="disk-controls" role="group" aria-label="Drive A floppy disk">
+      <button id="open-dsk" disabled>Open DSK</button>
+      <input id="disk" type="file" accept=".dsk" aria-label="Open floppy DSK" hidden disabled>
+      <button id="boot-disk" disabled>Boot disk</button>
+      <button id="eject-disk" disabled>Eject disk</button>
+      <button id="export-disk" disabled>Export modified DSK</button>
+      <label><input id="disk-protected" type="checkbox" checked disabled> Read-only</label>
+      <span id="disk-status" role="status" aria-live="polite">Drive A: empty</span>
+    </div>
     <div class="machine-state">
       <span id="status" role="status" aria-live="polite">Loading WebAssembly…</span>
       <span id="audio-state">Audio off · enable to hear sound</span>
@@ -41,6 +50,17 @@
       <button id="focus-screen" disabled>Click / tap to type</button>
       <span id="input-help">Physical keyboard required · Esc stops BASIC</span>
     </div>
+  </section>
+  <section class="disk-help" aria-label="Disk help">
+    <p><a href="weave-disk-demo.dsk" download>Download original bootable disk demo</a> (MIT).
+    Open DSK → Boot disk → focus the display and press Space. Uncheck Read-only to write;
+    export before ejecting or replacing modified media. Reset keeps disk changes.</p>
+    <p>Raw 360/720 KiB DSK only. Boot disk selects original Weave disk firmware with priority over a parked cartridge;
+    Open ROM selects cartridge firmware again. Use Weave BASIC returns to BASIC and keeps the mounted disk.
+    Clear an explicit firmware override with Use Weave BASIC before Boot disk.
+    This is a limited disk boot environment, without MSX-DOS or Disk BASIC; C-BIOS alone cannot boot disks.
+    External games may need additional lawful firmware/OS software. Nonstandard/copy-protected tracks are unsupported.
+    Disk bytes stay in memory on this page; export to keep changes before closing it.</p>
   </section>
   <section class="demos" aria-label="Demo ROMs">
     <div class="demo-controls">
