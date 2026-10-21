@@ -156,12 +156,11 @@ wrong/corrupt/oversized saves, failed ROM/memory transfers, ROM/mapper isolation
 storage failures and cross-tab conflict preservation. Existing BASIC, C-BIOS,
 demos, keyboard/video and classic SCC tests remain required regressions.
 
-Required post-merge verification remains pending: after Pages publication,
-record deployed commit, successful Actions run and the live
-<https://takahirox.github.io/msx-rust/> URLs. Run an SRAM and R-Type probe through
-the published picker/Wasm, recover SRAM after a fresh page, and confirm MSX2
-BASIC and curated demos. File a separate Issue for a deployed-site failure.
-Local checks do not establish publication.
+Required post-merge verification passed after Pages publication on 2026-10-21.
+The [live verification record](cartridge-sram-live.md) identifies the deployed
+commit, successful Actions run, tested URLs and results for SRAM restoration,
+R-Type, MSX2 BASIC and curated demos. The local checks below describe the earlier
+implementation stage; they did not establish publication.
 
 ## Local validation record
 
@@ -195,7 +194,7 @@ inspect banked execution RAM markers and VDP state. Screenshots and detailed
 runner logs are ignored local test artifacts and can be regenerated with the
 commands above. No proprietary game ROM or manual gameplay was used.
 
-Implementation and this local validation are complete. This node does not push,
-open a PR, comment, merge or deploy. PR/AI review and Issue #27's post-merge live
-Pages verification remain for the subsequent workflow; the local results do not
-claim that those steps happened.
+At the end of implementation, this local validation was complete, while
+publication, PR/AI review, merge and Issue #27's post-merge live verification
+remained for subsequent workflow nodes. The later live results are recorded
+separately above.

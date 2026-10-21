@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-10-21T03:19:09.289Z",
+  "records": [
+    {
+      "url": "https://takahirox.github.io/msx-rust/index.html",
+      "status": 200,
+      "bytes": 15200,
+      "sha256": "d8ce513ee8febdfdead24aa17a5265ab5e20c304dfabb1f3d7b1696cbe382650"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/style.css",
+      "status": 200,
+      "bytes": 6519,
+      "sha256": "6e9c0ffa7782d9734ad39ea97fc17eceb3c5725294d0f3b90531730cee312d11"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/app.js",
+      "status": 200,
+      "bytes": 28001,
+      "sha256": "1abded1805e104dcf244c9fcacdabe814d7db87ef4affc45104993ee8cfe042e"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/saves.js",
+      "status": 200,
+      "bytes": 1495,
+      "sha256": "39aaac86a9800e2c12da4ff20fc7ce3f90f139286563a2527b38387fe6cd7fb1"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/msx_wasm.wasm",
+      "status": 200,
+      "bytes": 367653,
+      "sha256": "ef1f8e7932c255ad7b303facaf3d85dbe05a8dd0f97bfd444d03790b60bcd65b"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/mapper-6.rom",
+      "status": 200,
+      "bytes": 262144,
+      "sha256": "f2491bc80ac004dc18b20044c2badc95e464f2f9757463acc0a188d68c770b8a"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/mapper-7.rom",
+      "status": 200,
+      "bytes": 262144,
+      "sha256": "40b48dc9d9dd0bcbb090366e96d6414accf8db9c656d9ae2c29db5a0ebc6bf1b"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/mapper-8.rom",
+      "status": 200,
+      "bytes": 131072,
+      "sha256": "d8a48b0ec2522464ab259738bc85b8220b44c1f9d9d62b98a65771fe80eb2c0c"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/mapper-9.rom",
+      "status": 200,
+      "bytes": 131072,
+      "sha256": "b3963da3bdbde392ee7e4b75a239a17c86cb8dd0142813f15ab5b3d7ad661170"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/mapper-10.rom",
+      "status": 200,
+      "bytes": 393216,
+      "sha256": "742ba214f04c0011ed1af7ed4f15ae64adfb271adaab5dbec4ee960c6ba55676"
+    },
+    {
+      "url": "https://takahirox.github.io/msx-rust/cbios-msx1-test-cartridge.rom",
+      "status": 200,
+      "bytes": 16384,
+      "sha256": "2e24ac9f09f1d5b14acb30caa43be0a52a92742f3c403dcacf37a8b3999510f7"
+    }
+  ]
+}
