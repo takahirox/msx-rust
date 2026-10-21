@@ -2,6 +2,16 @@ use std::{env, fs};
 fn main() {
     let dir = env::args().nth(1).expect("output directory");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        format!("{dir}/weave-disk-demo.dsk"),
+        msx_core::firmware::demo_disk(),
+    )
+    .unwrap();
+    fs::write(
+        format!("{dir}/weave-disk.rom"),
+        msx_core::firmware::disk_rom(),
+    )
+    .unwrap();
     for mapper in [
         msx_core::Mapper::Ascii8Sram2,
         msx_core::Mapper::Ascii8Sram8,

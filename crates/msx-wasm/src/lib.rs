@@ -69,6 +69,7 @@ pub extern "C" fn msx_firmware() -> u32 {
         msx_core::Firmware::Cbios => 1,
         msx_core::Firmware::Diagnostic => 2,
         msx_core::Firmware::User => 3,
+        msx_core::Firmware::Disk => 4,
     })
 }
 #[no_mangle]
@@ -279,6 +280,117 @@ pub extern "C" fn msx_restore_sram(length: u32) -> u32 {
                 a.error = error;
                 0
             }
+        }
+    })
+}
+
+/// Consume only an exactly sized staged disk; failures preserve the running session.
+#[no_mangle]
+pub extern "C" fn msx_mount_disk(length: u32, protected: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let bytes = std::mem::take(&mut a.upload);
+        let result = if length as usize != bytes.len() {
+            Err("Invalid DSK transfer length.".into())
+        } else {
+            a.machine.mount_disk(bytes, protected != 0)
+        };
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_boot_disk() -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let result = a.machine.boot_disk();
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_eject_disk() -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let result = a.machine.eject_disk();
+        disk_result(&mut a, result)
+    })
+}
+fn disk_result(a: &mut App, result: Result<(), String>) -> u32 {
+    match result {
+        Ok(()) => {
+            a.error.clear();
+            1
+        }
+        Err(e) => {
+            a.error = e;
+            0
+        }
+    }
+}
+/// Borrowed views must be reacquired after a mutating call, as with SRAM.
+#[no_mangle]
+pub extern "C" fn msx_disk() -> *const u8 {
+    APP.with(|a| {
+        a.borrow()
+            .machine
+            .hardware
+            .fdc
+            .disk
+            .as_ref()
+            .map_or(std::ptr::null(), |d| d.bytes().as_ptr())
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_disk_len() -> u32 {
+    APP.with(|a| {
+        a.borrow()
+            .machine
+            .hardware
+            .fdc
+            .disk
+            .as_ref()
+            .map_or(0, |d| d.bytes().len() as u32)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_disk_flags() -> u32 {
+    APP.with(|a| {
+        a.borrow()
+            .machine
+            .hardware
+            .fdc
+            .disk
+            .as_ref()
+            .map_or(0, |d| {
+                1 | (u32::from(d.write_protected) << 1) | (u32::from(d.dirty) << 2)
+            })
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_disk_protect(protected: u32) {
+    APP.with(|a| {
+        if let Some(d) = &mut a.borrow_mut().machine.hardware.fdc.disk {
+            d.write_protected = protected != 0;
+        }
+    });
+}
+#[no_mangle]
+pub extern "C" fn msx_disk_exported() {
+    APP.with(|a| {
+        if let Some(d) = &mut a.borrow_mut().machine.hardware.fdc.disk {
+            d.dirty = false;
+        }
+    });
+}
+
+/// Firmware-written boot progress: 0 loading, 1 entered sector zero, 2 boot error.
+#[no_mangle]
+pub extern "C" fn msx_disk_boot_state() -> u32 {
+    APP.with(|a| {
+        let a = a.borrow();
+        if a.machine.hardware.firmware == msx_core::Firmware::Disk {
+            u32::from(a.machine.hardware.ram[0xf104])
+        } else {
+            0
         }
     })
 }
