@@ -1,4 +1,4 @@
-//! Cartridge ROM mappings, including classic SCC activation. SRAM is unsupported.
+//! Cartridge hardware mappings. See docs/cartridge-sram.md for wiring and limits.
 
 mod detect;
 pub use detect::{detect_mapper, Candidate, Confidence, Detection};
@@ -14,6 +14,11 @@ pub enum Mapper {
     Ascii16 = 3,
     Konami = 4,
     KonamiScc = 5,
+    Ascii8Sram2 = 6,
+    Ascii8Sram8 = 7,
+    Ascii16Sram2 = 8,
+    Ascii16Sram8 = 9,
+    RType = 10,
 }
 impl Mapper {
     pub fn name(self) -> &'static str {
@@ -24,7 +29,28 @@ impl Mapper {
             Self::Ascii16 => "ASCII16",
             Self::Konami => "Konami",
             Self::KonamiScc => "Konami SCC",
+            Self::Ascii8Sram2 => "ASCII8SRAM2",
+            Self::Ascii8Sram8 => "ASCII8SRAM8",
+            Self::Ascii16Sram2 => "ASCII16SRAM2",
+            Self::Ascii16Sram8 => "ASCII16SRAM8",
+            Self::RType => "R-Type",
         }
+    }
+    pub fn sram_size(self) -> usize {
+        match self {
+            Self::Ascii8Sram2 | Self::Ascii16Sram2 => 2048,
+            Self::Ascii8Sram8 | Self::Ascii16Sram8 => 8192,
+            _ => 0,
+        }
+    }
+    fn ascii8(self) -> bool {
+        matches!(self, Self::Ascii8 | Self::Ascii8Sram2 | Self::Ascii8Sram8)
+    }
+    fn ascii16(self) -> bool {
+        matches!(
+            self,
+            Self::Ascii16 | Self::Ascii16Sram2 | Self::Ascii16Sram8
+        )
     }
 }
 impl TryFrom<u32> for Mapper {
@@ -37,7 +63,12 @@ impl TryFrom<u32> for Mapper {
             3 => Ok(Self::Ascii16),
             4 => Ok(Self::Konami),
             5 => Ok(Self::KonamiScc),
-            _ => Err("Unsupported cartridge mapper. Select Plain, ASCII8, ASCII16, Konami or Konami SCC.".into()),
+            6 => Ok(Self::Ascii8Sram2),
+            7 => Ok(Self::Ascii8Sram8),
+            8 => Ok(Self::Ascii16Sram2),
+            9 => Ok(Self::Ascii16Sram8),
+            10 => Ok(Self::RType),
+            _ => Err("Unsupported cartridge mapper ID. Select a documented mapper.".into()),
         }
     }
 }
@@ -47,6 +78,8 @@ pub(crate) struct Mapping {
     pub kind: Mapper,
     banks: [u8; 4],
     scc_enabled: bool,
+    pub sram: Vec<u8>,
+    sram_select: u8,
 }
 impl Mapping {
     pub fn new(kind: Mapper) -> Self {
@@ -54,10 +87,26 @@ impl Mapping {
             kind,
             banks: match kind {
                 Mapper::Konami | Mapper::KonamiScc => [0, 1, 2, 3],
+                Mapper::RType => [15, 0, 0, 0],
                 _ => [0; 4],
             },
             scc_enabled: false,
+            sram: Vec::new(),
+            sram_select: 0,
         }
+    }
+    pub fn reset(&mut self) {
+        self.banks = Self::new(self.kind).banks;
+        self.scc_enabled = false;
+    }
+    // Called only after all ROM/header validation, before any machine mutation.
+    pub fn reserve_sram(&mut self) -> Result<(), String> {
+        let size = self.kind.sram_size();
+        self.sram
+            .try_reserve_exact(size)
+            .map_err(|_| "Not enough memory for cartridge SRAM.".to_string())?;
+        self.sram.resize(size, 0xff);
+        Ok(())
     }
     pub fn validate(rom: &[u8], requested: Mapper) -> Result<Self, String> {
         let kind = if requested == Mapper::Auto {
@@ -74,10 +123,16 @@ impl Mapping {
             if !plain_size {
                 return Err("Plain mapping needs an 8, 16, 32 or 48 KiB image. Select the documented MegaROM mapper for bank-switched cartridges.".into());
             }
+        } else if kind == Mapper::RType {
+            if rom.len() != 384 * 1024 {
+                return Err("R-Type mapping requires exactly 384 KiB (256 KiB ROM followed by 128 KiB ROM).".into());
+            }
         } else {
             let (bank, max) = match kind {
                 Mapper::Ascii16 => (16384, 4 * 1024 * 1024),
                 Mapper::Ascii8 => (8192, 2 * 1024 * 1024),
+                Mapper::Ascii8Sram2 | Mapper::Ascii8Sram8 => (8192, 1024 * 1024),
+                Mapper::Ascii16Sram2 | Mapper::Ascii16Sram8 => (16384, 256 * 1024),
                 Mapper::Konami => (8192, 256 * 1024),
                 Mapper::KonamiScc => (8192, 512 * 1024),
                 _ => unreachable!(),
@@ -89,7 +144,12 @@ impl Mapping {
                 return Err(format!("This image exceeds the selected mapper's {} KiB hardware address range. Choose the correct mapper; extended mapper variants are unsupported.", max / 1024));
             }
         }
-        let mapping = Self::new(kind);
+        let mut mapping = Self::new(kind);
+        mapping.sram_select = match kind {
+            Mapper::Ascii8Sram2 | Mapper::Ascii8Sram8 => (rom.len() / 8192) as u8,
+            Mapper::Ascii16Sram2 | Mapper::Ascii16Sram8 => 0x10,
+            _ => 0,
+        };
         if ![0x4000, 0x8000]
             .into_iter()
             .any(|a| mapping.read(rom, a) == b'A' && mapping.read(rom, a + 1) == b'B')
@@ -132,7 +192,10 @@ impl Mapping {
         if self.scc_access(address) {
             return 0xff;
         }
-        let (bank, offset) = if self.kind == Mapper::Ascii16 {
+        if let Some(index) = self.sram_index(address) {
+            return self.sram.get(index).copied().unwrap_or(0xff);
+        }
+        let (bank, offset) = if self.kind.ascii16() || self.kind == Mapper::RType {
             (
                 self.banks[(a - 0x4000) / 0x4000] as usize * 0x4000,
                 a & 0x3fff,
@@ -143,18 +206,37 @@ impl Mapping {
                 a & 0x1fff,
             )
         };
+        if self.kind == Mapper::RType {
+            return rom[bank + offset];
+        }
         rom[(bank + offset) & (rom.len() - 1)]
+    }
+    fn sram_index(&self, address: u16) -> Option<usize> {
+        if self.sram_select == 0 || !(0x4000..0xc000).contains(&address) {
+            return None;
+        }
+        let window =
+            (address as usize - 0x4000) / if self.kind.ascii16() { 0x4000 } else { 0x2000 };
+        (self.banks[window] & self.sram_select != 0)
+            .then_some(address as usize & (self.kind.sram_size() - 1))
     }
     pub fn scc_access(&self, address: u16) -> bool {
         self.kind == Mapper::KonamiScc && self.scc_enabled && (0x9800..0xa000).contains(&address)
     }
     pub fn write(&mut self, address: u16, value: u8) {
+        if address >= 0x8000 {
+            if let Some(index) = self.sram_index(address) {
+                self.sram[index] = value;
+                return;
+            }
+        }
         let index = match self.kind {
-            Mapper::Ascii8 if (0x6000..0x8000).contains(&address) => {
+            kind if kind.ascii8() && (0x6000..0x8000).contains(&address) => {
                 ((address - 0x6000) / 0x800) as usize
             }
-            Mapper::Ascii16 if (0x6000..0x6800).contains(&address) => 0,
-            Mapper::Ascii16 if (0x7000..0x7800).contains(&address) => 1,
+            kind if kind.ascii16() && (0x6000..0x6800).contains(&address) => 0,
+            kind if kind.ascii16() && (0x7000..0x7800).contains(&address) => 1,
+            Mapper::RType if (0x7000..0x8000).contains(&address) => 1,
             Mapper::Konami if (0x6000..0xc000).contains(&address) => {
                 ((address - 0x4000) / 0x2000) as usize
             }
@@ -170,6 +252,13 @@ impl Mapping {
             _ => return,
         };
         self.banks[index] = match self.kind {
+            Mapper::RType => {
+                if value & 0x10 != 0 {
+                    0x10 | (value & 7)
+                } else {
+                    value & 15
+                }
+            }
             Mapper::Konami => value & 0x1f,
             Mapper::KonamiScc => value & 0x3f,
             _ => value,

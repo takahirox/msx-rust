@@ -2,7 +2,9 @@
 //! See firmware/boot.asm for the exact boot routine, including the native BASIC ABI.
 use crate::font;
 mod scc_fixture;
+mod sram_fixture;
 pub use scc_fixture::scc_test_cartridge;
+pub use sram_fixture::mapper_test_cartridge;
 pub fn bios() -> Vec<u8> {
     let mut rom = vec![0xff; 32768];
     write_bios(&mut rom);

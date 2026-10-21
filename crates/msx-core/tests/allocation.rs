@@ -125,3 +125,43 @@ fn demo_model_display_allocation_failure_preserves_running_basic() {
         assert!(m.basic.program.contains_key(&10));
     }
 }
+
+#[test]
+fn sram_reservation_failure_preserves_unsaved_cartridge_and_reset_does_not_allocate() {
+    use msx_core::cpu::Bus;
+    for kind in [
+        Mapper::Ascii8Sram2,
+        Mapper::Ascii8Sram8,
+        Mapper::Ascii16Sram2,
+        Mapper::Ascii16Sram8,
+    ] {
+        let mut m = Machine::default();
+        m.load_cartridge_owned(
+            firmware::mapper_test_cartridge(Mapper::Ascii16Sram8),
+            Mapper::Ascii16Sram8,
+        )
+        .unwrap();
+        m.hardware.slots = 0xd4;
+        m.hardware.write(0x7000, 0x10);
+        m.hardware.write(0x8123, 0x5a);
+        m.cpu.pc = 0x4321;
+        let incoming = firmware::mapper_test_cartridge(kind);
+        FAIL_SIZE.with(|s| s.set(kind.sram_size()));
+        let result = m.load_cartridge_for_model_owned(incoming, kind, Model::Msx2);
+        FAIL_SIZE.with(|s| s.set(0));
+        assert!(result.unwrap_err().contains("memory"));
+        assert_eq!(m.hardware.model, Model::Msx1);
+        assert_eq!(m.cpu.pc, 0x4321);
+        assert_eq!(m.hardware.read(0x8123), 0x5a);
+        DENY.with(|s| s.set(true));
+        m.reset();
+        DENY.with(|s| s.set(false));
+        assert_eq!(m.cartridge_sram()[0x123], 0x5a);
+        // Invalid headers must be rejected before any SRAM reservation attempt.
+        let invalid = vec![0; 128 * 1024];
+        FAIL_SIZE.with(|s| s.set(kind.sram_size()));
+        let result = m.load_cartridge_owned(invalid, kind);
+        FAIL_SIZE.with(|s| s.set(0));
+        assert!(result.unwrap_err().contains("AB"));
+    }
+}

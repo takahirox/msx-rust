@@ -4,7 +4,8 @@ The Konami SCC mapper implements the K051649 MegaROM sound chip on MSX1 and
 MSX2. Konami Standard is a separate mapper with no SCC. Five voices have separate
 periods, counters, wave positions, linear volumes and enable bits. Four signed
 32-byte waveforms are stored; voices 4 and 5 share the fourth waveform.
-SCC+/SCC-I (K052539), cartridge SRAM and unrelated FM expansions are unsupported.
+SCC+/SCC-I (K052539), SCC cartridge SRAM and unrelated FM expansions are unsupported.
+Separate [ASCII SRAM mappers](cartridge-sram.md) provide battery-backed cartridge saves.
 Importing a correctly mapped cartridge does not guarantee commercial-game compatibility.
 
 ## Memory and slot decoding

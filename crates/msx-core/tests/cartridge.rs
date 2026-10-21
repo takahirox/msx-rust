@@ -268,7 +268,7 @@ fn validation_and_auto_are_conservative_and_transactional() {
         assert_eq!(m.cpu.pc, 0x4321);
         assert_eq!(m.hardware.bios, old_bios);
     }
-    assert!(Mapper::try_from(6).is_err());
+    assert!(Mapper::try_from(11).is_err());
     assert!(m.load_bios(&vec![0; 65536]).is_err());
     assert_eq!(m.cpu.pc, 0x4321);
     // Explicitly supplied hardware can also be used with small images.

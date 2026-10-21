@@ -37,6 +37,7 @@ pub fn detect_mapper(rom: &[u8]) -> Detection {
     let mut candidates = Vec::new();
     let mut writes = false;
     let mut truncated = false;
+    let mut possible_sram = false;
     for mapper in [
         Mapper::Ascii8,
         Mapper::Ascii16,
@@ -45,6 +46,7 @@ pub fn detect_mapper(rom: &[u8]) -> Detection {
     ] {
         if let Ok(mapping) = Mapping::validate_explicit(rom, mapper) {
             let evidence = trace(rom, mapping);
+            possible_sram |= evidence.possible_sram;
             writes |= evidence.writes;
             truncated |= evidence.candidate.truncated;
             candidates.push(evidence.candidate);
@@ -60,6 +62,7 @@ pub fn detect_mapper(rom: &[u8]) -> Detection {
     let best = candidates.first();
     let confident = best.is_some_and(|c| {
         !truncated
+            && !possible_sram
             && c.score >= 6
             && (c.register_windows >= 2 || c.banked_transfer)
             && candidates
@@ -94,8 +97,9 @@ pub fn detect_mapper(rom: &[u8]) -> Detection {
             .collect::<Vec<_>>()
             .join(", ");
         let reason = match confidence {
+            _ if possible_sram => "Possible ASCII SRAM selection: ROM bytes cannot prove SRAM size or wiring; choose ASCII8SRAM2/8 or ASCII16SRAM2/8 from the cartridge documentation",
             _ if truncated => "Insufficient mapper evidence: code analysis limit reached",
-            Confidence::Invalid => "Invalid or unsupported ROM format: check size and AB header",
+            Confidence::Invalid => "Invalid or unsupported ROM format: check size and AB header (384 KiB layouts require manual R-Type selection)",
             Confidence::Ambiguous => "Ambiguous mapper evidence",
             _ => "Insufficient mapper evidence",
         };
@@ -113,6 +117,7 @@ pub fn detect_mapper(rom: &[u8]) -> Detection {
 struct Evidence {
     candidate: Candidate,
     writes: bool,
+    possible_sram: bool,
 }
 
 #[derive(Clone)]
@@ -167,6 +172,7 @@ fn trace(rom: &[u8], initial: Mapping) -> Evidence {
     let mut unsupported = BTreeSet::new();
     let mut writes = false;
     let mut banked_transfer = false;
+    let mut possible_sram = false;
     let mut truncated = false;
     // Bounds are independent of file size. No speculative path can hang detection.
     for _ in 0..8192 {
@@ -215,6 +221,13 @@ fn trace(rom: &[u8], initial: Mapping) -> Evidence {
             if let Some((index, start)) = register(initial.kind, word) {
                 windows[index] = windows[index].max(if word == start { 3 } else { 2 });
                 if let Some(a) = path.a {
+                    possible_sram |= match initial.kind {
+                        Mapper::Ascii8 if rom.len() <= 1024 * 1024 => {
+                            a as usize & (rom.len() / 8192) != 0
+                        }
+                        Mapper::Ascii16 if rom.len() <= 256 * 1024 => a & 0x10 != 0,
+                        _ => false,
+                    };
                     path.mapping.write(word, a);
                 } else {
                     // The subsequent byte layout is unknown; keep the evidence already found.
@@ -305,6 +318,7 @@ fn trace(rom: &[u8], initial: Mapping) -> Evidence {
             truncated: truncated || !pending.is_empty(),
         },
         writes,
+        possible_sram,
     }
 }
 

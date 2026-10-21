@@ -91,7 +91,7 @@ impl Hardware {
     /// of memory while allocating replacement RAM, firmware or video buffers.
     fn reset(&mut self) {
         self.ram.fill(0);
-        self.mapping = Mapping::new(self.mapping.kind);
+        self.mapping.reset();
         self.slots = 0xf0;
         self.secondary = [0; 4];
         if self.model == Model::Msx2
@@ -360,7 +360,8 @@ impl Machine {
         mapper: Mapper,
         model: Model,
     ) -> Result<(), String> {
-        let mapping = Mapping::validate(&rom, mapper)?;
+        let mut mapping = Mapping::validate(&rom, mapper)?;
+        mapping.reserve_sram()?;
         if model != self.hardware.model {
             if self.boot_policy == BootPolicy::Explicit && self.hardware.firmware != Firmware::Cbios
             {
@@ -379,6 +380,19 @@ impl Machine {
         self.hardware.cartridge = rom;
         self.hardware.mapping = mapping;
         self.reset();
+        Ok(())
+    }
+    /// Battery-backed bytes for the current cartridge only (empty for ROM-only mappers).
+    pub fn cartridge_sram(&self) -> &[u8] {
+        &self.hardware.mapping.sram
+    }
+    /// Restore a complete save atomically. Container identity/version is checked by the caller.
+    pub fn restore_cartridge_sram(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let sram = &mut self.hardware.mapping.sram;
+        if sram.is_empty() || bytes.len() != sram.len() {
+            return Err("Save size does not match this cartridge's SRAM.".into());
+        }
+        sram.copy_from_slice(bytes);
         Ok(())
     }
     pub fn unload_cartridge(&mut self) {
