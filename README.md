@@ -45,8 +45,8 @@ ROMs. **Use Weave BASIC** clears firmware overrides and ejects cartridges on eit
 model. **Pause / Resume** controls emulation. The compact toolbar also has **Open
 ROM**, **Eject**, and **Fullscreen**. Fullscreen keeps the toolbar accessible; **Exit
 fullscreen** or Escape returns to the page. Browsers without fullscreen support get a
-focused view with the same controls and exit options. There is no persistent program
-or ROM storage.
+focused view with the same controls and exit options. BASIC programs and ROM
+images are not stored. Supported ASCII cartridge SRAM is saved locally; see [cartridge saves](docs/cartridge-sram.md#browser-saving-and-recovery).
 
 Try **BASIC example**, **Graphics demo**, or **Sound demo** beneath the display.
 The starters enter commands into the current built-in BASIC session, resume paused
@@ -158,7 +158,9 @@ accurately modeled. Sprite status at raster/off-screen edges and unusual combine
 VDP modes are not compatibility guarantees. There are no disk/tape drives,
 SCC+/SCC-I or FM audio expansions. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
-with classic SCC audio are supported; SRAM and other mapper variants are not.
+with classic SCC audio, ASCII8/ASCII16 2/8 KiB SRAM variants and the 384 KiB
+R-Type layout are supported. Other specialized mappers and Game Master 2
+(including its second-slot use) remain unsupported.
 
 ## Weave BASIC and firmware
 
@@ -359,7 +361,8 @@ Choose **Cartridge mapper** under **ROMs & advanced system options** before sele
 - **Plain** uses the same header validation. Small images mirror in 4000h–BFFFh;
   48 KiB images start at 0000h. These lengths describe a mapping format, not an
   upload cap.
-- **ASCII8**, **ASCII16**, **Konami Standard**, and **Konami SCC** explicitly select
+- **ASCII8**, **ASCII16**, **Konami Standard**, **Konami SCC**,
+  **ASCII8SRAM2/8**, **ASCII16SRAM2/8**, and **R-Type** explicitly select
   MegaROM hardware (Konami SCC includes classic wavetable audio), bypassing
   heuristic choice while keeping format validation.
   Use the ROM author's documentation to choose; arbitrary or ambiguous images
@@ -371,11 +374,14 @@ Choose **Cartridge mapper** under **ROMs & advanced system options** before sele
 | --- | --- | --- | --- | --- |
 | ASCII8 | Four 8 KiB banks at 4000h–BFFFh | 6000h–67FFh, 6800h–6FFFh, 7000h–77FFh, 7800h–7FFFh | 0, 0, 0, 0 | 2 MiB (8 bank bits) |
 | ASCII16 | Two 16 KiB banks at 4000h–BFFFh | 6000h–67FFh, 7000h–77FFh | 0, 0 | 4 MiB (8 bank bits) |
+| ASCII8SRAM2/8 | Four 8 KiB banks, 2/8 KiB SRAM | ASCII8 ranges above | 0, 0, 0, 0 | 1 MiB ROM; SRAM select = ROM length / 8192 |
+| ASCII16SRAM2/8 | Two 16 KiB banks, 2/8 KiB SRAM | ASCII16 ranges above | 0, 0 | 256 KiB ROM; SRAM select = bit 4 |
+| R-Type | Fixed 16 KiB bank 0Fh, switched 16 KiB window at 8000h | 7000h–7FFFh | 0Fh, 0 | Exactly 384 KiB; bit 4 selects 256/128 KiB chips |
 | Konami | Four 8 KiB banks; first fixed at 0 | 6000h–7FFFh, 8000h–9FFFh, A000h–BFFFh | 0, 1, 2, 3 | 256 KiB (5 bank bits) |
 | Konami SCC | Four 8 KiB banks at 4000h–BFFFh | 5000h–57FFh, 7000h–77FFh, 9000h–97FFh, B000h–B7FFh | 0, 1, 2, 3 | 512 KiB (6 bank bits) |
 
-MegaROM images must have a power-of-two byte length of at least one mapper bank,
-with an AB header visible in the initial banks. Unconnected bank address bits
+Except for the explicit 384 KiB R-Type layout, MegaROM images must have a
+power-of-two byte length of at least one mapper bank, with an AB header visible in the initial banks. Unconnected bank address bits
 mirror smaller ROMs. Images beyond the hardware address range need a different
 or extended mapper; they are rejected with an explanation. ASCII mappings are
 unmapped outside 4000h–BFFFh. Konami mirrors page 1 into page 0 and page 2 into
@@ -385,14 +391,27 @@ SCC window exposes waveform RAM and sound registers at 9800h–9FFFh. Five indep
 voices share four waveforms (channels 4/5 share storage), and mix with PSG. Konami
 Standard has different banking and no SCC. See [the SCC register map, timing,
 accuracy limits and tests](docs/scc.md).
-SRAM/save hardware, SCC+/SCC-I, reversed ASCII registers and other mapper variants are
-unsupported; manual selection cannot establish that an unknown image uses none
-of these features.
+SRAM is readable through selected windows and writable only at 8000h–BFFFh in
+SRAM mode. The 2/8 KiB memory repeats within those windows. Reset retains it.
+Auto cannot establish SRAM hardware or its size; choose these five new mappers
+manually. See [exact wiring, limits, original sources and fixtures](docs/cartridge-sram.md).
+SCC+/SCC-I, reversed ASCII registers, 32 KiB SRAM, other select wiring and
+Game Master 2 / additional cartridge slots remain unsupported.
+
+SRAM saves are local to this browser, keyed by the ROM bytes' SHA-256 and selected
+mapper. Reopen the same ROM and mapper after a fresh page to restore the save.
+Advanced options show storage errors and provide **Export SRAM backup** and
+**Import and replace SRAM**. Backups validate version, ROM identity, mapper, size
+and checksum before changing SRAM. Export for safekeeping: private mode or cleared
+browser data can remove local saves. Corrupt/conflicting records are preserved
+until explicit import; storage failures allow continued play and export. Original
+ROM images are never persisted or sent to a server. [Saving and recovery details](docs/cartridge-sram.md#browser-saving-and-recovery).
 
 Loading a valid image resets the machine and banks. Reset retains selected ROMs and
-restores initial banks; Eject removes the cartridge and returns automatic mode to
-BASIC, retaining explicit firmware overrides; Use Weave BASIC clears the override and
-cartridge. Failed imports leave the running machine and its bank selections intact.
+restores initial banks without erasing cartridge SRAM; Eject removes the cartridge
+and returns automatic mode to BASIC, retaining explicit firmware overrides; Use Weave BASIC clears the override and
+cartridge. The browser saves outgoing SRAM before cartridge, model or firmware
+changes. Failed imports leave the running machine, banks and unsaved SRAM intact.
 The Wasm transfer reserves memory before JavaScript creates a writable view, then
 moves that buffer into the core without another cartridge copy. Empty files, malformed
 dumps, unsupported mapping and resource failures are reported as nonfatal errors.
@@ -418,7 +437,8 @@ waveforms are original MIT-licensed data; no music or game assets are included.
 Mapper fixtures are generated, original MIT-licensed code in
 [`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
 [`detection.rs`](crates/msx-core/tests/detection.rs),
-[`scc_fixture.rs`](crates/msx-core/src/firmware/scc_fixture.rs) and
+[`scc_fixture.rs`](crates/msx-core/src/firmware/scc_fixture.rs),
+[`sram_fixture.rs`](crates/msx-core/src/firmware/sram_fixture.rs) and
 [`browser.spec.js`](tests/browser.spec.js). Run the verification commands below to
 test legally distributable images: browser fixtures of 64, 128, 256, 512 and
 1024 KiB use Auto, switch to code in the last bank, display a backdrop and respond

@@ -249,3 +249,36 @@ pub extern "C" fn msx_detection() -> *const u8 {
 pub extern "C" fn msx_detection_len() -> u32 {
     APP.with(|a| a.borrow().detection.len() as u32)
 }
+
+/// Views are valid until the next mutating Wasm call; reacquire after memory growth.
+#[no_mangle]
+pub extern "C" fn msx_sram() -> *const u8 {
+    APP.with(|a| a.borrow().machine.cartridge_sram().as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn msx_sram_len() -> u32 {
+    APP.with(|a| a.borrow().machine.cartridge_sram().len() as u32)
+}
+/// Consume a staged save; invalid transfers never change the running cartridge.
+#[no_mangle]
+pub extern "C" fn msx_restore_sram(length: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let bytes = std::mem::take(&mut a.upload);
+        let result = if length as usize != bytes.len() {
+            Err("Invalid SRAM transfer length.".into())
+        } else {
+            a.machine.restore_cartridge_sram(&bytes)
+        };
+        match result {
+            Ok(()) => {
+                a.error.clear();
+                1
+            }
+            Err(error) => {
+                a.error = error;
+                0
+            }
+        }
+    })
+}

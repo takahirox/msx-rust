@@ -1,4 +1,5 @@
 // Browser transport only: Canvas, files, keyboard, pacing, and Web Audio.
+import { savePrefix, romIdentity, encodeSave, decodeSave } from './saves.js';
 const $ = id => document.getElementById(id);
 const screen = $('screen');
 const context = screen.getContext('2d', { alpha: false });
@@ -21,6 +22,7 @@ const diagnosticName = 'Original cartridge loader + diagnostic sub-ROM';
 let mainFile;
 let subFile;
 let cartridge = '';
+let activeSave;
 let importGeneration = 0;
 let demos;
 let catalogLoading = false;
@@ -41,6 +43,7 @@ function updateControls() {
   $('demo').disabled = !ready || loading || !demos;
   $('play-demo').disabled = !ready || loading || catalogLoading;
   $('eject').disabled = !ready || !cartridge;
+  for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
@@ -202,11 +205,14 @@ async function load(file, isSystem) {
     if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 0xffffffff) throw new Error('The image is empty or exceeds this browser/Wasm address space.');
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (generation !== importGeneration) return;
+    const identity = !isSystem && mapper >= 6 && mapper <= 9 ? await romIdentity(bytes) : undefined;
+    if (generation !== importGeneration) return;
     uploadRom(bytes, isSystem ? 1 : 0, mapper);
+    if (!isSystem) attachSave(identity, wasm.msx_detected_mapper());
     if (isSystem) localName = file.name;
     else {
       const selected = wasm.msx_detected_mapper();
-      const name = ['Auto', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC'][selected];
+      const name = mapperNames[selected];
       cartridge = `${file.name} (${mapper === 0 ? `Auto: ${name}${wasm.msx_detection_confidence() === 4 ? ', estimate' : ', recognized format'}` : name})`;
     }
     restart(() => {});
@@ -221,14 +227,100 @@ async function load(file, isSystem) {
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
+// Save failures have their own persistent status, independent of emulator messages.
+function saveStatus(message) { $('save-status').textContent = message; }
+function sramBytes() { return new Uint8Array(wasm.memory.buffer, wasm.msx_sram() >>> 0, wasm.msx_sram_len()).slice(); }
+function restoreSave(bytes) {
+  if (bytes.length !== wasm.msx_sram_len() || ![2048, 8192].includes(bytes.length)) throw new Error('Save size does not match cartridge SRAM.');
+  // Validation is complete and JS runs synchronously between CPU frames. Copy
+  // into the reserved SRAM view without a second fallible Wasm allocation after
+  // a cartridge has committed. The staged ABI is available to other callers.
+  new Uint8Array(wasm.memory.buffer, wasm.msx_sram() >>> 0, bytes.length).set(bytes);
+}
+function detachSave() {
+  activeSave = undefined;
+  saveStatus('No SRAM cartridge loaded.');
+}
+function attachSave(rom, mapper) {
+  if (!wasm.msx_sram_len()) { detachSave(); return; }
+  // Reopening identical bytes must also retain unsaved RAM when storage is unavailable.
+  if (activeSave?.rom === rom && activeSave.mapper === mapper) {
+    restoreSave(decodeSave(activeSave.current, rom, mapper, wasm.msx_sram_len()));
+    return;
+  }
+  activeSave = { rom, mapper, key: `${savePrefix}${rom}:${mapper}`, stored: null, current: null, blocked: false };
+  try {
+    activeSave.stored = localStorage.getItem(activeSave.key);
+    if (activeSave.stored !== null) {
+      restoreSave(decodeSave(activeSave.stored, rom, mapper, wasm.msx_sram_len()));
+      saveStatus('SRAM restored from this browser. Reset keeps it.');
+    } else saveStatus('New SRAM. Saved locally while playing; Reset keeps it.');
+  } catch (error) {
+    activeSave.blocked = true;
+    saveStatus(`SRAM restore unavailable: ${error.message} Playing is possible. Existing storage is preserved; export a backup or explicitly import a valid save.`);
+  }
+  activeSave.current = encodeSave(sramBytes(), rom, mapper);
+}
+function persistSave() {
+  if (!activeSave || !ready) return;
+  const save = activeSave;
+  try {
+    save.current = encodeSave(sramBytes(), save.rom, save.mapper);
+    if (save.blocked || save.current === save.stored) return;
+    if (localStorage.getItem(save.key) !== save.stored) {
+      save.blocked = true;
+      throw new Error('Another tab changed this save. Export a backup; reimport it explicitly to replace local data.');
+    }
+    localStorage.setItem(save.key, save.current);
+    save.stored = save.current;
+    saveStatus('SRAM saved in this browser. Reset keeps it. Export a backup for safekeeping.');
+  } catch (error) {
+    save.blocked = true;
+    saveStatus(`SRAM is in memory only: ${error.message} Export a backup before leaving or changing cartridges.`);
+  }
+}
+setInterval(persistSave, 1000);
+window.addEventListener('pagehide', persistSave);
+$('export-save').addEventListener('click', () => {
+  if (!activeSave) return;
+  persistSave();
+  const url = URL.createObjectURL(new Blob([activeSave.current], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = `msx-sram-${activeSave.rom}-${activeSave.mapper}.json`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('import-save').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  const save = activeSave, generation = importGeneration;
+  try {
+    if (!file || !save || loading) return;
+    if (file.size > 16384) throw new Error('Save is too large.');
+    const text = await file.text();
+    if (save !== activeSave || generation !== importGeneration || loading) return;
+    const bytes = decodeSave(text, save.rom, save.mapper, wasm.msx_sram_len());
+    restoreSave(bytes);
+    // Explicit import authorizes replacement, including a corrupt/conflicting stored record.
+    save.current = encodeSave(bytes, save.rom, save.mapper);
+    save.blocked = false;
+    try { save.stored = localStorage.getItem(save.key); }
+    catch { /* persistSave reports storage errors and leaves execution possible. */ }
+    persistSave();
+    if (!save.blocked) saveStatus('Imported SRAM and saved locally. Reset to let the game read it at startup.');
+  } catch (error) {
+    if (save === activeSave && generation === importGeneration) saveStatus(`Save import rejected: ${error.message} Current SRAM is unchanged.`);
+  } finally { event.target.value = ''; }
+});
+
 // Both local files and curated static assets use the same staged Rust cartridge API.
 function uploadRom(bytes, kind, mapper, targetModel) {
   const pointer = wasm.msx_upload(bytes.length);
   if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
   new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+  persistSave();
   const ok = targetModel === undefined ? wasm.msx_load(bytes.length, kind, mapper) : wasm.msx_load_demo(bytes.length, mapper, targetModel);
   if (!ok) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
 }
+const mapperNames = ['Auto', 'Plain', 'ASCII8', 'ASCII16', 'Konami', 'Konami SCC', 'ASCII8SRAM2', 'ASCII8SRAM8', 'ASCII16SRAM2', 'ASCII16SRAM8', 'R-Type'];
 const mapperIds = { Plain: 1, ASCII8: 2, ASCII16: 3, Konami: 4, 'Konami SCC': 5 };
 const localAsset = path => typeof path === 'string' && /^(?:demos\/)?[a-zA-Z0-9_.-]+$/.test(path) && !path.includes('..');
 async function staticAsset(path) {
@@ -287,6 +379,7 @@ $('play-demo').addEventListener('click', async () => {
     if (bytes.length !== demo.size || digest !== demo.sha256) throw new Error('Demo integrity check failed (size/SHA-256). Reload or try another demo.');
     const targetModel = demo.model === 'MSX2' ? 1 : 0;
     uploadRom(bytes, 0, mapperIds[demo.mapper], targetModel);
+    detachSave();
     if (model !== targetModel) {
       model = targetModel;
       // Only clear staged local file choices after a successful profile transition.
@@ -346,7 +439,7 @@ window.addEventListener('keyup', event => {
 });
 screen.addEventListener('blur', releaseKeys);
 window.addEventListener('blur', releaseKeys);
-document.addEventListener('visibilitychange', () => { previousTime = undefined; accumulator = 0; releaseKeys(); flushAudio(); });
+document.addEventListener('visibilitychange', () => { persistSave(); previousTime = undefined; accumulator = 0; releaseKeys(); flushAudio(); });
 screen.addEventListener('paste', event => { event.preventDefault(); command((event.clipboardData.getData('text/plain')).replace(/\r\n?/g, '\n').replace(/[^\x20-\x7e\n]/g, '')); });
 $('pause').addEventListener('click', () => { paused = !paused; releaseKeys(); flushAudio(); updateStatus(); screen.focus(); });
 $('reset').addEventListener('click', () => restart(() => wasm.msx_reset()));
@@ -357,17 +450,19 @@ function clearRomSelections() {
 }
 function restoreFirmware(selected = 'auto') {
   if (!ready || loading) return;
+  persistSave();
   if (selected === 'cbios' || selected === 'diagnostic') {
     const ok = selected === 'cbios' ? wasm.msx_cbios() : wasm.msx_diagnostic();
     if (!ok) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
   } else wasm.msx_builtin();
+  detachSave();
   localName = '';
   clearRomSelections();
   restart(() => {});
 }
 $('builtin').addEventListener('click', () => restoreFirmware());
 $('firmware').addEventListener('change', () => restoreFirmware($('firmware').value));
-$('eject').addEventListener('click', () => { cartridge = ''; $('cartridge').value = ''; restart(() => wasm.msx_eject()); });
+$('eject').addEventListener('click', () => { persistSave(); detachSave(); cartridge = ''; $('cartridge').value = ''; restart(() => wasm.msx_eject()); });
 $('open-rom').addEventListener('click', () => $('cartridge').click());
 $('audio').addEventListener('click', async () => {
   try {
@@ -394,6 +489,7 @@ function updateModelControls() {
   updateFirmwareSelection();
 }
 $('model').addEventListener('change', () => {
+  persistSave(); detachSave();
   model = Number($('model').value);
   firmware = 'auto'; $('firmware').value = firmware;
   localName = '';

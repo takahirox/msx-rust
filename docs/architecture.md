@@ -122,7 +122,9 @@ executes from it on every supported mapper. Browser tests generate larger images
 in memory and select them through the real file input, verify pixels and Space
 responses after successful and failed imports, and restore plain cartridges and
 BASIC. A separate raw Wasm test verifies memory growth and invalid transfer lengths,
-mapper IDs and unrepresentable allocation sizes. SRAM is unsupported.
+mapper IDs and unrepresentable allocation sizes. [ASCII cartridge SRAM and R-Type](cartridge-sram.md)
+add per-cartridge battery memory, allocation-safe register reset, five explicit
+mapper IDs, bounded Wasm save views/restores, and validated browser-local saves.
 
 Classic SCC registers/audio are independently implemented from public hardware
 experiments and register documentation, without emulator implementation code. See

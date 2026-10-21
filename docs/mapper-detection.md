@@ -83,8 +83,8 @@ Auto is the picker default. Status shows **Auto: mapper, estimate** for MegaROMs
 or **Auto: Plain, recognized format**. Failure text includes candidate scores
 where available, explains uncertainty, and directs users to choose the documented
 mapper in advanced options and open the same file again. Changing the mapper
-control alone leaves the loaded cartridge unchanged. ROM contents and hashes
-are never uploaded or persisted.
+control alone leaves the loaded cartridge unchanged. ROM contents are never uploaded or persisted. Explicit SRAM imports persist a
+local ROM hash and save bytes as described in [cartridge saving](cartridge-sram.md).
 
 ## Limits and compatibility
 
@@ -99,8 +99,12 @@ statistical probabilities; no universal accuracy is claimed from synthetic tests
 
 The same bytes produce the same result under MSX1/MSX2; inference never switches
 profiles or installs BIOS/sub-ROM firmware. Classic SCC audio is provided by the
-selected Konami SCC hardware, not inferred from a game identity. SRAM, SCC+/SCC-I,
-disks and extended mappers remain unsupported; inference cannot establish which
+selected Konami SCC hardware, not inferred from a game identity. The explicit
+ASCII SRAM and R-Type families are documented in [cartridge hardware](cartridge-sram.md);
+Auto never selects those families. Known immediate ASCII register writes asserting
+a possible SRAM line suppress a ROM-only guess and request a manual choice. ROM
+bytes cannot prove SRAM capacity/wiring. SCC+/SCC-I, disks and extended mappers
+remain unsupported; inference cannot establish which
 BIOS services a cartridge needs. Correct banking alone does not establish
 cartridge boot compatibility with the selected hardware.
 

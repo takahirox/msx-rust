@@ -2,6 +2,19 @@ use std::{env, fs};
 fn main() {
     let dir = env::args().nth(1).expect("output directory");
     fs::create_dir_all(&dir).unwrap();
+    for mapper in [
+        msx_core::Mapper::Ascii8Sram2,
+        msx_core::Mapper::Ascii8Sram8,
+        msx_core::Mapper::Ascii16Sram2,
+        msx_core::Mapper::Ascii16Sram8,
+        msx_core::Mapper::RType,
+    ] {
+        fs::write(
+            format!("{dir}/mapper-{}.rom", mapper as u32),
+            msx_core::firmware::mapper_test_cartridge(mapper),
+        )
+        .unwrap();
+    }
     fs::write(
         format!("{dir}/scc-test-cartridge.rom"),
         msx_core::firmware::scc_test_cartridge(),
