@@ -64,7 +64,7 @@ pub struct Controller {
     status: u8,
     physical_track: u8,
     target: u8,
-    update_track: bool,
+    track_target: Option<u8>,
     direction_in: bool,
     type_one: bool,
     transfer: Transfer,
@@ -91,7 +91,7 @@ impl Default for Controller {
             status: 0,
             physical_track: 0,
             target: 0,
-            update_track: false,
+            track_target: None,
             direction_in: true,
             type_one: true,
             transfer: Transfer::Idle,
@@ -238,7 +238,6 @@ impl Controller {
             return;
         }
         if self.type_one {
-            self.update_track = cmd & 0x10 != 0 || cmd & 0xe0 == 0;
             self.target = match cmd & 0xe0 {
                 0 => {
                     if cmd & 0x10 == 0 {
@@ -266,6 +265,13 @@ impl Controller {
                     self.direction_in = false;
                     self.physical_track.saturating_sub(1)
                 }
+            };
+            self.track_target = match cmd & 0xe0 {
+                0 => Some(self.target), // restore/seek set the register to the destination
+                _ if cmd & 0x10 == 0 => None,
+                // Updating steps change the register independently of the head.
+                _ if self.direction_in => Some(self.track.wrapping_add(1)),
+                _ => Some(self.track.wrapping_sub(1)),
             };
             self.transfer = Transfer::Seek;
             self.delay = SEEK_CYCLES * [1, 2, 3, 5][(cmd & 3) as usize];
@@ -371,8 +377,8 @@ impl Controller {
                         self.finish(0x10);
                     } else {
                         self.physical_track = self.target;
-                        if self.update_track {
-                            self.track = self.target;
+                        if let Some(track) = self.track_target {
+                            self.track = track;
                         }
                         self.finish(0);
                     }

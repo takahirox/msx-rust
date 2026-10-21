@@ -219,10 +219,10 @@ fn step_multi_record_and_partial_write_lifecycle() {
     assert_eq!(f.read(0) & 0x10, 0x10);
     f.write(0, 0x30);
     wait(&mut f);
-    assert_eq!(f.track, 3); // remembered step-in
+    assert_eq!(f.track, 2); // remembered step-in, physical 3
     f.write(0, 0x70);
     wait(&mut f);
-    assert_eq!(f.track, 2);
+    assert_eq!(f.track, 1); // physical 2
     f.write(0, 0);
     wait(&mut f);
     assert_eq!(f.track, 0);
@@ -289,6 +289,39 @@ fn step_multi_record_and_partial_write_lifecycle() {
     f.read(0);
     f.write(0, 0xc0);
     assert_eq!(f.read(0) & 0x10, 0x10);
+}
+
+#[test]
+fn updating_steps_preserve_track_mismatch_for_reads_and_writes() {
+    for (commands, track, physical_track) in [
+        ([0x50, 0x40, 0x30], 2, 3), // remembered step-in
+        ([0x50, 0x40, 0x70], 0, 1), // explicit step-out
+    ] {
+        let mut f = drive(368640);
+        for command in commands {
+            f.write(0, command);
+            wait(&mut f);
+        }
+        assert_eq!(f.read(1), track);
+        for command in [0x80, 0xa0] {
+            f.write(0, command);
+            wait(&mut f);
+            assert!(f.irq);
+            assert!(!f.drq);
+            assert_eq!(f.read(0), 0x10); // record-not-found, not busy
+            f.write(3, 0x5a); // a rejected write must not accept sector data
+        }
+        let disk = f.disk.as_ref().unwrap();
+        assert!(!disk.dirty);
+        assert!(disk.bytes().iter().all(|byte| *byte == 0));
+
+        // Matching the register to the actual head position permits a read.
+        f.write(1, physical_track);
+        f.write(0, 0x80);
+        f.tick(BYTE_CYCLES);
+        assert!(f.drq);
+        assert_eq!(f.read(0), 3); // busy + DRQ
+    }
 }
 
 #[test]
