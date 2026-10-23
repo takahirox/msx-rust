@@ -43,6 +43,8 @@ async function observeWasm(page) {
     };
     const read = File.prototype.arrayBuffer;
     File.prototype.arrayBuffer = async function () {
+      // Keep cartridge import pending long enough to exercise the BIOS import wait.
+      if (this.name === 'mapper-6.rom') await new Promise(resolve => setTimeout(resolve, 300));
       if (this.name === 'deferred.rom') await new Promise(resolve => window.finishPhilips = resolve);
       if (this.name === 'unreadable.rom') throw new Error('fixture read failure');
       return read.call(this);
@@ -67,7 +69,9 @@ for (const site of sites) {
         await page.locator('#advanced-panel > summary').click();
         await page.locator('#mapper').selectOption('6');
         await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
-        await expect(page.locator('#save-status')).toContainText('SRAM');
+        await expect(page.locator('#status')).toContainText('mapper-6.rom (ASCII8SRAM2)');
+        await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('#export-save')).toBeEnabled();
         await installSystem(page, model);
         const disk = await fixture('sector', size, 0x35);
         disk[0x1f1] = Number(size === 737280);
