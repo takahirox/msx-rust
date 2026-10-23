@@ -411,6 +411,21 @@ fn expanded_slot_register_subrom_protection_and_reset() {
 }
 #[test]
 fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
+    fn command_edges(v: &Vdp, screen8: bool) {
+        let ink = if screen8 { [0, 255, 0] } else { [0, 255, 255] };
+        let white = [255, 255, 255];
+        for (x, y, color) in [
+            (20, 120, white),
+            (23, 120, white),
+            (30, 120, ink),
+            (30, 123, ink),
+            (30, 124, white),
+            (33, 124, white),
+            (30, 125, [255, 0, 0]),
+        ] {
+            assert_eq!(rgb(v, x, y), color, "CPU command probe ({x},{y})");
+        }
+    }
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
     m.use_diagnostic().unwrap();
@@ -424,6 +439,7 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     assert_eq!(m.hardware.vdp.height(), 212);
     assert_eq!(rgb(&m.hardware.vdp, 0, 0), [255, 0, 0]);
     assert_eq!(rgb(&m.hardware.vdp, 10, 10), [0, 255, 255]);
+    command_edges(&m.hardware.vdp, false);
     assert!(m.basic.console.transcript.is_empty());
     m.hardware.key(8, 0, true);
     m.frame();
@@ -439,12 +455,14 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     assert_eq!(m.hardware.vdp.mode(), 8);
     assert_eq!(rgb(&m.hardware.vdp, 0, 211), [255, 0, 0]);
     assert_eq!(rgb(&m.hardware.vdp, 10, 10), [0, 255, 0]);
+    command_edges(&m.hardware.vdp, true);
     assert_eq!(rgb(&m.hardware.vdp, 35, 32), [255, 255, 255]);
     m.reset();
     for _ in 0..15 {
         m.frame();
     }
     assert_eq!(m.hardware.vdp.mode(), 7);
+    command_edges(&m.hardware.vdp, false);
 }
 #[test]
 fn external_main_and_subrom_execute_real_slot_interactions() {

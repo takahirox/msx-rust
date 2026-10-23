@@ -341,6 +341,46 @@ pub fn msx2_cartridge() -> Vec<u8> {
         c.out(0x99, 2); // Read setup at 18200h, including prefetch.
         c.emit(&[0xdb, 0x98, 0xfe, if mode == 10 { 0x23 } else { 0x1c }]);
         c.jump(0xc2, "failure");
+        // Original reverse-top probe. Row 1023 aliases physical row 511 in
+        // these modes. A reverse fill from row zero must leave its sentinel
+        // alone; copy it into the displayed page so Canvas can observe it.
+        c.word(36, 20);
+        c.word(38, 511);
+        c.word(40, 4);
+        c.word(42, 1);
+        c.reg(44, if mode == 10 { 15 } else { 255 });
+        c.reg(45, 0);
+        c.reg(46, 0x80);
+        c.wait();
+        c.word(38, 0);
+        c.word(42, 3);
+        c.reg(44, line);
+        c.reg(45, 8);
+        c.reg(46, 0x80);
+        c.wait();
+        c.word(32, 20);
+        c.word(34, 511);
+        c.word(38, 376);
+        c.word(42, 1);
+        c.reg(45, 0);
+        c.reg(46, 0x90);
+        c.wait();
+        // Y-major LINE draws rows 376..379 and leaves DY=380. The fill
+        // deliberately reuses DY without writing it: row 124 must be white.
+        c.word(36, 30);
+        c.word(38, 376);
+        c.word(40, 3);
+        c.word(42, 0);
+        c.reg(44, line);
+        c.reg(45, 1);
+        c.reg(46, 0x70);
+        c.wait();
+        c.word(40, 4);
+        c.word(42, 1);
+        c.reg(44, if mode == 10 { 15 } else { 255 });
+        c.reg(45, 0);
+        c.reg(46, 0x80);
+        c.wait();
         c.reg(1, 0x40);
         c.emit(&[0xc9]);
     }

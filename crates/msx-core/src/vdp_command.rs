@@ -71,7 +71,9 @@ impl Vdp {
             ny: if ny == 0 && code != 7 { 1024 } else { ny },
             col: 0,
             row: 0,
-            error: (nx / 2) as i32,
+            // LINE resolves half-step ties toward the minor-axis advance.
+            // NX=0 still draws one pixel without a minor-axis step.
+            error: if nx == 0 { 1023 } else { ((nx - 1) / 2) as i32 },
             color: self.registers[44],
             unit,
             width,
@@ -115,6 +117,10 @@ impl Vdp {
     fn finish_command(&mut self, c: &Command) {
         self.statuses[2] &= !0x81;
         self.registers[46] &= 15;
+        if c.code == 7 {
+            self.registers[38] = c.dy as u8;
+            self.registers[39] = ((c.dy >> 8) & 3) as u8;
+        }
         if c.code >= 8 {
             let dy = (c.dy + c.row as i32 * c.step_y()) as u16;
             if c.code != 10 {
@@ -140,6 +146,16 @@ impl Vdp {
         if c.col >= c.nx || clipped {
             c.col = 0;
             c.row += 1;
+            // Include row zero, then stop before any negative Y is masked
+            // into wrapped VRAM. Forward Y retains ten-bit/physical wrapping.
+            if c.step_y() < 0 {
+                let rows = c.row as i32;
+                if (c.code != 10 && rows > c.dy)
+                    || (matches!(c.code, 9 | 10 | 13 | 14) && rows > c.sy)
+                {
+                    return true;
+                }
+            }
         }
         c.row >= c.ny
     }
@@ -200,25 +216,34 @@ impl Vdp {
                 }
                 7 => {
                     if c.arg & 0x20 == 0 {
-                        self.pset(c.dx as usize, c.dy as usize, c.color, c.op);
+                        self.pset(c.dx as usize, (c.dy & 1023) as usize, c.color, c.op);
                     }
-                    done = c.col >= c.nx;
-                    c.col += 1;
                     if c.arg & 1 == 0 {
                         c.dx += c.step_x();
+                        // X-major tests completion before the minor Y advance.
+                        done = c.col >= c.nx || !(0..c.width as i32).contains(&c.dx);
+                        if !done {
+                            if c.error < c.ny as i32 {
+                                c.error += c.nx as i32;
+                                c.dy += c.step_y();
+                            }
+                            c.error = (c.error - c.ny as i32) & 1023;
+                            done = c.dy < 0;
+                        }
                     } else {
+                        // Y-major advances Y even after the final pixel.
                         c.dy += c.step_y();
-                    }
-                    c.error -= c.ny as i32;
-                    if c.error < 0 {
-                        c.error += c.nx as i32;
-                        if c.arg & 1 == 0 {
-                            c.dy += c.step_y();
-                        } else {
-                            c.dx += c.step_x();
+                        done = c.dy < 0;
+                        if !done {
+                            if c.error < c.ny as i32 {
+                                c.error += c.nx as i32;
+                                c.dx += c.step_x();
+                            }
+                            c.error = (c.error - c.ny as i32) & 1023;
+                            done = c.col >= c.nx || !(0..c.width as i32).contains(&c.dx);
                         }
                     }
-                    done |= !(0..c.width as i32).contains(&c.dx);
+                    c.col += 1;
                 }
                 8 | 9 | 11 => {
                     let value = match c.code {
