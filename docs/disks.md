@@ -180,18 +180,18 @@ head/register offsets persist. STEP retains the last direction; STEP-IN/OUT set
 it. The T bit controls STEP-family register updates independently of head motion.
 RESTORE sets Track=FFh and Data=0, steps outward following the track-zero sensor,
 then repairs Track=0. An outward attempt when already at zero suppresses the pulse,
-repairs Track=0 even with T clear, and completes immediately. Register arithmetic
-otherwise remains eight-bit, independently of the head.
+repairs Track=0 even with T clear, and completes movement immediately (verification
+still follows if V=1). Register arithmetic otherwise remains eight-bit,
+independently of the head.
 
 At the drive's upper stop, an attempted inward pulse performs any requested Track
 update but keeps the head at 79 and immediately reports seek error, regardless of
 V. Earlier movement is retained; an out-of-range or mismatched Track cannot alias
 an image sector. A later RESTORE can recover the head/register correspondence.
 This hard upper stop/error is the bounded raw-image drive's policy, not a claim
-about physical drives' extra cylinders. Type I commands with V set verify the
-resulting Track against the physical head and mounted track/side geometry,
-reporting seek error on a mismatch; V clear skips
-that check. Side compare is honored when enabled. Multi-record transfers increment
+about physical drives' extra cylinders. Type I commands with V set settle and
+search matching-cylinder IDs as specified below; V clear skips verification.
+Sector side compare is honored when enabled. Multi-record transfers increment
 the sector register and terminate with record-not-found after sector 9 rather than
 silently crossing a track. Unsupported read-address/read-track/write-track/format
 commands return record-not-found. CRC/deleted marks and density controls are outside
@@ -200,8 +200,8 @@ this raw-sector subset.
 Status: bit 0 busy, bit 1 DRQ for sector commands, bit 2 lost data, bit 4 seek/
 record-not-found, bit 6 write-protect failure, bit 7 not ready. Type I status uses
 bit 2 for track zero, bit 1 for index, bit 6 for the media protect signal instead.
-Status errors persist until the next command. A drive is ready only with media,
-A: selected and motor on. Writes check protection before and after transfer.
+Status errors persist until the next command; bit 7 always reflects live READY.
+A drive is ready only with media, A: selected and motor on. Writes check protection before and after transfer.
 
 Type-I movement uses the 1 MHz WD2793 profile: rate bits 00/01/10/11 select
 6/12/20/30 ms **per pulse**. At the 3,579,545 Hz CPU clock, event `n` is observed at
@@ -216,9 +216,9 @@ at rate 00 issues pulses at 0, 6, …, 468 ms and completes at 474 ms (1,696,705
 cycles). Equal Track/Data with V=0 completes immediately with no artificial delay.
 BUSY stays asserted and DRQ clear until completion, when interface IRQ rises.
 FORCE INTERRUPT cancels future events but retains all issued head/register changes;
-status/signal acknowledgement and polarity are unchanged. Side/drive/motor abort,
-media replacement/ejection, reset and interface removal cancel pending events;
-reset/removal retain their existing reset-to-zero lifecycle.
+status/signal acknowledgement and polarity are unchanged. Media replacement/ejection,
+reset and interface removal cancel pending events; reset/removal retain their
+existing reset-to-zero lifecycle.
 
 The first-pulse/final-interval convention follows the
 [pinned openMSX scheduling reference](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/WD2793.cc)
@@ -226,13 +226,59 @@ The first-pulse/final-interval convention follows the
 The rate table and movement/register/zero-sensor behavior are supported by the
 [TI second-source TMS279X/WD279X manual](https://deramp.com/swtpc.com/DC_5/TMS279X_DataSheet.pdf),
 printed pages 12–13 and 17, an edited transcription without physical-device
-confirmation. The upstream verification sequence itself has a TODO. We retain
-our existing verification-result predicate after movement; verification settling
-and rotational ID search, READY-independent Type-I execution, head-load fidelity
-and exact internal startup latency remain separate gaps. In particular this
-profile still requires READY for Type I and omits internal command startup delay.
-CPU accesses and ticks remain instruction-boundary events (see
-[CPU timing](architecture.md#cpu-fetch-timing)).
+confirmation. The upstream verification sequence itself has a TODO and is not a
+verification oracle. Type I executes independently of READY: diskless and
+motor-off A can position normally. READY remains live status bit 7, separate from seek error.
+Side/drive/motor writes do not cancel Type I; subsequent pulses and feedback use
+the newly selected drive. Only installed A receives physical steps. Absent B and
+no-drive selections still advance controller registers but expose no A zero,
+index or write-protect signals. RESTORE initializes Track to FF and fails with
+seek error after 255 unsuccessful pulses plus the final rate interval if there
+is no zero feedback. A's track-zero signal remains motor/media independent in
+this selected model, not a claim about universal physical wiring. Philips reset
+latch 00 selects A with motor off; Weave reset selects no drive.
+
+V=0 retains the movement completion timing above. V=1 (also for equal-register
+SEEK, already-zero RESTORE and outward STEP at zero) adds exactly 30 ms of settling,
+then searches IDs with **HLT assumed high**. BUSY stays set, DRQ stays clear, and
+IRQ rises only on success or failure. Fractional movement and settling deadlines
+are retained on one clock; all elapsed movement, settling, ID and index events
+are consumed chronologically across large ticks.
+
+Raw DSK carries payloads, not ID/gap/CRC timing. Our normal-track approximation
+synthesizes nine good-CRC IDs on every supported cylinder/side: cylinder is the
+physical head position, side is the selected side, sectors 1..9, size 512 bytes.
+The global rotational phase starts at zero on reset and advances even while the
+motor is off. Its period is 715,909 CPU cycles (300 rpm); motor enable/selection
+does not reset phase, and physical spin-up is omitted. ID `k+1`, `k=0..8`, occurs
+at `ceil(k × 715909 / 9)` cycles within each revolution:
+
+```text
+ID:       1      2       3       4       5       6       7       8       9
+phase:    0  79546  159091  238637  318182  397728  477273  556819  636364
+```
+
+Rising index coincides with ID 1 at phase zero (status index stays high for 7,000
+cycles). At the same deadline: finish movement, finish settling, inspect ID, then
+count rising index. Thus an ID at the search-start boundary is eligible, and a
+matching ID wins at the fifth-index boundary. Selection/motor/side writes apply
+after events already consumed at that clock and never replay an event at the
+write's timestamp. Matching cylinder plus good CRC succeeds independently of
+Sector or payload bytes; no CRC faults are invented from payload contents. A
+missing side supplies index but no IDs. A cylinder mismatch or missing side fails
+on the fifth rising index encountered during search, not after five nominal
+wall-clock periods. Only selected A with media and motor on supplies ID/index
+input. Without that input the search remains cancellably BUSY, with no fabricated
+elapsed revolutions; restoring input resumes at the current global phase. This
+no-input policy is a selected-model inference from index-driven failure, not
+physical WD2793 confirmation. FORCE INTERRUPT cancels every phase and preserves
+completed movement; mount/eject/reset/interface removal remain cancellation
+boundaries. Reset/removal keep the existing reset-to-zero policy.
+
+Full HLD/status-bit-5 lifecycle, physical motor spin-up, flux/CRC anomalies,
+sector-transfer rotational timing, exact internal startup latency and additional
+commands remain separate gaps. CPU accesses and ticks remain instruction-boundary
+events (see [CPU timing](architecture.md#cpu-fetch-timing)).
 
 Sector-transfer timing is unchanged: DRQ is first raised after 114 CPU cycles,
 then 114 cycles after each serviced byte. An unserviced DRQ aborts with lost-data
@@ -301,7 +347,16 @@ checks active-low signals/acknowledgement, waits beyond the original seek durati
 then reads track 2/sector 1 and writes its eight-byte observation trace to track
 2/sector 9. Native tests and compiled-Wasm browser tests execute the same bytes
 on both models; green VDP output and the exact exported image require every CPU
-check to succeed. Existing generated fixtures remain byte-for-byte unchanged.
+check to succeed. The original `philips-readiness.hex` AB ROM (#53) boots through
+the same system fixture without any mounted disk. It observes reset-selected A,
+seeks to track 2, polls no-input verification BUSY after more than one second, forces/acknowledges
+IRQ, and paints a white checkpoint. The host then inserts a raw image without
+resetting CPU/head. Ordinary firmware polling checks delayed no-step verification,
+reads retained track 2 and writes `[84,02,80,81,81,BF,80,00]` (hex) to the first
+eight bytes of track 2/sector 9. Green VDP output requires success; the exact full
+exported image checks unchanged surrounding bytes. Native tests and compiled Wasm
+run this diskless-to-mounted sequence on both models at both browser roots.
+Earlier generated fixtures remain byte-for-byte unchanged.
 These fixtures establish the selected bus contract, not commercial compatibility.
 
 ## Provenance and reproducibility

@@ -393,7 +393,7 @@ fn type_one_verify_checks_resulting_track_and_media_geometry() {
             f.write(1, track);
             f.write(3, 7);
             f.write(0, command | verify);
-            let moving = command != 0x10 || track != 7;
+            let moving = verify != 0 || command != 0x10 || track != 7;
             assert_eq!(f.irq, !moving);
             assert_eq!(f.read(0) & 1, u8::from(moving));
             wait(&mut f);

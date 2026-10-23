@@ -1,3 +1,101 @@
+# Issue 53 WD2793 readiness and verification
+
+Source: [Correct WD2793 Type-I readiness and verification sequencing](https://github.com/takahirox/msx-rust/issues/53).
+Local pre-merge validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium. The assigned checkpoint was
+`01da0b3`; its controller matched evaluation baseline `21f003b`. The live Issue
+and comments were read before implementation. This node performed the checks
+below; no additional software inputs were needed.
+
+The shared controller now separates READY-independent movement, 30 ms settling
+under an HLT-high assumption, and rotational ID/index search. Only selected A
+receives mechanical pulses and exposes its sensors. The Philips reset latch
+selects A with motor off. V=0 movement timing and sector-transfer/write safety
+remain intact. [The supported profile](disks.md) publishes the synthetic ID
+positions, rounding, index phase, event ordering and no-input BUSY inference.
+
+Twenty native register tests cover all Type-I families, T/V values, all rates,
+no-step cases, both geometries, mismatched tracks, missing sides, diskless and
+motor-off A, absent B/no-drive, selection during motion/search, RESTORE exhaustion,
+and cancellation during movement/settling/search. Assertions immediately before,
+at and after events use independently calculated millisecond deadlines and a
+literal nine-position ID table, without reading production movement/verification
+timing constants or private head state. Large, irregular and single-cycle
+partitions agree, including multi-revolution search and exact settling/ID/index coincidence: 19 tracks at
+30 ms plus 30 ms settling completes at precisely 2,147,727 cycles (600 ms),
+not 2,147,728 after independently rounding the two phases. At search start this
+index counts toward the five-event timeout; a matching ID at the fifth index wins.
+Later sector reads infer A's retained position. Existing partial-write, protect,
+dirty-media and sector-abort regressions remain in the full suites.
+
+The original `philips-readiness.hex` AB ROM runs through the existing CPU-executed
+system fixture without a disk, seeks to track 2, checks no-input verification stays
+BUSY beyond one second, then cancels and paints a white checkpoint. Inserting an
+image resumes ordinary polling without resetting CPU/head. It checks delayed
+no-step verification, reads track 2, writes the independent eight-byte trace
+`84 02 80 81 81 BF 80 00` to track 2/sector 9 and paints green only on success.
+The exact expected full export preserves every other byte. Native tests vary eight
+insertion phases on both models. Compiled Wasm executes the same ROM on both
+models at `/` and `/msx-rust/`. The browser pauses at the white checkpoint only to
+mount and unprotect the private image without a host-input race. No BIOS traps,
+proprietary ROMs, original hardware or gameplay are prerequisites.
+
+Baseline sensitivity was measured by temporarily substituting only baseline
+`disk.rs` and `lib.rs`, restoring both corrected sources in a `finally` block.
+The final register suite fails 11 tests and passes 9 against the baseline; the
+new Philips CPU fixture also fails (diskless PC=45BBh). Examples include leaked
+A zero/protect feedback (`C4h` instead of `80h`) on an absent drive, Track remaining
+0 instead of reaching 5 without READY, and immediate verification IRQ where BUSY
+must remain asserted. The corrected focused suites pass 20 register and 8 Philips
+tests, including the original movement/sector fixtures.
+
+| Check | Actual result |
+| --- | --- |
+| Baseline sensitivity | Expected failures: 11 register tests and 1 CPU fixture |
+| Corrected focused native suites | Passed: 20 register and 8 Philips tests |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 219 tests, none failed or ignored |
+| `./scripts/build.sh` | Passed with pinned toolchain and existing local linker workaround |
+| `node scripts/check-dist.mjs` | Passed: inventory, provenance, hashes, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm readiness fixture | Passed: all 4 model/root combinations |
+| `npm test` | Passed: all 114 cases in 10.1 minutes, none failed or skipped |
+| Fixture regeneration, JS syntax, `git diff --check` | Passed: six fixtures reproduce; five earlier fixtures unchanged |
+
+The initial build failed because this host's pinned `rust-lld` could not resolve
+`libLLVM.dylib`. The successful build uses the previously documented task-local,
+ignored wrapper setting `DYLD_LIBRARY_PATH` to the same pinned sysroot's `lib`
+and executing its unchanged `rust-lld`; only the per-command
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` selects it. The workaround kept
+Rust 1.99.0 and changed no tracked build configuration or host toolchain files.
+Preliminary native checks used the host Cargo before selecting README's pinned sysroot-first PATH;
+all final checks use Rust 1.99.0.
+
+The first focused browser attempt failed on the test's disabled Read-only control
+before mount (one timeout, one interrupted case, two unperformed). The next run
+passed one and failed three because the fixture's polling bound omitted five MSX
+opcode-fetch waits per loop (42 cycles, not 37). Pausing for mount/unprotect and
+calculating the bound with those waits fixed the fixture; all four final cases
+pass. Native tests now vary insertion phase to exercise that timing range.
+Earlier generated fixtures are byte-for-byte unchanged and the new fixture is
+original MIT source generated by `tests/fixtures/philips.py`.
+
+Source-Issue/full-diff self-review found no blocking code findings. The review
+checked selected-drive mechanics/status, live READY, event rounding/order,
+phase cancellation, unchanged sector/write behavior, fixture provenance and
+documentation against every acceptance item. All mandatory checks passed; none
+were skipped or left unperformed. The full browser run retains MSX1/MSX2
+video/input, PSG/SCC/SCC-I audio, firmware/sub-ROM/mapper coexistence, SRAM
+persistence and private disk ownership/export coverage alongside the four new
+readiness cases. Optional timestamped upstream execution/trace comparison,
+physical hardware, proprietary software and commercial
+gameplay checks were not performed; authored diagnostics establish this selected
+controller contract, not commercial compatibility. Full HLD/status-bit-5 lifecycle,
+physical spin-up, flux/CRC anomalies, sector-transfer timing fidelity and additional
+commands remain explicitly separate. Issue #53 requires no post-merge verification.
+No push, PR, merge or GitHub comment is part of this node.
+
 # Issue 47 WD2793 incremental movement
 
 Source: [Correct WD2793 Type-I per-step movement, timing and interruption](https://github.com/takahirox/msx-rust/issues/47).
