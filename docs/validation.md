@@ -1,3 +1,49 @@
+# Issue 37 AY envelope
+
+Source: [Correct AY-3-8910 envelope timing and register-write phase behavior](https://github.com/takahirox/msx-rust/issues/37).
+Local pre-merge validation started 2026-10-23 on macOS arm64 with pinned Rust
+1.99.0, Node.js 24.12.0 and Playwright 1.64.1 / Chromium. The [timing and write
+contract](psg-envelope.md) records exact timestamps, original fixtures and evidence
+limits. Full validation completed on 2026-10-24.
+
+| Check | Actual result |
+| --- | --- |
+| Focused cycle-32 regression against unchanged baseline PSG | Failed as required: level 15, expected 14; passed with corrected PSG |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 147 Rust tests, including 12 new envelope tests; no failures or ignored tests |
+| `./scripts/build.sh` | Passed with pinned toolchain and local linker environment workaround below |
+| `node scripts/check-dist.mjs` | Passed: exact distribution inventory, pinned hashes/notices/provenance, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| `npm test -- tests/envelope.spec.js` | Passed: four model/hosting combinations, real Wasm PCM and scheduled Web Audio intervals of 1621–1622 samples |
+| `npm test` | Passed: all 88 browser tests in 8.4 minutes, including existing firmware, disk, SCC lifecycle and SRAM checks |
+
+The initial shell selected Homebrew Rust 1.94.0, which lacked its Wasm target.
+Selecting the README's pinned Rust 1.99.0 fixed that; its installed `rust-lld`
+then failed to find `libLLVM.dylib`. An ignored `target/` linker wrapper sets
+`DYLD_LIBRARY_PATH` to the pinned toolchain's `lib` directory immediately before
+executing that toolchain's `rust-lld`; only the build process selects it with
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. Setting the library path outside
+`build.sh` alone did not survive the local shell/process environment. No tracked
+build configuration or host toolchain files were changed. Mandatory Rust checks
+used 1.99.0; the initial baseline diagnostic used the shell's 1.94.0.
+
+The first browser probe run passed three combinations and failed its scheduled
+buffer continuity assertion in one. That assertion assumed buffer
+continuity, which the scheduler does not guarantee during catch-up. It now records
+frame identities and measures only contiguous scheduled frames; the corrected
+four-case focused run passed. Deterministic twenty-frame Wasm PCM checks also
+pass and do not depend on real-time scheduling.
+
+Source-Issue/full-diff self-review completed with no blocking findings. Production
+changes are limited to the shared envelope state/counter; public APIs, tone/noise
+clocks, sample buffering, frontend lifecycle and firmware assets are unchanged.
+No push, PR, merge or GitHub comment is part of this node. Optional pinned openMSX
+trace comparison, commercial-title listening, speaker tests and physical AY
+measurements were not performed. The
+zero-period and write-phase rules remain provisional, partly based on YM2149
+evidence. Required post-merge verification: none.
+
 # Issue #33 MSX opcode-fetch wait validation
 
 Source: [Account for MSX opcode-fetch waits while preserving standalone Z80 timing](https://github.com/takahirox/msx-rust/issues/33).
