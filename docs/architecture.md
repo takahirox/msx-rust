@@ -9,8 +9,9 @@ ROM staging and errors. JavaScript owns browser APIs only. All ROM generators ar
 ordinary Rust functions, with no assembler, downloaded artifact, or external ROM
 needed to build or boot.
 
-`Machine::step` executes a Z80 instruction and advances VDP, PSG and SCC time by its
-T-states. `Machine::frame` preserves instruction overshoot between calls and runs
+`Machine::step` executes a Z80 instruction and advances VDP (including commands),
+PSG, SCC, FDC and, on MSX2, RTC by its elapsed T-states including fetch waits.
+`Machine::frame` preserves instruction overshoot between calls and runs
 228 × 262 T-states per NTSC frame (MSX2 PAL uses 313 lines), generating roughly 736 audio samples. The VDP renders
 active scanlines and raises VBlank after 192 or 212 lines. Interrupt requests remain asserted
 until status is read or the interrupt-enable bit is cleared. The CPU acknowledges
@@ -42,9 +43,10 @@ assembly listing, and license inventory.
 ## CPU tests and vectors
 
 All implementation and tests were independently written for this repository.
-No existing CPU emulator source was used. The decoder follows the bit fields of the
+No emulator implementation code was copied. The decoder follows the bit fields of the
 Zilog opcode tables. The tests in `crates/msx-core/tests/cpu.rs` are executable
 vectors, specifying exact instruction bytes, initial state, final state and T-states.
+The original vectors below use standalone zero-wait timing.
 They are not a claim of exhaustive Z80 conformance.
 
 Representative independently calculated vectors:
@@ -67,10 +69,55 @@ Other vectors exercise alternate registers, calls/stack, conditional timing, all
 prefix families, RRD/RLD, logic parity, INC/DEC, HALT refresh, NMI/RETN and IM 0/1/2.
 
 Not covered by this suite: every possible state for every opcode, undocumented WZ/Q
-behavior, silicon-specific flags, contention, and M1 wait states. No third-party
+behavior, silicon-specific flags, access-phase synchronization and contention.
+No third-party
 ZEX/Fuse corpus or physical-machine differential test has been run. The supplied-ROM
 integration example also boots an unmodified local C-BIOS and then checks our
 independent cartridge's VDP, keyboard and PSG behavior.
+
+## CPU fetch timing
+
+`Cpu::new()` and `Cpu::default()` retain zero-wait standalone Z80 timing.
+`Cpu::with_fetch_wait(FetchWait::Msx)` adds one T-state for each ordinary M1
+opcode fetch, including CB/ED/DD/FD prefixes and each HALT idle fetch. Both
+`Machine` models select this policy at construction and every reset, including
+model, firmware and cartridge transitions. Waits are counted at fetch events,
+independently of instruction length, data reads and R-register values or writes.
+For indexed-CB instructions, displacement and final opcode bytes are ordinary
+reads: only the index and CB prefixes incur fetch waits.
+
+Interrupt acknowledgement is separate from ordinary fetch timing. NMI remains
+11 T, IM0 with the MSX bus's FFh (RST 38h) and IM1 remain 13 T, and IM2 remains
+19 T in both policies. R increments on acknowledgement without adding a fetch
+wait; subsequent handler opcodes do incur waits. Standalone IM0 continues to
+execute the bus-supplied opcode. The basis is Zilog UM0080 printed pages 12–14
+(acknowledgement and HALT cycles) and the openMSX timing definitions linked below.
+The built-in I/O wait already included in bare instruction timings is unchanged.
+
+Original `cpu.rs` regression vectors explicitly check standalone/MSX counts:
+NOP and HALT entry/idle 4/5, LD A,n 7/8, immediate IN/OUT 11/12,
+register CB rotate and NEG 8/10, LD IX,nn 14/16, indexed-CB BIT 20/22 and
+rotate 23/25, LDIR repeating/final 21/23 and 16/18, and DD FD NOP 12/15.
+They also cover taken/untaken branches, repeated/ignored prefixes, LD R,A,
+LD A,R, refresh wrap/bit 7, EI delay, HALT exit and handler fetches. An entire
+64 KiB address space of index prefixes yields after 262144/327680 T to keep the
+scheduler bounded. Every new CPU timing step checks returned cycles against its
+`tstates` increment.
+
+`tests/fetch_timing.rs` checks both machine generations with original RAM code,
+VDP/IRQ and FDC byte-transfer boundaries, PSG sample counts/waveforms, SCC
+oscillator phase, MSX2 command completion and RTC rollover. It checks lifecycle
+transitions and NTSC/PAL frame overshoot accumulation. CPU `tstates`, returned
+cycles, device advancement and frame budgets all use the same elapsed time.
+Clocks remain 3,579,545 Hz for the CPU and 44,100 Hz for audio sampling; frame
+budgets remain 228 × 262 (NTSC) and 228 × 313 (MSX2 PAL). The Wasm frame-budget
+export and browser frame accumulator retain these budgets and clock rates.
+
+This is instruction-level accounting. Devices advance after each instruction;
+individual access phases, VRAM contention, V9938 arbitration and other
+device-specific timing approximations remain separate work. No openMSX trace
+comparison or physical hardware measurement was performed. Specification-based
+tests establish this correction, not broad commercial-game playability.
 
 ## Hardware tests
 
@@ -94,6 +141,7 @@ These documents informed hardware behavior; no implementation code, fonts, examp
 programs or ROM bytes were copied from them.
 
 - Zilog, [Z80 CPU User Manual, UM008011-0816](https://www.zilog.com/docs/z80/um0080.pdf): instruction encodings, flags, timings, reset and interrupt behavior.
+- openMSX [Z80 timing definitions](https://github.com/openMSX/openMSX/blob/master/src/cpu/Z80.hh) and [CPU implementation](https://github.com/openMSX/openMSX/blob/master/src/cpu/CPUCore.cc): upstream evidence for MSX fetch waits, indexed-CB operand reads and interrupt-entry totals; consulted for the timing contract, independently implemented here without copying source.
 - Texas Instruments, [Video Display Processors Programmer's Guide (1984)](https://map.grauw.nl/resources/video/ti-vdp-programmers-guide.pdf): VDP registers, ports, modes and sprite behavior.
 - General Instrument, [AY-3-8910/8912/8913 data sheet](https://www.ym2149.com/ay8910.pdf): register masks, mixer, noise, amplitude and envelope operation.
 - ASCII, [MSX Technical Data Book](https://www.msxarchive.nl/pub/msx/docs/manuals/msxtech.pdf): MSX memory/I/O architecture (archive may restrict access).

@@ -72,9 +72,17 @@ async function gameReady(page, id) {
       if(id==='yoko') {
         // Upstream intentionally boots into its GAME OVER/start prompt.
         await page.locator('#screen').focus();
-        await page.keyboard.down('Space');await advance(page,4);
-        await page.keyboard.up('Space');await advance(page,4);
-        const ship=await playerSprite(page);
+        // The HUD can appear before initialization starts polling input. Retry
+        // the start press until the ship appears, within 64 emulated frames.
+        let ship;
+        for(let start=0;start<8;start++) {
+          await page.keyboard.down('Space');
+          try { await advance(page,4); }
+          finally { await page.keyboard.up('Space'); }
+          await advance(page,4);
+          ship=await playerSprite(page);
+          if(ship && ship.x<64) break;
+        }
         expect(ship).not.toBeNull();expect(ship.x).toBeLessThan(64);
       }
       return;

@@ -1,3 +1,47 @@
+# Issue #33 MSX opcode-fetch wait validation
+
+Source: [Account for MSX opcode-fetch waits while preserving standalone Z80 timing](https://github.com/takahirox/msx-rust/issues/33).
+Local pre-merge validation: 2026-10-23, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium.
+
+| Check | Actual result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 130 tests passed; no failures or ignored tests |
+| `cargo test -p msx-core --test fetch_timing --locked` | 5 passed after strengthening the command-completion boundary assertion |
+| `./scripts/build.sh` | Passed with the pinned toolchain and local linker workaround below |
+| `node scripts/check-dist.mjs` | Passed; deployment inventory, firmware/demo hashes, notices, provenance, subpath links and import-free Wasm |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| `npm test` | 82 passed, 2 failed in YOKO startup assertions; both failures resolved as described below |
+| `npm test -- tests/demos.spec.js` | All 7 demo tests passed after the fixture correction, including both previously failing tests at root and project subpath |
+| `node --check tests/demos.spec.js`; `git diff --check` | Passed |
+
+The full browser run exposed a fixed eight-frame start-button assumption: the HUD
+can become visible before YOKO starts polling input. The test now retries the
+start press within a bounded 64 emulated frames and still requires the actual
+ship, input-driven movement, Reset/Eject and diagnostic pixels. All seven affected
+demo-suite tests passed on rerun; the other browser suites passed in the full run.
+The full 84-test suite was not repeated after this test-only correction.
+
+Homebrew Rust initially shadowed rustup and lacked its Wasm target. With the
+README's pinned-toolchain PATH selection, rust-lld then failed to locate its own
+`libLLVM.dylib`. The existing [local macOS linker workaround](deployment.md#pre-merge-validation)
+resolved this: an ignored `target/msx-wasm-linker.sh` exports the pinned sysroot's
+`lib` directory as `DYLD_LIBRARY_PATH` immediately before invoking rust-lld;
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` selects that wrapper. No toolchain,
+CI, clock-frequency, firmware, licensed asset or application pacing changes were
+needed.
+
+The [timing contract and original fixtures](architecture.md#cpu-fetch-timing)
+cover standalone/MSX instruction counts, interrupts, R-register independence,
+bounded prefix yielding, lifecycle policy retention, device boundaries and frame
+overshoot. Review of the complete diff against Issue #33 found no outstanding
+blocking requirements. Optional openMSX trace comparison and physical hardware
+measurement were not performed; these checks establish this timing correction,
+not broad commercial-game compatibility. Required post-merge verification for
+Issue #33: **None**. No push, PR, merge or comment was performed.
+
 # Issue #17 Weave BASIC compatibility validation
 
 Source: [Expand Weave BASIC compatibility with classic MSX BASIC programming features](https://github.com/takahirox/msx-rust/issues/17).
