@@ -51,6 +51,9 @@ pub fn write_disk_boot(rom: &mut [u8], msx2: bool) {
         0, 0xf0, 0xc3, 0, 0x41,
     ];
     rom[0x100..0x100 + code.len()].copy_from_slice(&code);
+    if msx2 {
+        super::mapper_boot(rom);
+    }
 }
 pub fn disk_rom() -> Vec<u8> {
     let mut rom = vec![0xff; 16384];

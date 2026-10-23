@@ -285,7 +285,7 @@ fn rtype_fixed_bank_chip_selection_full_decoder_and_physical_size() {
 fn boot(m: &mut Machine) {
     for _ in 0..600 {
         m.frame();
-        if m.hardware.ram[0xc000] == 0xa5 {
+        if m.hardware.read(0xc000) == 0xa5 {
             return;
         }
     }
@@ -301,7 +301,7 @@ fn original_z80_fixtures_execute_banked_code_restore_saves_and_show_video_on_bot
                 .unwrap();
             boot(&mut m);
             assert_eq!(
-                m.hardware.ram[0xc002],
+                m.hardware.read(0xc002),
                 if kind == Mapper::RType { 23 } else { 7 }
             );
             assert_eq!(
@@ -311,22 +311,22 @@ fn original_z80_fixtures_execute_banked_code_restore_saves_and_show_video_on_bot
             if kind == Mapper::RType {
                 continue;
             }
-            assert_eq!(m.hardware.ram[0xc001], 4);
+            assert_eq!(m.hardware.read(0xc001), 4);
             m.hardware.key(8, 0, true);
             m.frame();
             m.hardware.key(8, 0, false);
             m.frame();
-            assert_eq!(m.hardware.ram[0xc001], 5);
+            assert_eq!(m.hardware.read(0xc001), 5);
             assert_eq!(m.cartridge_sram()[0], 5);
             let save = m.cartridge_sram().to_vec();
             m.reset();
             boot(&mut m);
-            assert_eq!(m.hardware.ram[0xc001], 5);
+            assert_eq!(m.hardware.read(0xc001), 5);
             m.load_cartridge_owned(firmware::mapper_test_cartridge(kind), kind)
                 .unwrap();
             m.restore_cartridge_sram(&save).unwrap();
             boot(&mut m);
-            assert_eq!(m.hardware.ram[0xc001], 5);
+            assert_eq!(m.hardware.read(0xc001), 5);
             assert_eq!(m.hardware.vdp.registers[7], 5);
         }
     }

@@ -4,19 +4,21 @@ use crate::font;
 mod disk;
 pub(crate) use disk::write_disk_boot;
 pub use disk::{demo_disk, disk_rom};
+mod ram_mapper_fixture;
+pub use ram_mapper_fixture::ram_mapper_cartridge;
 mod scc_fixture;
 mod sram_fixture;
 pub use scc_fixture::scc_test_cartridge;
 pub use sram_fixture::mapper_test_cartridge;
 pub fn bios() -> Vec<u8> {
     let mut rom = vec![0xff; 32768];
-    write_bios(&mut rom);
+    write_bios(&mut rom, false);
     rom
 }
-pub(crate) fn write_bios(rom: &mut [u8]) {
+pub(crate) fn write_bios(rom: &mut [u8], msx2: bool) {
     rom.fill(0xff);
     rom[..3].copy_from_slice(&[0xc3, 0x00, 0x01]); // JP 0100h
-    rom[0x2d] = 0; // MSX1 generation (MSX2 profile sets this to 1).
+    rom[0x2d] = u8::from(msx2);
     rom[0x38..0x3a].copy_from_slice(&[0xed, 0x4d]);
     rom[0x66..0x68].copy_from_slice(&[0xed, 0x45]);
     let boot = [
@@ -31,6 +33,21 @@ pub(crate) fn write_bios(rom: &mut [u8]) {
         0xf7, // poll at 013Bh
     ];
     rom[0x100..0x100 + boot.len()].copy_from_slice(&boot);
+    if msx2 {
+        mapper_boot(rom);
+    }
+}
+/// Original reset trampoline: all mapper setup runs through Z80 OUT instructions.
+/// No stack or separate RAM pages are used before initialization completes.
+fn mapper_boot(rom: &mut [u8]) {
+    let entry = [rom[0], rom[1], rom[2]];
+    let init = [
+        0xf3, // DI
+        0x3e, 3, 0xd3, 0xfc, 0x3e, 2, 0xd3, 0xfd, 0x3e, 1, 0xd3, 0xfe, 0x3e, 0, 0xd3, 0xff,
+    ];
+    rom[0x80..0x80 + init.len()].copy_from_slice(&init);
+    rom[0x80 + init.len()..0x83 + init.len()].copy_from_slice(&entry);
+    rom[..3].copy_from_slice(&[0xc3, 0x80, 0]);
 }
 /// A self-contained plain 16 KiB cartridge. Only standard VDP/PPI/PSG ports are used.
 /// Shows text and a sprite; holds a 440 Hz tone while Space is pressed.
@@ -133,6 +150,7 @@ pub fn msx2_bios() -> Vec<u8> {
         0x3e, 4, 0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99, 0x76, 0x18, 0xfd,
     ]);
     rom[0x100..0x100 + boot.len()].copy_from_slice(&boot);
+    mapper_boot(&mut rom);
     rom
 }
 /// An original diagnostic sub-ROM, not an implementation of the MSX2 BIOS API.

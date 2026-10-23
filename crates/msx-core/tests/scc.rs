@@ -32,7 +32,7 @@ fn machine(model: Model, scc: bool, psg: bool) -> Machine {
         m.hardware.output(0xa1, v);
     }
     m.cpu.pc = 0xc100;
-    m.hardware.ram[0xc100] = 0x76; // HALT in RAM, no fixture overwriting test registers.
+    m.hardware.write(0xc100, 0x76); // HALT in RAM, no fixture overwriting test registers.
     m
 }
 fn silent(m: &Machine) -> bool {
@@ -185,10 +185,10 @@ fn reset_eject_reload_replacement_model_and_firmware_clear_old_sound() {
             }
             // Avoid booting/reprogramming a cartridge while checking fresh silence.
             m.cpu.pc = 0xc100;
-            m.hardware.ram[0xc100] = 0x76;
             if m.hardware.model == Model::Msx2 {
                 m.hardware.secondary[3] = 0xff;
             }
+            m.hardware.write(0xc100, 0x76);
             m.frame();
             assert!(silent(&m), "transition {transition}, model {model:?}");
         }
@@ -206,11 +206,11 @@ fn original_megarom_executes_real_z80_scc_and_psg_on_both_models_and_auto() {
             m.load_cartridge_with_mapper(&rom, mapper).unwrap();
             for _ in 0..600 {
                 m.frame();
-                if m.hardware.ram[0xc000] == 0xa5 {
+                if m.hardware.read(0xc000) == 0xa5 {
                     break;
                 }
             }
-            assert_eq!(m.hardware.ram[0xc000], 0xa5);
+            assert_eq!(m.hardware.read(0xc000), 0xa5);
             for i in 0..128 {
                 assert_eq!(m.hardware.read(0x9800 + i), rom[0x800 + i as usize]);
             }

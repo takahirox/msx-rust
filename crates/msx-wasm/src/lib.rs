@@ -1,6 +1,7 @@
 //! Minimal raw Wasm ABI. All emulation and BASIC live in the portable core.
 use msx_core::{
     cartridge::{detect_mapper, Confidence},
+    cpu::Bus,
     Machine, Mapper, Model,
 };
 use std::cell::RefCell;
@@ -386,11 +387,38 @@ pub extern "C" fn msx_disk_exported() {
 #[no_mangle]
 pub extern "C" fn msx_disk_boot_state() -> u32 {
     APP.with(|a| {
-        let a = a.borrow();
+        let mut a = a.borrow_mut();
         if a.machine.hardware.firmware == msx_core::Firmware::Disk {
-            u32::from(a.machine.hardware.ram[0xf104])
+            u32::from(a.machine.hardware.read(0xf104))
         } else {
             0
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_boot_status_follows_logical_ram_mapping() {
+        msx_model(1);
+        APP.with(|a| {
+            let mut a = a.borrow_mut();
+            a.machine
+                .mount_disk(msx_core::firmware::demo_disk(), true)
+                .unwrap();
+            a.machine.boot_disk().unwrap();
+            let h = &mut a.machine.hardware;
+            h.output(0xa8, 0xf8);
+            h.write(0xffff, 0xff);
+            h.output(0xff, 9);
+            h.write(0xf104, 2);
+            h.output(0xff, 0);
+            h.write(0xf104, 1);
+        });
+        assert_eq!(msx_disk_boot_state(), 1);
+        APP.with(|a| a.borrow_mut().machine.hardware.output(0xff, 9));
+        assert_eq!(msx_disk_boot_state(), 2);
+    }
 }

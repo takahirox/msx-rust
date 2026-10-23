@@ -3,7 +3,7 @@ use msx_core::{cpu::Bus, firmware, Firmware, Machine, Mapper, Model};
 fn boot(m: &mut Machine) {
     for _ in 0..600 {
         m.frame();
-        if m.hardware.ram[0xc202] == 0xa5 {
+        if m.hardware.read(0xc202) == 0xa5 {
             return;
         }
     }
@@ -29,8 +29,8 @@ fn bundled_cbios_executes_standard_services_and_expanded_slots_on_z80() {
     m.load_cartridge(&firmware::cbios_test_cartridge()).unwrap();
     boot(&mut m);
     m.frame();
-    assert_eq!(m.hardware.ram[0xfcc4] & 0x80, 0x80); // BIOS EXPTBL.
-    assert_eq!(m.hardware.ram[0xc200], 0x5a); // BIOS WRSLT/RDSLT round trip.
+    assert_eq!(m.hardware.read(0xfcc4) & 0x80, 0x80); // BIOS EXPTBL.
+    assert_eq!(m.hardware.read(0xc200), 0x5a); // BIOS WRSLT/RDSLT round trip.
     assert_eq!(m.hardware.slots & 0xc3, 0xc0); // BIOS page zero, expanded RAM stack.
     assert_eq!(m.hardware.secondary[3] >> 6, 3);
     assert_eq!(&m.hardware.vdp.vram[0x1802..0x1815], b"C-BIOS SERVICE TEST");
@@ -38,12 +38,12 @@ fn bundled_cbios_executes_standard_services_and_expanded_slots_on_z80() {
     assert_eq!(pixel(&m, 0, 16), [255, 255, 255]);
     assert_eq!(pixel(&m, 1, 16), [0, 0, 0]);
     assert_eq!(pixel(&m, 8, 16), [0, 0, 0]);
-    assert_eq!(m.hardware.ram[0xc201], 0);
+    assert_eq!(m.hardware.read(0xc201), 0);
     m.hardware.key(8, 0, true);
     for _ in 0..3 {
         m.frame();
     }
-    assert_eq!(m.hardware.ram[0xc201], 1); // SNSMAT return, not host text input.
+    assert_eq!(m.hardware.read(0xc201), 1); // SNSMAT return, not host text input.
     assert_eq!(m.hardware.psg.registers[8], 15);
     assert!(m.hardware.psg.samples.iter().any(|s| s.abs() > 0.05));
     assert_eq!(pixel(&m, 8, 16), [255, 255, 255]);
@@ -99,7 +99,7 @@ fn firmware_switches_release_cartridge_banks_and_restore_msx1_basic() {
     for _ in 0..300 {
         m.frame();
     }
-    assert_eq!(m.hardware.ram[0xc202], 0);
+    assert_eq!(m.hardware.read(0xc202), 0);
     assert!(
         String::from_utf8_lossy(&m.hardware.vdp.vram[0x1800..0x1b00])
             .contains("No cartridge found.")

@@ -47,7 +47,9 @@ pub struct Hardware {
     pub rtc: rtc::Rtc,
     pub fdc: disk::Controller,
     pub disk_rom: Vec<u8>,
+    /// Physical RAM storage. CPU-address observations must use the Bus mapping.
     pub ram: Vec<u8>,
+    ram_segments: [u8; 4],
     pub bios: Vec<u8>,
     pub cartridge: Vec<u8>,
     mapping: Mapping,
@@ -74,7 +76,10 @@ impl Default for Hardware {
             rtc: rtc::Rtc::default(),
             fdc: disk::Controller::default(),
             disk_rom: firmware::disk_rom(),
-            ram: vec![0; 65536],
+            // Reserve the largest profile up front; model changes and reset
+            // must not allocate during a transactional cartridge commit.
+            ram: vec![0; 256 * 1024],
+            ram_segments: [0; 4],
             bios: firmware::bios(),
             cartridge: Vec::new(),
             mapping: Mapping::default(),
@@ -97,6 +102,7 @@ impl Hardware {
     /// of memory while allocating replacement RAM, firmware or video buffers.
     fn reset(&mut self) {
         self.ram.fill(0);
+        self.ram_segments = [0; 4];
         self.fdc.reset();
         self.mapping.reset();
         self.slots = 0xf0;
@@ -135,6 +141,14 @@ impl Hardware {
     }
 }
 impl Hardware {
+    fn ram_address(&self, address: u16) -> usize {
+        if self.model == Model::Msx2 {
+            usize::from(self.ram_segments[usize::from(address >> 14)]) * 0x4000
+                + usize::from(address & 0x3fff)
+        } else {
+            usize::from(address)
+        }
+    }
     fn slot(&self, address: u16) -> (u8, u8) {
         let page = (address >> 14) * 2;
         let primary = (self.slots >> page) & 3;
@@ -163,7 +177,9 @@ impl Bus for Hardware {
             (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
             (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
-            (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[a],
+            (3, sub) if self.model == Model::Msx1 || sub == 3 => {
+                self.ram[self.ram_address(address)]
+            }
             _ => 255,
         }
     }
@@ -178,7 +194,10 @@ impl Bus for Hardware {
             }
             (1, 0) if self.mapping.scc_access(address) => self.scc.write(address, value),
             (1, 0) => self.mapping.write(address, value),
-            (3, sub) if self.model == Model::Msx1 || sub == 3 => self.ram[address as usize] = value,
+            (3, sub) if self.model == Model::Msx1 || sub == 3 => {
+                let a = self.ram_address(address);
+                self.ram[a] = value;
+            }
             _ => {}
         }
     }
@@ -198,6 +217,9 @@ impl Bus for Hardware {
                 }
             }
             0xb5 if self.model == Model::Msx2 => self.rtc.read(),
+            0xfc..=0xff if self.model == Model::Msx2 => {
+                0xf0 | self.ram_segments[usize::from(port as u8 - 0xfc)]
+            }
             0xa8 => self.slots,
             0xa9 => self
                 .keyboard
@@ -216,6 +238,9 @@ impl Bus for Hardware {
             0x99 => self.vdp.control(value),
             0x9a => self.vdp.write_palette(value),
             0x9b => self.vdp.write_indirect(value),
+            0xfc..=0xff if self.model == Model::Msx2 => {
+                self.ram_segments[usize::from(port as u8 - 0xfc)] = value & 15;
+            }
             0xb4 if self.model == Model::Msx2 => self.rtc.selected = value & 15,
             0xb5 if self.model == Model::Msx2 => self.rtc.write(value),
             0xa0 => self.psg.select(value),
@@ -300,7 +325,7 @@ impl Machine {
         let h = &mut self.hardware;
         h.subrom.clear();
         match firmware {
-            Firmware::WeaveBasic => firmware::write_bios(&mut h.bios),
+            Firmware::WeaveBasic => firmware::write_bios(&mut h.bios, h.model == Model::Msx2),
             Firmware::Cbios => {
                 h.bios.copy_from_slice(if h.model == Model::Msx2 {
                     firmware::CBIOS_MSX2_MAIN
@@ -317,9 +342,6 @@ impl Machine {
                 h.subrom.extend_from_slice(&self.diagnostic_sub);
             }
             Firmware::User => unreachable!("local firmware uses validated buffers"),
-        }
-        if h.model == Model::Msx2 && firmware == Firmware::WeaveBasic {
-            h.bios[0x2d] = 1;
         }
         h.firmware = firmware;
     }

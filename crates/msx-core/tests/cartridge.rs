@@ -248,7 +248,7 @@ fn large_images_reach_last_bank_without_truncation() {
 fn validation_and_auto_are_conservative_and_transactional() {
     let mut m = machine(Mapper::Ascii8);
     m.hardware.write(0x7800, 7);
-    m.hardware.ram[0xc000] = 99;
+    m.hardware.write(0xc000, 99);
     m.cpu.pc = 0x4321;
     let old_bios = m.hardware.bios.clone();
     for (rom, kind) in [
@@ -264,7 +264,7 @@ fn validation_and_auto_are_conservative_and_transactional() {
     ] {
         assert!(m.load_cartridge_owned(rom, kind).is_err());
         assert_eq!(m.hardware.read(0xbfff), 7);
-        assert_eq!(m.hardware.ram[0xc000], 99);
+        assert_eq!(m.hardware.read(0xc000), 99);
         assert_eq!(m.cpu.pc, 0x4321);
         assert_eq!(m.hardware.bios, old_bios);
     }
@@ -319,12 +319,12 @@ fn cpu_executes_from_a_switched_bank() {
             // The default MSX2 C-BIOS discovers slots/RAM before AB init.
             for _ in 0..600 {
                 m.frame();
-                if m.hardware.ram[0xc000] == 0x5a {
+                if m.hardware.read(0xc000) == 0x5a {
                     break;
                 }
             }
             assert!(m.cpu.halted);
-            assert_eq!(m.hardware.ram[0xc000], 0x5a);
+            assert_eq!(m.hardware.read(0xc000), 0x5a);
         }
     }
 }

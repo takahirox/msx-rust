@@ -12,6 +12,11 @@ fn main() {
         msx_core::firmware::disk_rom(),
     )
     .unwrap();
+    fs::write(
+        format!("{dir}/ram-mapper-test-cartridge.rom"),
+        msx_core::firmware::ram_mapper_cartridge(),
+    )
+    .unwrap();
     for mapper in [
         msx_core::Mapper::Ascii8Sram2,
         msx_core::Mapper::Ascii8Sram8,
