@@ -1,3 +1,61 @@
+# Issue 43 stack and exchange access order
+
+Source: [Correct Z80 stack and EX (SP) memory-access ordering](https://github.com/takahirox/msx-rust/issues/43).
+Local pre-merge validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0 and Playwright 1.64.1 / Chromium. The Run's upstream checkpoint
+was `eedca0c`; its CPU implementation was unchanged from evaluation baseline
+`0ea455fc9dabd42be6e7abeafe2c8305f844b8b2`. A read-only check of GitHub `main`
+also returned that baseline. All results below were executed by this implementation
+node; no delegated or historical CI results are substituted.
+
+Before changing CPU code, the new `stack_order` suite failed four ordering tests
+(PUSH, CALL/RST, interrupt entry and EX); both ordinary-store and POP/RET controls
+passed. The new MSX2 PUSH and EX integration tests also failed against the unchanged
+CPU: underlying FFFEh RAM became 5Ah, expected retained 6Bh, when high byte 3Fh
+hid RAM. Seven other `ram_mapper` tests, including the new MSX1 control, passed.
+The combined baseline invocation stopped after the failing `ram_mapper` binary;
+`stack_order` was then run separately to obtain its actual failures.
+
+With the correction, PUSH writes FFFFh before FFFEh from SP=0000h. The integration
+vectors verify both visible→hidden (retain 6Bh) and hidden→visible (write 5Ah)
+transitions, selector readback and the untouched byte behind FFFFh via a page-2
+RAM alias. All HL/IX/IY exchanges at SP=FFFEh retain their original two-byte read
+result even when the subsequent high-byte write changes the slot. The MSX1 probes
+verify that FFFFh remains ordinary flat RAM.
+
+| Check | Actual result |
+| --- | --- |
+| Baseline `cargo test -p msx-core --locked --test stack_order` | Expected failure: 4 failed, 2 controls passed |
+| Baseline `cargo test -p msx-core --locked --test stack_order --test ram_mapper` | Expected failure in `ram_mapper`: 2 failed, 7 passed; `stack_order` run separately above |
+| Corrected focused command with both test binaries | Passed: 6 access-trace and 9 RAM-mapper tests |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 165 tests, no failures or ignored tests |
+| `./scripts/build.sh` | Passed with pinned toolchain and local linker workaround below; first attempt failed to load `libLLVM.dylib` |
+| `node scripts/check-dist.mjs` | Passed: exact inventory, disk assets, pinned ROM/notice hashes, provenance, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| `npm test` | Passed: all 98 browser tests in 9.2 minutes, no failures or skipped tests |
+
+The shell initially selected Homebrew Rust 1.94.0; every Cargo validation command
+above used the README's Rust 1.99.0 `PATH` selection. The pinned toolchain's
+`rust-lld` could not locate its existing `libLLVM.dylib`. As in the earlier envelope
+validation below, an ignored `target/issue43-rust-lld` shell wrapper exports
+`DYLD_LIBRARY_PATH` as the pinned sysroot's `lib` directory and executes that
+sysroot's `lib/rustlib/aarch64-apple-darwin/bin/rust-lld` with its original arguments.
+Only the build invocation selects the wrapper through
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`; tracked build configuration and host
+toolchain files are unchanged.
+
+The [architecture contract](architecture.md#cpu-memory-access-order) documents
+ordered accesses and the remaining instruction-level timing approximation.
+Source-Issue/full-diff self-review found no blocking findings. Production changes
+are limited to the shared CPU's PUSH and EX write sequences; the low-first word
+helper, instruction cycle totals and bus/peripheral implementations are unchanged.
+Optional pinned reference-emulator trace comparison, physical hardware,
+proprietary firmware and commercial gameplay were not performed. These tests do
+not establish broad commercial compatibility. Required post-merge verification:
+none. No push, pull request, merge or GitHub comment is part of this node.
+
 # Issue 37 AY envelope
 
 Source: [Correct AY-3-8910 envelope timing and register-write phase behavior](https://github.com/takahirox/msx-rust/issues/37).

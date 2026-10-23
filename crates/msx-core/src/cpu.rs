@@ -161,8 +161,11 @@ impl Cpu {
         bus.write(a.wrapping_add(1), (v >> 8) as u8);
     }
     fn push(&mut self, bus: &mut impl Bus, v: u16) {
-        self.sp = self.sp.wrapping_sub(2);
-        Self::write16(bus, self.sp, v);
+        // Each write may change the mapping used by the following access.
+        self.sp = self.sp.wrapping_sub(1);
+        bus.write(self.sp, (v >> 8) as u8);
+        self.sp = self.sp.wrapping_sub(1);
+        bus.write(self.sp, v as u8);
     }
     fn pop(&mut self, bus: &mut impl Bus) -> u16 {
         let v = Self::read16(bus, self.sp);
@@ -574,7 +577,10 @@ impl Cpu {
                     }
                     4 => {
                         let v = Self::read16(bus, self.sp);
-                        Self::write16(bus, self.sp, self.index(idx));
+                        let original = self.index(idx);
+                        // Capture both reads before writing high byte, then low byte.
+                        bus.write(self.sp.wrapping_add(1), (original >> 8) as u8);
+                        bus.write(self.sp, original as u8);
                         self.set_index(idx, v);
                         19
                     }
