@@ -147,6 +147,12 @@ Clocks remain 3,579,545 Hz for the CPU and 44,100 Hz for audio sampling; frame
 budgets remain 228 × 262 (NTSC) and 228 × 313 (MSX2 PAL). The Wasm frame-budget
 export and browser frame accumulator retain these budgets and clock rates.
 
+The shared WD2793 [Type-I movement scheduler](disks.md) uses command-relative
+fractional-cycle deadlines for 6/12/20/30 ms steps. It consumes all elapsed pulses
+and the final completion interval independently of tick partition, preserving
+issued movement on interruption. The first eligible pulse is issued at command
+start; internal startup latency and verification settling/search remain omitted.
+
 This is instruction-level accounting. Devices advance after each instruction;
 individual access phases, VRAM contention, V9938 arbitration and other
 device-specific timing approximations remain separate work. No openMSX trace

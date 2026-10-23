@@ -10,9 +10,8 @@ fn drive(size: usize) -> Controller {
     f
 }
 fn wait(f: &mut Controller) {
-    for _ in 0..2000 {
-        f.tick(114);
-    }
+    // More than 79 intervals at the slowest (30 ms) rate.
+    f.tick(8_500_000);
 }
 #[test]
 fn geometry_and_media_are_bounded() {
@@ -394,9 +393,11 @@ fn type_one_verify_checks_resulting_track_and_media_geometry() {
             f.write(1, track);
             f.write(3, 7);
             f.write(0, command | verify);
-            assert_eq!(f.read(0) & 1, 1);
+            let moving = command != 0x10 || track != 7;
+            assert_eq!(f.irq, !moving);
+            assert_eq!(f.read(0) & 1, u8::from(moving));
             wait(&mut f);
-            assert!(f.irq);
+            assert_eq!(f.irq, moving);
             assert!(!f.drq);
             assert_eq!(f.read(1), expected_track);
             let error = if verify != 0 && expected_track != physical_track {
