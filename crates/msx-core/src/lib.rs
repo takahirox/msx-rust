@@ -35,7 +35,7 @@ pub enum Firmware {
     Disk,
 }
 use basic::Basic;
-use cpu::{Bus, Cpu};
+use cpu::{Bus, Cpu, FetchWait};
 use psg::Psg;
 use std::collections::VecDeque;
 use vdp::Vdp;
@@ -280,7 +280,7 @@ pub struct Machine {
 impl Default for Machine {
     fn default() -> Self {
         Self {
-            cpu: Cpu::new(),
+            cpu: Cpu::with_fetch_wait(FetchWait::Msx),
             hardware: Hardware::default(),
             basic: Basic::default(),
             boot_policy: BootPolicy::Automatic,
@@ -369,7 +369,7 @@ impl Machine {
     }
     pub fn reset(&mut self) {
         self.hardware.reset();
-        self.cpu = Cpu::new();
+        self.cpu = Cpu::with_fetch_wait(FetchWait::Msx);
         self.basic = Basic::default();
         self.frame_debt = 0;
     }

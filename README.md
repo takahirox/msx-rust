@@ -189,9 +189,12 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
 
 This is an initial implementation, not a claim of universal MSX software compatibility.
-Instruction-level timing is used; individual bus phases, MSX M1 wait states, analog
-video/overscan, VDP access contention, and undocumented CPU silicon quirks are not
-accurately modeled. Sprite status at raster/off-screen edges and unusual combined
+Both MSX models include one extra T-state per ordinary M1 opcode/prefix fetch
+and HALT idle fetch. Standalone `Cpu::new()` retains zero-wait Z80 timing;
+[the timing contract and tests](docs/architecture.md#cpu-fetch-timing) describe both.
+Instruction-level timing is used; individual bus phases, analog video/overscan,
+VDP access contention, and undocumented CPU silicon quirks are not accurately
+modeled. Sprite status at raster/off-screen edges and unusual combined
 VDP modes are not compatibility guarantees. There are no disk/tape drives,
 SCC+/SCC-I or FM audio expansions. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking

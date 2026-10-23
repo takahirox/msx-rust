@@ -1,11 +1,22 @@
 //! Independently implemented Z80 decoder, organized by the instruction bit fields.
-//! Timings are T-states, excluding machine-specific bus contention/wait states.
+//! Timings are elapsed T-states, including the selected opcode-fetch wait policy.
+//! Access-phase synchronization and bus contention are not modeled.
 pub const S: u8 = 0x80;
 pub const Z: u8 = 0x40;
 pub const H: u8 = 0x10;
 pub const PV: u8 = 4;
 pub const N: u8 = 2;
 pub const C: u8 = 1;
+
+/// Ordinary M1 fetch waits; interrupt acknowledgement uses separate timing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FetchWait {
+    /// Standalone, zero-wait Z80 timing.
+    #[default]
+    None,
+    /// One extra T-state per opcode/prefix fetch and HALT idle fetch.
+    Msx,
+}
 
 pub trait Bus {
     fn read(&mut self, address: u16) -> u8;
@@ -39,6 +50,8 @@ pub struct Cpu {
     pub halted: bool,
     pub nmi_pending: bool,
     ei_delay: u8,
+    fetch_wait: FetchWait,
+    fetch_wait_cycles: u32,
     pub tstates: u64,
 }
 fn sz(v: u8) -> u8 {
@@ -52,6 +65,12 @@ impl Cpu {
         Self {
             sp: 0xffff,
             ..Self::default()
+        }
+    }
+    pub fn with_fetch_wait(fetch_wait: FetchWait) -> Self {
+        Self {
+            fetch_wait,
+            ..Self::new()
         }
     }
     pub fn a(&self) -> u8 {
@@ -126,8 +145,12 @@ impl Cpu {
         self.refresh = (self.refresh & 0x80) | (self.refresh.wrapping_add(1) & 0x7f);
     }
     fn opcode(&mut self, bus: &mut impl Bus) -> u8 {
+        self.fetch_wait();
         self.refresh();
         self.byte(bus)
+    }
+    fn fetch_wait(&mut self) {
+        self.fetch_wait_cycles += u32::from(self.fetch_wait == FetchWait::Msx);
     }
     fn read16(bus: &mut impl Bus, a: u16) -> u16 {
         let lo = bus.read(a);
@@ -234,6 +257,7 @@ impl Cpu {
     }
     /// Executes one instruction or interrupt acknowledge, returning consumed T-states.
     pub fn step(&mut self, bus: &mut impl Bus) -> u32 {
+        self.fetch_wait_cycles = 0;
         let cycles = if self.nmi_pending {
             self.nmi_pending = false;
             self.halted = false;
@@ -262,6 +286,7 @@ impl Cpu {
                 }
             }
         } else if self.halted {
+            self.fetch_wait();
             self.refresh();
             4
         } else {
@@ -286,6 +311,7 @@ impl Cpu {
                 }
             }
         };
+        let cycles = cycles + self.fetch_wait_cycles;
         self.ei_delay = self.ei_delay.saturating_sub(1);
         self.tstates += cycles as u64;
         cycles
