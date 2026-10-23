@@ -285,6 +285,30 @@ pub extern "C" fn msx_restore_sram(length: u32) -> u32 {
     })
 }
 
+/// ROMless slot-1 accessory; validate IDs before changing the running session.
+#[no_mangle]
+pub extern "C" fn msx_install_sound_cartridge(profile: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let result = msx_core::SoundCartridgeProfile::try_from(profile)
+            .and_then(|profile| a.machine.install_sound_cartridge(profile));
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_sound_cartridge_profile() -> u32 {
+    APP.with(|a| {
+        a.borrow()
+            .machine
+            .sound_cartridge_profile()
+            .map_or(0, |p| p as u32)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_remove_sound_cartridge() {
+    APP.with(|a| a.borrow_mut().machine.remove_sound_cartridge());
+}
+
 /// Profile 1 is the explicit Philips NMS1200-style local disk ROM. Unknown
 /// profiles and incomplete/canceled uploads are rejected before touching hardware.
 #[no_mangle]
@@ -426,6 +450,46 @@ pub extern "C" fn msx_disk_boot_state() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scci_explicit_ids_replacement_reset_and_invalid_requests_are_atomic() {
+        for model in [0, 1] {
+            msx_model(model);
+            assert_eq!(msx_cbios(), 1);
+            for profile in [1, 2] {
+                assert_eq!(msx_install_sound_cartridge(profile), 1);
+                assert_eq!(msx_sound_cartridge_profile(), profile);
+                APP.with(|a| {
+                    let mut a = a.borrow_mut();
+                    let h = &mut a.machine.hardware;
+                    h.secondary[3] = 255;
+                    h.slots = 0xd4;
+                    h.write(0x5000, if profile == 1 { 0 } else { 8 });
+                    h.write(0xbffe, 1);
+                    h.write(0x4123, 0x7b);
+                    a.machine.cpu.pc = 0x1234;
+                });
+                for id in [0, 3, u32::MAX] {
+                    assert_eq!(msx_install_sound_cartridge(id), 0);
+                }
+                msx_upload(16);
+                msx_cancel_upload();
+                assert_eq!(msx_load(16, 0, 1), 0);
+                APP.with(|a| {
+                    let mut a = a.borrow_mut();
+                    assert_eq!(a.machine.cpu.pc, 0x1234);
+                    assert_eq!(a.machine.hardware.read(0x4123), 0x7b);
+                });
+                msx_reset();
+                assert_eq!(msx_sound_cartridge_profile(), profile);
+                assert_eq!(msx_firmware(), 1);
+                assert_eq!(msx_boot_policy(), 1);
+                msx_remove_sound_cartridge();
+                assert_eq!(msx_sound_cartridge_profile(), 0);
+                assert_eq!(msx_firmware(), 1);
+            }
+        }
+    }
 
     #[test]
     fn disk_rom_staging_profile_validation_and_cancellation_are_atomic() {

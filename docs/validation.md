@@ -569,3 +569,51 @@ including keyboard interaction, local ROM selection, and audio activation/listen
 Check that Wasm and all relative assets load without errors. Pre-merge artifact and
 subpath checks do not establish that publication succeeded. Keep this pending until
 performed; do not close it based on a local build alone.
+
+## Issue #49: ROMless SCC-I sound cartridges (2026-10-24)
+
+Implemented explicit Snatcher and SD Snatcher 64 KiB profiles across the core,
+raw Wasm ABI and advanced browser controls. See [hardware decoding, reset policy,
+provenance and fixture methodology](scc.md#romless-snatcher-and-sd-snatcher-scc-i).
+The original CPU fixture loads a sector through the Philips interface, executes
+code copied into accessory RAM, checks compatible/plus fifth-wave readbacks and
+writes independently expected disk bytes. Native/browser cases cover both models
+and profiles; browser cases run at `/` and `/msx-rust/` with compiled Wasm.
+
+| Check | Final result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed, 198 tests |
+| `./scripts/build.sh` | Passed using the documented local linker workaround |
+| `node scripts/check-dist.mjs` | Passed, including new exports and asset provenance |
+| `npm ci` / `npx playwright install chromium` | Passed |
+| `npm test` | Passed, 110 cases, 9.7 minutes; includes eight SCC-I cases and existing SCC/PSG, SRAM, disk and firmware regressions |
+| `git diff --check`, staged diff whitespace and local Markdown file links | Passed |
+
+Used the pinned Rust 1.99.0 toolchain at the front of PATH. The initial Wasm link
+failed with the already documented macOS `libLLVM.dylib` lookup issue; the ignored
+`target/local-linker/rust-lld` wrapper sets that toolchain's library path and invokes
+its original linker. No dependency, toolchain or production build settings changed.
+Development fixture/bootstrap errors were corrected. Earlier browser attempts were
+intentionally interrupted for a test setup correction and then a reference-review
+fix; the final full run above completed without failures or skipped cases. The
+final build/inventory checks were repeated after a help-text clarification.
+
+Reviewed the complete source Issue and staged diff using the repository review
+guidelines. Review included both RAM populations, selector/protection boundaries,
+mode priority, SCC-I maps and deformation, independent fifth-wave PCM, hidden
+phase continuity and PSG mixing, allocation failures, reset versus insertion,
+slot-1 replacement, preserved firmware/modified disks, browser cancellation and
+outgoing SRAM saves. A raw deformation-bit clock-source detail in the pinned
+reference was corrected and tested with distinct channel phases. No blocking
+findings remain in the local source/full-diff review. No PR was opened or reviewed,
+and no push, comment or merge was performed.
+
+All mandatory local checks were performed and passed. Optional openMSX runtime/PCM
+comparison and physical measurements were unperformed. Underlying RAM writes
+beneath readable sound overlays remain the explicitly provisional upstream policy;
+DAC latency, analog effects and deformation timing retain documented synthesis
+approximations. No proprietary firmware or commercial-game bytes were used.
+Fixture success does not establish Snatcher or SD Snatcher execution/playability.
+Issue #49 requires no post-merge verification; publication was not performed.

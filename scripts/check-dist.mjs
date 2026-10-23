@@ -9,7 +9,7 @@ for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt
 }
 const module = await WebAssembly.compile(await readFile('dist/msx_wasm.wasm'));
 assert.deepEqual(WebAssembly.Module.imports(module), []);
-for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy', 'msx_sram', 'msx_sram_len', 'msx_restore_sram', 'msx_disk_profile', 'msx_install_disk_rom', 'msx_remove_disk_rom', 'msx_mount_disk', 'msx_boot_disk', 'msx_eject_disk', 'msx_disk', 'msx_disk_len', 'msx_disk_flags', 'msx_disk_protect', 'msx_disk_exported', 'msx_disk_boot_state']) {
+for (const name of ['memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy', 'msx_sram', 'msx_sram_len', 'msx_restore_sram', 'msx_install_sound_cartridge', 'msx_sound_cartridge_profile', 'msx_remove_sound_cartridge', 'msx_disk_profile', 'msx_install_disk_rom', 'msx_remove_disk_rom', 'msx_mount_disk', 'msx_boot_disk', 'msx_eject_disk', 'msx_disk', 'msx_disk_len', 'msx_disk_flags', 'msx_disk_protect', 'msx_disk_exported', 'msx_disk_boot_state']) {
   assert(WebAssembly.Module.exports(module).some(e => e.name === name), `Missing Wasm export ${name}`);
 }
 for (const id of [6, 7, 8, 9, 10]) {

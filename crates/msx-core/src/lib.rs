@@ -10,6 +10,9 @@ pub mod font;
 pub mod psg;
 pub mod rtc;
 pub mod scc;
+mod sound_cartridge;
+use sound_cartridge::SoundCartridge;
+pub use sound_cartridge::SoundCartridgeProfile;
 pub mod vdp;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,6 +57,7 @@ pub struct Hardware {
     pub bios: Vec<u8>,
     pub cartridge: Vec<u8>,
     mapping: Mapping,
+    sound_cartridge: Option<SoundCartridge>,
     pub slots: u8,
     pub ppi_c: u8,
     pub ppi_control: u8,
@@ -85,6 +89,7 @@ impl Default for Hardware {
             bios: firmware::bios(),
             cartridge: Vec::new(),
             mapping: Mapping::default(),
+            sound_cartridge: None,
             slots: 0xf0,
             ppi_c: 0,
             ppi_control: 0x82,
@@ -120,7 +125,12 @@ impl Hardware {
         self.release_keys();
         self.vdp.reset();
         self.psg.reset();
-        self.scc = scc::Scc::default();
+        if let Some(cart) = &mut self.sound_cartridge {
+            cart.reset();
+            self.scc.reset_scci();
+        } else {
+            self.scc = scc::Scc::default();
+        }
         self.keys.clear();
         self.services.clear();
         // A real BIOS probes slots itself. Our firmware boots AB cartridges in their initial banks.
@@ -186,6 +196,11 @@ impl Bus for Hardware {
             {
                 self.philips_rom.as_ref().unwrap_or(&self.disk_rom)[(address - 0x4000) as usize]
             }
+            (1, 0) if self.sound_cartridge.is_some() => self
+                .sound_cartridge
+                .as_ref()
+                .unwrap()
+                .read(address, &mut self.scc),
             (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
             (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
@@ -211,6 +226,11 @@ impl Bus for Hardware {
                     self.fdc.write((address - 0x7ff8) as u8, value);
                 }
             }
+            (1, 0) if self.sound_cartridge.is_some() => self
+                .sound_cartridge
+                .as_mut()
+                .unwrap()
+                .write(address, value, &mut self.scc),
             (1, 0) if self.mapping.scc_access(address) => self.scc.write(address, value),
             (1, 0) => self.mapping.write(address, value),
             (3, sub) if self.model == Model::Msx1 || sub == 3 => {
@@ -323,6 +343,7 @@ impl Machine {
         self.boot_policy = BootPolicy::Explicit;
         self.hardware.cartridge.clear();
         self.hardware.mapping = Mapping::default();
+        self.hardware.sound_cartridge = None;
         self.reset();
         Ok(())
     }
@@ -335,6 +356,7 @@ impl Machine {
         self.boot_policy = BootPolicy::Explicit;
         self.hardware.cartridge.clear();
         self.hardware.mapping = Mapping::default();
+        self.hardware.sound_cartridge = None;
         self.reset();
         Ok(())
     }
@@ -437,8 +459,32 @@ impl Machine {
         }
         self.hardware.cartridge = rom;
         self.hardware.mapping = mapping;
+        self.hardware.sound_cartridge = None;
         self.reset();
         Ok(())
+    }
+    /// Explicit ROMless slot-1 replacement. Allocate before changing any session state;
+    /// retain the selected firmware, independently installed disk interface and media.
+    pub fn install_sound_cartridge(
+        &mut self,
+        profile: SoundCartridgeProfile,
+    ) -> Result<(), String> {
+        let cart = SoundCartridge::new(profile)?;
+        self.hardware.cartridge.clear();
+        self.hardware.mapping = Mapping::default();
+        self.hardware.sound_cartridge = Some(cart);
+        self.hardware.scc = scc::Scc::default();
+        self.reset();
+        Ok(())
+    }
+    pub fn sound_cartridge_profile(&self) -> Option<SoundCartridgeProfile> {
+        self.hardware.sound_cartridge.as_ref().map(|c| c.profile)
+    }
+    /// Accessory removal restarts the selected firmware, including automatic policy.
+    pub fn remove_sound_cartridge(&mut self) {
+        if self.hardware.sound_cartridge.take().is_some() {
+            self.reset();
+        }
     }
     /// Battery-backed bytes for the current cartridge only (empty for ROM-only mappers).
     pub fn cartridge_sram(&self) -> &[u8] {
@@ -454,11 +500,16 @@ impl Machine {
         Ok(())
     }
     pub fn unload_cartridge(&mut self) {
+        if self.hardware.sound_cartridge.is_some() {
+            self.remove_sound_cartridge();
+            return;
+        }
         if self.boot_policy == BootPolicy::Automatic {
             self.install_firmware(Firmware::WeaveBasic);
         }
         self.hardware.cartridge = Vec::new();
         self.hardware.mapping = Mapping::default();
+        self.hardware.sound_cartridge = None;
         self.reset();
     }
     pub fn load_bios(&mut self, rom: &[u8]) -> Result<(), String> {
@@ -483,6 +534,7 @@ impl Machine {
         self.boot_policy = BootPolicy::Automatic;
         self.hardware.cartridge.clear();
         self.hardware.mapping = Mapping::default();
+        self.hardware.sound_cartridge = None;
         self.reset();
     }
     /// Install a separately supplied, already reserved Philips disk ROM. A failed
@@ -552,7 +604,8 @@ impl Machine {
         self.hardware.fdc.tick(cycles);
         let h = &mut self.hardware;
         // Register visibility controls CPU access, not the installed chip's audio.
-        let scc = (h.mapping.kind == Mapper::KonamiScc).then_some(&mut h.scc);
+        let scc = (h.mapping.kind == Mapper::KonamiScc || h.sound_cartridge.is_some())
+            .then_some(&mut h.scc);
         h.psg.tick_with_scc(cycles, scc);
         if self.hardware.model == Model::Msx2 {
             self.hardware.rtc.tick(cycles);

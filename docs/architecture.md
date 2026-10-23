@@ -220,3 +220,9 @@ mapper IDs, bounded Wasm save views/restores, and validated browser-local saves.
 Classic SCC registers/audio are independently implemented from public hardware
 experiments and register documentation, without emulator implementation code. See
 [the sources, register map, mixer, accuracy limits and original fixture](scc.md).
+
+ROMless Snatcher/SD Snatcher SCC-I profiles explicitly replace slot 1 with banked
+64 KiB volatile RAM and compatible/plus sound registers. They retain the selected
+system firmware and independently installed slot-2 disk interface. The fifth wave
+is independent in plus mode. See [SCC-I decoding, reset, provenance and independent
+CPU disk fixtures](scc.md#romless-snatcher-and-sd-snatcher-scc-i).
