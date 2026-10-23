@@ -4,6 +4,8 @@ use crate::font;
 mod disk;
 pub(crate) use disk::write_disk_boot;
 pub use disk::{demo_disk, disk_rom};
+mod joystick_fixture;
+pub use joystick_fixture::joystick_test_cartridge;
 mod ram_mapper_fixture;
 pub use ram_mapper_fixture::ram_mapper_cartridge;
 mod scc_fixture;

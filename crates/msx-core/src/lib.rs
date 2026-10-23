@@ -62,7 +62,9 @@ pub struct Hardware {
     pub ppi_c: u8,
     pub ppi_control: u8,
     pub keyboard: [u8; 11],
+    /// Connector one's active-low inputs; retained for existing core callers.
     pub joystick: u8,
+    joystick2: u8,
     pub vdp: Vdp,
     pub psg: Psg,
     scc: scc::Scc,
@@ -95,6 +97,7 @@ impl Default for Hardware {
             ppi_control: 0x82,
             keyboard: [255; 11],
             joystick: 0x3f,
+            joystick2: 0x3f,
             vdp: Vdp::default(),
             psg: Psg::default(),
             scc: scc::Scc::default(),
@@ -153,6 +156,17 @@ impl Hardware {
     pub fn release_keys(&mut self) {
         self.keyboard.fill(255);
         self.joystick = 0x3f;
+        self.joystick2 = 0x3f;
+    }
+    /// Set six active-low inputs on connector 0 or 1. Invalid indices leave both
+    /// connectors unchanged and return false. Pin 8 gates reads, not held state.
+    pub fn set_joystick(&mut self, connector: usize, value: u8) -> bool {
+        match connector {
+            0 => self.joystick = value & 0x3f,
+            1 => self.joystick2 = value & 0x3f,
+            _ => return false,
+        }
+        true
     }
 }
 impl Hardware {
@@ -249,10 +263,19 @@ impl Bus for Hardware {
             0x99 => self.vdp.read_status(),
             0xa2 => {
                 if self.psg.selected == 14 {
-                    if self.psg.registers[15] & 0x40 == 0 {
-                        self.joystick | 0x40
+                    // MSX motherboard compatibility policy: fixed R14 input / R15
+                    // output routing regardless of R7 direction bits. R7 itself
+                    // retains normal readback and all six audio mixer controls.
+                    let control = self.psg.registers[15];
+                    let (inputs, common) = if control & 0x40 == 0 {
+                        (self.joystick, 0x10)
                     } else {
-                        0x7f
+                        (self.joystick2, 0x20)
+                    };
+                    0x40 | if control & common == 0 {
+                        inputs & 0x3f
+                    } else {
+                        0x3f
                     }
                 } else {
                     self.psg.read()

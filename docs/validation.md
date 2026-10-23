@@ -1,3 +1,87 @@
+# Issue 55 two standard joystick connectors
+
+Source: [Complete two standard joystick connectors across core, Wasm and browser](https://github.com/takahirox/msx-rust/issues/55).
+Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium. The assigned upstream checkpoint was `027a0cb`;
+implementation follows the live Issue read from GitHub and its supplied snapshot.
+No proprietary firmware, software or physical measurements were required.
+
+The core retains connector one's public field and adds an independent second
+active-low mask. R15 bit 6 selects the connector and bits 4/5 gate reads with
+their own pin-8 commons without erasing held state. R14 bits 6/7 remain 1/0.
+Fixed R14-input/R15-output motherboard routing applies across all R7 direction
+settings while preserving register readback and audio. The legacy Wasm setter
+still controls connector one; the indexed setter accepts 0/1, masks host inputs
+and rejects other indices without changing either connector.
+
+The original MIT cartridge executes under bundled, unmodified C-BIOS on both
+models. It stores six direct PSG samples at C200h–C205h, real `GTSTCK(1,2)` at
+C206h–C207h, real `GTTRIG(1,2,3,4)` at C208h–C20Bh and keyboard `SNSMAT` results
+at C20Ch–C20Eh, then draws each byte with original black/white tiles. C210h=A5h
+marks a completed update. Native tests compare independent RAM and visible pixel
+expectations for directions, both triggers, simultaneous input, common gating,
+selection changes and released state. Register tests cover each switch, all four
+diagonals, simultaneous connectors, all R7 direction-bit combinations, unrelated
+R15 outputs and the Issue's literal `6E 57 7F 7F 6E 57` expectation. PCM comparisons
+verify that changing R7 direction bits preserves the audio of each mixer setting.
+
+Eight Playwright cases drive actual keyboard events through compiled Wasm and
+read only the diagnostic's Canvas result tiles, on both models at `/` and
+`/msx-rust/`. They cover all twelve controls, physical codes with Shift,
+normal matrix delivery, independent simultaneous holds and per-key releases,
+focus scoping, Canvas blur, window blur and visibility notifications, Pause/Resume,
+Reset, cartridge replacement/ejection and machine transitions. Window blur and
+visibility notifications are dispatched by the test harness; these are not
+physical OS/window-manager measurements. Compiled legacy/indexed ABI calls also
+verify masking, connector isolation, invalid indices and release compatibility.
+
+| Check | Actual result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed with pinned Rust 1.99.0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed with pinned Rust 1.99.0 |
+| `cargo test --workspace --locked` | Passed: 223 tests, none failed or ignored |
+| `./scripts/build.sh` | Passed with pinned toolchain and local library-path workaround below |
+| `node scripts/check-dist.mjs` | Passed: exact inventory, new exports, provenance, unmodified C-BIOS hashes and subpath links |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused joystick browser suite | Passed: all 8 model/root cases |
+| `npm test` | Passed: all 122 cases in 11.9 minutes, none failed or skipped |
+| JavaScript syntax, 65 local Markdown links and `git diff --check` | Passed |
+
+Full-diff review removed an unnecessary new paused-keydown guard: the existing
+Pause/Resume release handler already prevents held input surviving the transition.
+The full browser run was intentionally interrupted and restarted against this
+final implementation, preserving existing keyboard delivery while paused.
+
+Environment setup used `npm ci` and `npx playwright install chromium`. Initial
+native checks used the host's Homebrew Rust 1.94 before selecting the pinned
+1.99.0 toolchain at the front of PATH. The first build could not find the host
+compiler's Wasm target; the pinned compiler then exposed this host's existing
+`rust-lld` LLVM library lookup problem. Building with `DYLD_LIBRARY_PATH` set to
+the pinned toolchain's `lib` directory resolved linking; `./scripts/build.sh`
+then passed with the pinned sysroot-first PATH. No tracked build configuration,
+host toolchain files or dependencies changed. The initial diagnostic test caught
+a fixture error: its final direct probe left connector one's common high. The
+fixture now lowers both commons before BIOS polling, which preserves those bits.
+
+Source-Issue/full-diff self-review checked both models, independent held state,
+selection/common isolation, fixed directions and audio/readback, legacy/indexed
+API compatibility, physical-key and keyboard-matrix delivery, lifecycle releases,
+real firmware execution, independent result/pixel oracles and original fixture
+provenance. The production diff is limited to joystick routing/state and browser
+mapping; bundled firmware binaries, media/audio device implementations and
+ownership safeguards are unchanged. No blocking findings remain and all mandatory
+local checks above passed. The full browser run retains the firmware/keyboard,
+PSG/SCC/SCC-I audio, disk, SRAM persistence/recovery and media provenance/ownership
+regressions. No PR was opened or reviewed by this implementation node.
+
+Optional pinned-openMSX runtime comparison, physical joystick measurements and
+commercial gameplay were not performed. Reference routing/default direction and
+high-common behavior were inspected at the Issue's pinned openMSX revision;
+no upstream implementation bytes were copied. Alternate direction wiring,
+pin-6/7 feedback, mouse/paddle devices, host Gamepad API, Tab delivery and PPI C7
+sound remain separate work. Issue #55 requires no post-merge verification.
+No push, PR, merge or GitHub comment is part of this node.
+
 # Issue 53 WD2793 readiness and verification
 
 Source: [Correct WD2793 Type-I readiness and verification sequencing](https://github.com/takahirox/msx-rust/issues/53).
