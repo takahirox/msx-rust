@@ -112,7 +112,7 @@ fn slot_rom_protection_ppi_and_psg_io() {
     assert_eq!(h.input(0xa9), 255);
 }
 #[test]
-fn psg_tone_frequency_noise_and_envelopes() {
+fn psg_tone_frequency_and_noise() {
     let mut p = Psg::default();
     for (r, v) in [(0, 254), (7, 0x3e), (8, 15)] {
         p.select(r);
@@ -131,25 +131,6 @@ fn psg_tone_frequency_noise_and_envelopes() {
     p.tick(CPU_HZ / 5);
     assert_ne!(p.samples, periodic);
     assert!(p.samples.iter().all(|v| v.is_finite() && v.abs() <= 0.6));
-    for shape in 0..16 {
-        let mut p = Psg::default();
-        p.select(11);
-        p.write(1);
-        p.select(13);
-        p.write(shape);
-        assert_eq!(p.envelope_level(), if shape & 4 != 0 { 0 } else { 15 });
-        p.tick(512 * 16);
-        assert_eq!(
-            p.envelope_level(),
-            match shape {
-                0..=7 | 9 | 15 => 0,
-                11 | 13 => 15,
-                8 | 14 => 15,
-                10 | 12 => 0,
-                _ => unreachable!(),
-            }
-        );
-    }
 }
 #[test]
 fn psg_volume_zero_settles_to_silence() {

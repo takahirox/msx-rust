@@ -12,6 +12,7 @@ pub struct Psg {
     tone: [bool; 3],
     noise_count: u32,
     noise: u32,
+    // Half-tick units: +2 per CPU/16 clock, threshold 2*EP.
     envelope_count: u32,
     envelope_step: i8,
     envelope_attack: u8,
@@ -31,7 +32,7 @@ impl Default for Psg {
             noise_count: 0,
             noise: 0x1ffff,
             envelope_count: 0,
-            envelope_step: 15,
+            envelope_step: 31,
             envelope_attack: 0,
             envelope_hold: false,
             divider: 0,
@@ -60,17 +61,25 @@ impl Psg {
         };
         self.registers[r] = value & mask;
         if r == 13 {
-            self.envelope_step = 15;
-            self.envelope_attack = if value & 4 != 0 { 15 } else { 0 };
+            self.envelope_step = 31;
+            self.envelope_attack = if value & 4 != 0 { 31 } else { 0 };
             self.envelope_hold = false;
-            self.envelope_count = 0;
+            // Every R13 write restarts the index, retaining counter/divider phase.
+        } else if r == 11 || r == 12 {
+            // Period shortening clamps phase just below the next internal step.
+            self.envelope_count = self.envelope_count.min(self.envelope_period() - 1);
         }
     }
     pub fn read(&self) -> u8 {
         self.registers[self.selected as usize]
     }
     pub fn envelope_level(&self) -> u8 {
-        (self.envelope_step.max(0) as u8) ^ self.envelope_attack
+        // Two internal steps per visible AY level; see docs/psg-envelope.md.
+        ((self.envelope_step.max(0) as u8) ^ self.envelope_attack) >> 1
+    }
+    fn envelope_period(&self) -> u32 {
+        // Zero-as-one is a provisional boundary policy, not settled AY hardware.
+        2 * (u16::from_le_bytes([self.registers[11], self.registers[12]]) as u32).max(1)
     }
     fn clock(&mut self) {
         for c in 0..3 {
@@ -88,10 +97,10 @@ impl Psg {
             let feedback = (self.noise ^ (self.noise >> 3)) & 1;
             self.noise = (self.noise >> 1) | (feedback << 16);
         }
-        self.envelope_count += 1;
-        let period = u16::from_le_bytes([self.registers[11], self.registers[12]]) as u32;
-        if self.envelope_count >= 32 * period.max(1) {
-            self.envelope_count = 0;
+        self.envelope_count += 2;
+        let period = self.envelope_period();
+        if self.envelope_count >= period {
+            self.envelope_count -= period;
             if !self.envelope_hold {
                 self.envelope_step -= 1;
                 if self.envelope_step < 0 {
@@ -102,15 +111,15 @@ impl Psg {
                         self.envelope_hold = true;
                     } else if shape & 1 != 0 {
                         if shape & 2 != 0 {
-                            self.envelope_attack ^= 15;
+                            self.envelope_attack ^= 31;
                         }
                         self.envelope_step = 0;
                         self.envelope_hold = true;
                     } else {
                         if shape & 2 != 0 {
-                            self.envelope_attack ^= 15;
+                            self.envelope_attack ^= 31;
                         }
-                        self.envelope_step = 15;
+                        self.envelope_step = 31;
                     }
                 }
             }
@@ -168,3 +177,6 @@ impl Psg {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,11 @@
+# Original MIT-licensed Z80 probe for Issue #37. Placed at 0100h in a generated
+# system ROM, entered by JP 0100h. DI; each pair is LD A,n / OUT (port),A.
+# Mixer disables tone/noise gates; only channel A selects the envelope.
+# EP=0101h, descending repeating shape 8; HALT with interrupts disabled.
+f3
+3e 07 d3 a0 3e 3f d3 a1
+3e 08 d3 a0 3e 10 d3 a1
+3e 0b d3 a0 3e 01 d3 a1
+3e 0c d3 a0 3e 01 d3 a1
+3e 0d d3 a0 3e 08 d3 a1
+76

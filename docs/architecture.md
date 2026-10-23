@@ -127,7 +127,10 @@ use exact palette pixels for all four modes, read-ahead and address wrapping,
 VBlank timing/status clearing, sprite priority/magnification/early clock, overflow
 and collision including transparent sprites. PSG tests count square-wave edges at
 approximately 440 Hz, distinguish noise output, check bounded finite samples and
-all 16 envelope shape terminal/repeat states. These do not measure analog fidelity.
+all sixteen envelope shapes at exact cycle boundaries. The [envelope timing and
+write contract](psg-envelope.md) documents the clock derivation, provisional phase
+policy, independently sampled PCM oracle and original Z80/Wasm probe. These do
+not measure analog fidelity.
 
 `basic.rs` tests program flow, nested and zero-trip loops, arithmetic precedence,
 strings, errors, graphics coordinates across the entire screen, tile-font retention
