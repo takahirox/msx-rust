@@ -323,6 +323,24 @@ pub fn msx2_cartridge() -> Vec<u8> {
         for b in [0x18, 0x3c, 0x7e, 0xff, 0xff, 0x7e, 0x3c, 0x18] {
             c.out(0x98, b);
         }
+        // Independently authored cross-mode probe: physical C100h/1C100h
+        // become logical 18200h/18201h (display page 1, row 130).
+        // A flat implementation instead leaves the normal fill at these pixels.
+        c.reg(0, 6); // Linear SCREEN 5; do not clear VRAM.
+        for (physical, value) in [
+            (0xc100, if mode == 10 { 0x23 } else { 0x1c }),
+            (0x1c100, if mode == 10 { 0x32 } else { 0xe0 }),
+        ] {
+            c.address(physical);
+            c.out(0x98, value);
+        }
+        c.reg(0, mode);
+        // Read the first logical byte through the buffered CPU data port too.
+        c.reg(14, 6);
+        c.out(0x99, 0);
+        c.out(0x99, 2); // Read setup at 18200h, including prefetch.
+        c.emit(&[0xdb, 0x98, 0xfe, if mode == 10 { 0x23 } else { 0x1c }]);
+        c.jump(0xc2, "failure");
         c.reg(1, 0x40);
         c.emit(&[0xc9]);
     }

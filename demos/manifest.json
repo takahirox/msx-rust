@@ -60,12 +60,12 @@
       "file": "msx2-test-cartridge.rom",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "source": "https://github.com/takahirox/msx-rust/blob/cc80cc69fe62b854065988f15ca6e90b6e13bea4/crates/msx-core/src/firmware.rs",
-      "download": "https://github.com/takahirox/msx-rust/blob/cc80cc69fe62b854065988f15ca6e90b6e13bea4/crates/msx-core/src/firmware.rs",
-      "version": "msx2_cartridge generator at cc80cc69fe62b854065988f15ca6e90b6e13bea4",
-      "changes": "Generated from the original project source by scripts/build.sh.",
+      "source": "https://github.com/takahirox/msx-rust/blob/main/crates/msx-core/src/firmware.rs",
+      "download": "https://github.com/takahirox/msx-rust/blob/main/crates/msx-core/src/firmware.rs",
+      "version": "msx2_cartridge generator with Issue #35 cross-mode VRAM probe",
+      "changes": "Generated from the checked-out original project source by scripts/build.sh; Issue #35 adds SCREEN 5 uploads reinterpreted through SCREEN 7/8 ports and pixels.",
       "size": 16384,
-      "sha256": "d3f9447666f31a33b4bc4270128ee035b9125a1bbc039ff462c87321f62b9b4d",
+      "sha256": "806e8ec15010229cb8da08863e94ecec5edde21cd22946d7b4750d86b5468dd9",
       "notices": [
         "demos/PROVENANCE.txt",
         "LICENSE",
@@ -78,6 +78,6 @@
     "demos/Z88DK-LICENSE.txt": "83ac98165b8bd7e95a57d78c8d634e66ac646a6730da8237d6330be7de598a0d",
     "demos/PLUSTAKER-LICENSE.txt": "9b4e0bead8930f867a688bd2efec26e9a54c892a8dd4b6de41b67b0fd7363db2",
     "demos/YOKO-LICENSE.txt": "bd8b6b20a54450472a7e7ed624af4931549b4e8781e6e8b7ac86689c081eaf36",
-    "demos/PROVENANCE.txt": "c8e37e1e921846fa54bcb54f0c4a773fed56c011176d894d1fd7b310a0e1fcb6"
+    "demos/PROVENANCE.txt": "15a65f628f52281adae6182af9c6df40c6f310c2db80a978ed5f7d99b0253303"
   }
 }

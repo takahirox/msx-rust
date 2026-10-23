@@ -23,6 +23,8 @@ pub const PALETTE: [[u8; 3]; 16] = [
     [255, 255, 255],
 ];
 pub struct Vdp {
+    /// Physical bank order. SCREEN 7/8 rotate logical A0 into physical A16;
+    /// mode changes reinterpret this storage without moving or clearing bytes.
     pub vram: Vec<u8>,
     pub registers: [u8; 64],
     pub msx2: bool,
@@ -133,7 +135,7 @@ impl Vdp {
                     self.buffer = if self.msx2 && self.registers[45] & 0x40 != 0 {
                         255
                     } else {
-                        self.vram[self.address]
+                        self.at(self.address)
                     };
                     self.advance();
                 }
@@ -157,7 +159,7 @@ impl Vdp {
     pub fn write(&mut self, v: u8) {
         self.latch = None;
         if !self.msx2 || self.registers[45] & 0x40 == 0 {
-            self.vram[self.address] = v;
+            self.set_byte(self.address, v);
         }
         self.buffer = v;
         self.advance();
@@ -168,7 +170,7 @@ impl Vdp {
         self.buffer = if self.msx2 && self.registers[45] & 0x40 != 0 {
             255
         } else {
-            self.vram[self.address]
+            self.at(self.address)
         };
         self.advance();
         v
@@ -215,8 +217,20 @@ impl Vdp {
             _ => 255,
         }
     }
-    fn at(&self, a: usize) -> u8 {
-        self.vram[a & (self.vram.len() - 1)]
+    fn physical_address(&self, logical: usize) -> usize {
+        let address = if self.msx2 && matches!(self.mode(), 7 | 8) {
+            (logical >> 1) | ((logical & 1) << 16)
+        } else {
+            logical
+        };
+        address & (self.vram.len() - 1)
+    }
+    fn at(&self, logical: usize) -> u8 {
+        self.vram[self.physical_address(logical)]
+    }
+    pub(crate) fn set_byte(&mut self, logical: usize, value: u8) {
+        let physical = self.physical_address(logical);
+        self.vram[physical] = value;
     }
     pub fn tick(&mut self, cycles: u32) {
         self.tick_command(cycles);
@@ -519,6 +533,7 @@ impl Vdp {
     }
     pub(crate) fn pset(&mut self, x: usize, y: usize, value: u8, op: u8) {
         let (a, shift, mask) = self.bitmap_address(x, y);
+        let a = self.physical_address(a);
         let src = value & mask;
         if op & 8 != 0 && src == 0 {
             return;

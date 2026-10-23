@@ -26,6 +26,9 @@ async function fixture(page) {
   await expect.poll(() => pixel(page,0,0)).toEqual([255,0,0]);
   await expect.poll(() => pixel(page,10,10)).toEqual([0,255,255]);
   await expect.poll(() => pixel(page,70,32)).toEqual([255,255,255]);
+  // Written in linear SCREEN 5, then reinterpreted in SCREEN 7 by real Z80 I/O.
+  for (const [x, color] of [[0,[255,0,0]], [1,[0,255,255]], [2,[0,255,255]], [3,[255,0,0]]])
+    await expect.poll(() => pixel(page,x,130)).toEqual(color);
 }
 test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and returns to MSX1 locally', async ({page}) => {
   const errors=[], requests=[];
@@ -58,6 +61,8 @@ test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and retu
   await expect(page.locator('#screen')).toHaveAttribute('width','256');
   await page.keyboard.up('8');
   await expect.poll(()=>pixel(page,0,211)).toEqual([255,0,0]);
+  await expect.poll(()=>pixel(page,0,130)).toEqual([255,0,0]);
+  await expect.poll(()=>pixel(page,1,130)).toEqual([0,255,0]);
   await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,0]);
   await expect.poll(()=>page.locator('#screen').evaluate(canvas=>{
     const data=canvas.getContext('2d').getImageData(0,160,256,1).data, colors=new Set();
@@ -102,6 +107,11 @@ test('MSX2 firmware imports are atomic, paired, validated and reversible', async
 });
 test('MSX2 boots from the GitHub Pages project subpath with relative fixture links',async({page})=>{
   await boot(page,'http://127.0.0.1:41874/msx-rust/');await fixture(page);
+  await page.keyboard.down('8');
+  await expect(page.locator('#screen')).toHaveAttribute('width','256');
+  await page.keyboard.up('8');
+  await expect.poll(()=>pixel(page,0,130)).toEqual([255,0,0]);
+  await expect.poll(()=>pixel(page,1,130)).toEqual([0,255,0]);
   for(const file of ['msx2-test-cartridge.rom','weave-msx2-boot.rom','msx2-diagnostic-sub.rom','cbios-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) expect((await page.request.get(`http://127.0.0.1:41874/msx-rust/${file}`)).ok()).toBe(true);
   await page.setViewportSize({width:320,height:720});
   await page.locator('#advanced-panel > summary').click();

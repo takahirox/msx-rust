@@ -204,7 +204,10 @@ fn bitmap_primitives_pack_pixels_clip_and_restore_text_on_msx2() {
         }
         assert_eq!(rgb(&m, 21, 20), [0, 0, 0]);
         // Packed VRAM bytes are independent of framebuffer labels and rendering.
-        let index = ((211 * width + width - 1) * bits) / 8;
+        let index = match mode {
+            7 | 8 => 0x169ff, // Logical 0xd3ff: odd byte in the upper physical bank.
+            _ => ((211 * width + width - 1) * bits) / 8,
+        };
         assert_eq!(
             m.hardware.vdp.vram[index] & ((1u16 << bits) - 1) as u8,
             color as u8
@@ -276,4 +279,36 @@ fn declared_model_cartridges_commit_atomically_and_preserve_explicit_policy() {
     assert_eq!(m.hardware.cartridge, cartridge);
     assert_eq!(m.hardware.model, Model::Msx2);
     assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
+}
+
+#[test]
+fn basic_vpoke_uses_mode_decoding_and_retains_its_16k_bound() {
+    for (mode, x, expected) in [
+        (5, 3, [36, 145, 36]),
+        (6, 6, [109, 255, 109]),
+        (7, 3, [36, 145, 36]),
+        (8, 1, [255, 0, 0]),
+    ] {
+        let mut m = Machine::default();
+        m.set_model(Model::Msx2);
+        m.frame();
+        enter(&mut m, &format!("SCREEN {mode}:VPOKE 1,28:VPOKE 16383,85"));
+        m.frame();
+        let physical = if mode >= 7 { 0x10000 } else { 1 };
+        assert_eq!(
+            m.hardware.vdp.vram[physical], 28,
+            "{}",
+            m.basic.console.transcript
+        );
+        assert_eq!(rgb(&m, x, 0), expected);
+        assert_eq!(
+            m.hardware.vdp.vram[if mode >= 7 { 0x11fff } else { 0x3fff }],
+            85
+        );
+        // Enter returns graphics to text; bounds remain the documented BASIC subset.
+        m.text_key(13);
+        m.frame();
+        enter(&mut m, "VPOKE 16384,99");
+        assert!(m.basic.console.transcript.contains("OUT OF RANGE"));
+    }
 }

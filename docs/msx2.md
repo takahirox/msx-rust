@@ -119,6 +119,49 @@ separately licensed as described above.
 ![Original diagnostic in SCREEN 7](msx2-evidence/screen7.png)
 ![Original diagnostic in SCREEN 8](msx2-evidence/screen8.png)
 
+## VRAM storage and mode changes
+
+The V9938 uses one stable 128 KiB backing store in physical bank order.
+SCREEN 7/8 (GRAPHIC 6/7) decode a logical byte address `L` as
+`((L >> 1) | ((L & 1) << 16)) & 0x1ffff`; the other supported modes
+use linear decoding. For example, logical 00001h, 00002h and 10000h
+select physical 10000h, 00001h and 08000h. Even and odd logical bytes
+alternate between the two physical 64 KiB banks. SCREEN 7 packs two
+pixels per logical byte; SCREEN 8 stores one GRB pixel per byte.
+
+CPU prefetch/read-ahead and writes, bitmap drawing/rendering, sprite
+attribute/color/pattern fetches and pixel/byte commands share this decoding.
+The CPU counter stays logical: R14 carries at 16 KiB boundaries in extended
+modes, with full 128 KiB wrapping; compatibility modes keep their selected
+16 KiB bank. A register mode change preserves stored bytes and the buffered
+read byte; subsequent memory accesses use the new mode. Reset retains its
+existing buffer-reuse and VRAM-clearing behavior.
+
+Weave BASIC bitmap primitives use the same pixel accessors. VPOKE now decodes
+its logical address in the active mode, while retaining its supported decimal
+0–16383 address bound. Console/font/tile operations use the supported linear
+modes, and full bitmap CLS/SCREEN clears remain full-store clears. No BASIC
+syntax, page-selection feature or address range was added.
+
+The independently authored diagnostic now uploads two bytes through ports in
+linear SCREEN 5, switches back without clearing, verifies buffered port readback,
+and displays their SCREEN 7/8 interpretation at row 130 of display page 1.
+Native regressions also inspect fixed physical addresses, both display pages,
+scroll, alternate fields, sprite collision/overflow and logical/byte command
+transfers, including overlapping reverse copies. The browser suite checks the
+diagnostic pixels at both site roots.
+
+Behavioral references:
+[Yamaha V9938 Technical Data Book](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf)
+(printed pages 2–3, 7, 46–53 and command/sprite chapters),
+[measured multi-bank addressing](https://openmsx.org/vdp-vram-timing/vdp-timing.html),
+[openMSX CPU/table decoding](https://github.com/openMSX/openMSX/blob/master/src/video/VDP.cc)
+and [command addresses](https://github.com/openMSX/openMSX/blob/master/src/video/VDPCmdEngine.cc).
+Implementation and fixtures are original; no upstream code was copied.
+VRAM arbitration, command speed/color corrections, expansion VRAM and exact
+mid-command mode-change timing remain outside this correction. Commercial-title
+compatibility and optional openMSX/hardware comparison remain unestablished.
+
 ## Firmware and memory profile
 
 Use a lawfully obtained matching **32 KiB MSX2 main BIOS/BASIC ROM** and **16 KiB
@@ -314,6 +357,38 @@ local firmware testing; it is not needed by any automated gate:
 ```sh
 cargo run --locked --release --example check_bios -- /local/main.rom /local/sub.rom
 ```
+
+### Issue #35 validation
+
+Validated locally on 2026-10-23, macOS arm64, pinned Rust 1.99.0, Node.js
+24.12.0 and Playwright 1.64.1 / Chromium. Only original fixtures and the
+unchanged bundled firmware/game assets were used.
+
+| Check | Observed result |
+| --- | --- |
+| Baseline regression proof | All four new interleaving regressions and the new BASIC VPOKE regression fail with the original production VDP/command/BASIC code; restored implementation passes |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | All 135 tests passed |
+| `./scripts/build.sh` | Passed using the existing documented macOS linker wrapper and pinned toolchain PATH |
+| `node scripts/check-dist.mjs` | Passed, including the updated original diagnostic hash and provenance notice |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| `npm test` | All 84 tests passed in 8.4 minutes, including cross-mode Canvas assertions at both site roots |
+| `git diff --check`; changed JavaScript syntax | Passed |
+| Optional openMSX/hardware comparison | Unperformed; openMSX is not installed and no hardware recording was used |
+
+Initial test-authoring failures were corrected before the successful native run:
+the BASIC test now waits for the scanline containing the changed pixels and
+returns to text before entering its out-of-range VPOKE check. The deliberate
+baseline failures above establish that same-mode port/renderer agreement cannot
+conceal the original defect.
+
+The source-Issue review covers physical storage, logical counters and buffered
+reads, unchanged table-base masks and sprite color rules, all existing command
+memory paths, BASIC direct consumers, the original Z80/browser probe, fixture
+provenance and the complete diff. No blocking findings remain.
+Issue #35 requires no post-merge verification; historical deployment checks
+below remain separate.
 
 ### Issue #31 validation
 

@@ -1256,7 +1256,7 @@ impl Basic {
                 p.done()?;
                 match command.as_str() {
                     "VDP" => vdp.registers[a] = v,
-                    "VPOKE" => vdp.vram[a] = v,
+                    "VPOKE" => vdp.set_byte(a, v),
                     _ => {
                         psg.select(a as u8);
                         psg.write(v);
