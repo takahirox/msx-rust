@@ -16,6 +16,12 @@ fn address(v: &mut Vdp, a: usize, write: bool) {
     v.control(a as u8);
     v.control(((a >> 8) & 63) as u8 | if write { 64 } else { 0 });
 }
+fn upload(v: &mut Vdp, a: usize, bytes: &[u8]) {
+    address(v, a, true);
+    for &byte in bytes {
+        v.write(byte);
+    }
+}
 fn bitmap(mode: u8) -> Vdp {
     let mut v = Vdp::new(true);
     reg(&mut v, 0, mode);
@@ -103,12 +109,12 @@ fn bitmap_modes_pages_scroll_and_212_lines() {
         reg(&mut v, 9, 0x80);
         reg(&mut v, 2, 0x3f);
         let base = if mode == 10 { 0x10000 } else { 0x8000 };
-        v.vram[base] = byte;
+        upload(&mut v, base, &[byte]);
         v.render();
         assert_eq!(v.width(), width);
         assert_eq!(v.height(), 212);
         assert_eq!(rgb(&v, 0, 0), v.palette[expected]);
-        v.vram[base + if mode == 10 { 256 } else { 128 }] = byte;
+        upload(&mut v, base + if mode == 10 { 256 } else { 128 }, &[byte]);
         reg(&mut v, 23, 1);
         v.render();
         assert_eq!(rgb(&v, 0, 0), v.palette[expected]);
@@ -116,8 +122,8 @@ fn bitmap_modes_pages_scroll_and_212_lines() {
     let mut v = bitmap(14);
     reg(&mut v, 9, 0x80);
     reg(&mut v, 2, 0x3f);
-    v.vram[0x10000] = 0xe3;
-    v.vram[0x10000 + 211 * 256 + 255] = 0x1c;
+    upload(&mut v, 0x10000, &[0xe3]);
+    upload(&mut v, 0x10000 + 211 * 256 + 255, &[0x1c]);
     v.render();
     assert_eq!(rgb(&v, 0, 0), [0, 255, 255]);
     assert_eq!(rgb(&v, 255, 211), [255, 0, 0]);
@@ -577,8 +583,8 @@ fn byte_fill_y_copy_clipping_and_absent_expansion_vram() {
 fn alternate_pages_fixed_sprite_colors_and_border_adjust_are_not_stale() {
     let mut v = bitmap(14);
     reg(&mut v, 2, 0x3f);
-    v.vram[0] = 0x1c;
-    v.vram[0x10000] = 0xe0;
+    upload(&mut v, 0, &[0x1c]);
+    upload(&mut v, 0x10000, &[0xe0]);
     reg(&mut v, 13, 0x11);
     v.render();
     assert_eq!(rgb(&v, 0, 0), [255, 0, 0]);
@@ -595,17 +601,17 @@ fn alternate_pages_fixed_sprite_colors_and_border_adjust_are_not_stale() {
     assert_eq!(rgb(&v, 0, 0), [255, 0, 0]);
     // Blue DAC values in direct color mode use four of the eight levels.
     reg(&mut v, 9, 0);
-    v.vram[0x10000] = 1;
-    v.vram[0x10001] = 2;
+    upload(&mut v, 0x10000, &[1]);
+    upload(&mut v, 0x10001, &[2]);
     v.render();
     assert_eq!(rgb(&v, 0, 0), [0, 0, 72]);
     assert_eq!(rgb(&v, 1, 0), [0, 0, 145]);
     reg(&mut v, 5, 0x77);
     reg(&mut v, 6, 15);
     reg(&mut v, 8, 0);
-    v.vram[0x3a00..0x3a05].copy_from_slice(&[9, 20, 0, 0, 216]);
-    v.vram[0x3800..0x3810].fill(15);
-    v.vram[0x7800..0x7808].fill(0x80);
+    upload(&mut v, 0x3a00, &[9, 20, 0, 0, 216]);
+    upload(&mut v, 0x3800, &[15; 16]);
+    upload(&mut v, 0x7800, &[0x80; 8]);
     v.palette[15] = [1, 2, 3];
     v.render();
     assert_eq!(rgb(&v, 20, 10), [255, 255, 255]);
@@ -652,5 +658,356 @@ fn rtc_calendar_rolls_through_leap_day_and_midnight() {
     for (r, v) in [(7, 1), (8, 0), (9, 3)] {
         rtc.selected = r;
         assert_eq!(rtc.read() & 15, v);
+    }
+}
+
+// Fixed physical addresses are deliberately independent of the production decoder.
+#[test]
+fn interleaved_ports_reinterpret_storage_and_preserve_logical_counter_and_buffer() {
+    let pairs = [
+        (0x00000, 0x00000),
+        (0x00001, 0x10000),
+        (0x00002, 0x00001),
+        (0x03fff, 0x11fff),
+        (0x04000, 0x02000),
+        (0x0ffff, 0x17fff),
+        (0x10000, 0x08000),
+        (0x10001, 0x18000),
+        (0x1fffe, 0x0ffff),
+        (0x1ffff, 0x1ffff),
+    ];
+    for mode in [10, 14] {
+        let mut v = bitmap(6); // Linear SCREEN 5.
+        for (i, &(_, physical)) in pairs.iter().enumerate() {
+            upload(&mut v, physical, &[0x30 + i as u8]);
+        }
+        let saved = v.vram.clone();
+        reg(&mut v, 0, mode);
+        for (i, &(logical, _)) in pairs.iter().enumerate() {
+            address(&mut v, logical, false);
+            assert_eq!(v.read(), 0x30 + i as u8);
+        }
+        assert_eq!(v.vram, saved);
+        for (i, &(logical, physical)) in pairs.iter().enumerate() {
+            upload(&mut v, logical, &[0x60 + i as u8]);
+            assert_eq!(v.vram[physical], 0x60 + i as u8);
+        }
+        let saved = v.vram.clone();
+        reg(&mut v, 0, if mode == 10 { 14 } else { 10 });
+        for (i, &(logical, _)) in pairs.iter().enumerate() {
+            address(&mut v, logical, false);
+            assert_eq!(v.read(), 0x60 + i as u8);
+        }
+        reg(&mut v, 0, 6);
+        for (i, &(_, physical)) in pairs.iter().enumerate() {
+            address(&mut v, physical, false);
+            assert_eq!(v.read(), 0x60 + i as u8);
+        }
+        assert_eq!(v.vram, saved);
+        reg(&mut v, 0, mode);
+        for (start, next, high) in [(0x3fff, 0x4000, 1), (0xffff, 0x10000, 4), (0x1ffff, 0, 0)] {
+            upload(&mut v, start, &[0xa1, 0xb2, 0xc3]);
+            address(&mut v, start, false); // Prefetch advances logical counter.
+            assert_eq!(v.registers[14], high);
+            assert_eq!(v.read(), 0xa1);
+            assert_eq!(v.read(), 0xb2);
+            assert_eq!(v.read(), 0xc3);
+            address(&mut v, next, false);
+            assert_eq!(v.read(), 0xb2);
+        }
+        // An ordinary register-mode switch keeps the prefetched byte, but the
+        // next read-ahead uses the new decoding of the next logical address.
+        reg(&mut v, 0, 6);
+        upload(&mut v, 0x10000, &[0x91]);
+        upload(&mut v, 1, &[0x42, 0x53]);
+        reg(&mut v, 0, mode);
+        address(&mut v, 1, false);
+        reg(&mut v, 0, 6);
+        assert_eq!(v.read(), 0x91);
+        assert_eq!(v.read(), 0x53);
+        address(&mut v, 1, false);
+        reg(&mut v, 0, mode);
+        assert_eq!(v.read(), 0x42);
+        assert_eq!(v.read(), 0x42); // Logical 2 maps to physical 1.
+                                    // Status/data accesses must still cancel a half-written control latch.
+        v.control(0xaa);
+        v.read_status();
+        address(&mut v, 2, true);
+        v.write(0x67);
+        assert_eq!(v.vram[1], 0x67);
+    }
+    let mut m = Machine::default();
+    m.set_model(Model::Msx2);
+    m.hardware.vdp.vram.fill(0x55);
+    m.reset();
+    assert!(m.hardware.vdp.vram.iter().all(|&b| b == 0));
+}
+
+#[test]
+fn linear_uploads_render_both_interleaved_pages_and_scroll_without_moving_bytes() {
+    for mode in [10, 14] {
+        let mut v = bitmap(6);
+        // Physical bank pairs for logical 00000/1, 10000/1 and 10100/1.
+        for (a, bytes) in [
+            (0, [0x23, 0x45]),
+            (0x8000, [0x67, 0x89]),
+            (0x8080, [0xab, 0xcd]),
+        ] {
+            upload(&mut v, a, &bytes[..1]);
+            upload(&mut v, a + 0x10000, &bytes[1..]);
+        }
+        let saved = v.vram.clone();
+        reg(&mut v, 0, mode);
+        for (page, scroll, values) in [
+            (0, 0, [0x23, 0x45]),
+            (0x3f, 0, [0x67, 0x89]),
+            (0x3f, 1, [0xab, 0xcd]),
+        ] {
+            reg(&mut v, 2, page);
+            reg(&mut v, 23, scroll);
+            v.render();
+            if mode == 10 {
+                for (x, c) in [
+                    values[0] >> 4,
+                    values[0] & 15,
+                    values[1] >> 4,
+                    values[1] & 15,
+                ]
+                .iter()
+                .enumerate()
+                {
+                    assert_eq!(rgb(&v, x, 0), v.palette[*c as usize]);
+                }
+            } else {
+                // Independently specified GRB values, including the blue DAC.
+                let expected = match values[0] {
+                    0x23 => [[0, 36, 255], [36, 72, 72]],
+                    0x67 => [[36, 109, 255], [72, 145, 72]],
+                    _ => [[72, 182, 255], [109, 218, 72]],
+                };
+                assert_eq!(rgb(&v, 0, 0), expected[0]);
+                assert_eq!(rgb(&v, 1, 0), expected[1]);
+            }
+        }
+        assert_eq!(v.vram, saved);
+    }
+}
+
+#[test]
+fn sprite_tables_uploaded_through_ports_work_in_both_interleaved_modes_and_cross_mode() {
+    for mode in [10, 14] {
+        for cross_mode in [false, true] {
+            let mut v = bitmap(if cross_mode { 6 } else { mode });
+            reg(&mut v, 5, 0x77);
+            reg(&mut v, 6, 15);
+            reg(&mut v, 8, 0);
+            // Fixed bank pairs for attribute/color/pattern tables. Populate the
+            // same logical table using linear ports when cross_mode is true.
+            let mut put = |a: usize, b: u8| {
+                let physical = match a {
+                    0x3800..=0x388f => 0x1c00 + (a - 0x3800) / 2 + (a % 2) * 0x10000,
+                    0x3a00..=0x3a24 => 0x1d00 + (a - 0x3a00) / 2 + (a % 2) * 0x10000,
+                    0x7800..=0x7808 => 0x3c00 + (a - 0x7800) / 2 + (a % 2) * 0x10000,
+                    _ => unreachable!(),
+                };
+                upload(&mut v, if cross_mode { physical } else { a }, &[b]);
+            };
+            for row in 0..8 {
+                put(0x7800 + row, 0x80);
+            }
+            for n in 0..9 {
+                for (i, b) in [9, 20, 0, 0].into_iter().enumerate() {
+                    put(0x3a00 + n * 4 + i, b);
+                }
+                for row in 0..16 {
+                    put(0x3800 + n * 16 + row, 2);
+                }
+            }
+            put(0x3a24, 216);
+            put(0x3810, 0x44);
+            put(0x7808, 0xc0);
+            put(0x3a06, 1);
+            reg(&mut v, 0, mode);
+            v.render();
+            let expected = if mode == 10 {
+                v.palette[6]
+            } else {
+                [109, 109, 0]
+            };
+            assert_eq!(rgb(&v, if mode == 10 { 40 } else { 20 }, 10), expected);
+            assert_eq!(v.status & 0x7f, 0x68); // Collision plus ninth-sprite overflow.
+            assert_eq!(status(&mut v, 3), 32);
+            assert_eq!(status(&mut v, 5), 18);
+        }
+    }
+}
+
+fn read_bytes(v: &mut Vdp, a: usize, count: usize) -> Vec<u8> {
+    address(v, a, false);
+    (0..count).map(|_| v.read()).collect()
+}
+
+#[test]
+fn interleaved_commands_share_ports_banks_pages_and_transfer_handshakes() {
+    for (mode, unit, packed) in [(10, 2, 0x33), (14, 1, 3)] {
+        let mut v = bitmap(mode);
+        // Logical fill crosses the display-page boundary in Y.
+        setup(&mut v, 0, 255, 4 * unit, 2, 3, 0x80);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0x10000, 4), [packed; 4]);
+        assert_eq!(v.vram[0x8000], packed);
+        assert_eq!(v.vram[0x18000], packed);
+        reg(&mut v, 2, 0x3f);
+        v.render();
+        assert_eq!(
+            rgb(&v, 0, 0),
+            if mode == 10 {
+                v.palette[3]
+            } else {
+                [0, 0, 255]
+            }
+        );
+        // Pixel write/XOR and POINT use the same data as CPU ports.
+        setup(&mut v, unit, 256, 1, 1, 5, 0x53);
+        finish(&mut v);
+        word(&mut v, 32, unit);
+        word(&mut v, 34, 256);
+        reg(&mut v, 46, 0x40);
+        finish(&mut v);
+        assert_eq!(status(&mut v, 7), 6);
+        setup(&mut v, 0, 2, 3, 0, 9, 0x70);
+        finish(&mut v);
+        assert_eq!(
+            read_bytes(&mut v, 0x200, 2),
+            if mode == 10 { [0x99, 0x99] } else { [9, 9] }
+        );
+        word(&mut v, 32, 0);
+        word(&mut v, 34, 2);
+        reg(&mut v, 44, 9);
+        reg(&mut v, 46, 0x60);
+        finish(&mut v);
+        assert_eq!(status(&mut v, 2) & 0x10, 0x10);
+        assert_eq!(status(&mut v, 8), 0);
+        // Logical copy back across the page boundary.
+        word(&mut v, 32, 0);
+        word(&mut v, 34, 256);
+        setup(&mut v, 0, 0, 4 * unit, 1, 0, 0x90);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0, 4), read_bytes(&mut v, 0x10000, 4));
+        // Reverse logical overlap crosses both nibble and physical bank boundaries.
+        upload(&mut v, 0, &[0x12, 0x34, 0x56, 0x78]);
+        word(&mut v, 32, 3 * unit - 1);
+        word(&mut v, 34, 0);
+        reg(&mut v, 45, 4);
+        setup(&mut v, 4 * unit - 1, 0, 3 * unit, 1, 0, 0x90);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0, 4), [0x12, 0x12, 0x34, 0x56]);
+        reg(&mut v, 45, 0);
+        // CPU logical transfer, readback and TR stalls, alternating physical banks.
+        setup(&mut v, 0, 1, 4 * unit, 1, 2, 0xb0);
+        for i in 0..4 * unit {
+            if i != 0 {
+                reg(&mut v, 44, (i + 2) as u8);
+            }
+            v.tick(8);
+            if i + 1 < 4 * unit {
+                assert_eq!(status(&mut v, 2) & 0x81, 0x81);
+                let saved = v.vram.clone();
+                v.tick(32);
+                assert_eq!(v.vram, saved);
+            }
+        }
+        assert_eq!(status(&mut v, 2) & 0x81, 0);
+        word(&mut v, 32, 0);
+        word(&mut v, 34, 1);
+        word(&mut v, 40, 4 * unit);
+        word(&mut v, 42, 1);
+        reg(&mut v, 46, 0xa0);
+        for i in 0..4 * unit {
+            v.tick(8);
+            assert_eq!(status(&mut v, 2) & 0x81, 0x81);
+            assert_eq!(status(&mut v, 7), (i + 2) as u8);
+        }
+        assert_eq!(status(&mut v, 2) & 0x81, 0);
+        // Byte fill and CPU byte transfer at page 1.
+        setup(&mut v, 0, 256, 4 * unit, 1, 0xab, 0xc0);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0x10000, 4), [0xab; 4]);
+        setup(&mut v, 0, 256, 4 * unit, 1, 0x12, 0xf0);
+        for value in [0x12, 0x34, 0x56, 0x78] {
+            if value != 0x12 {
+                reg(&mut v, 44, value);
+            }
+            v.tick(8);
+        }
+        assert_eq!(status(&mut v, 2) & 0x81, 0);
+        assert_eq!(v.vram[0x8000..0x8002], [0x12, 0x56]);
+        assert_eq!(v.vram[0x18000..0x18002], [0x34, 0x78]);
+        v.render();
+        assert_eq!(
+            rgb(&v, unit as usize, 0),
+            if mode == 10 {
+                v.palette[3]
+            } else {
+                [182, 36, 0]
+            }
+        );
+        // Reverse overlapping HMMM must read each source before overwriting it.
+        word(&mut v, 32, 2 * unit);
+        word(&mut v, 34, 256);
+        reg(&mut v, 45, 4);
+        setup(&mut v, 3 * unit, 256, 3 * unit, 1, 0, 0xd0);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0x10000, 4), [0x12, 0x12, 0x34, 0x56]);
+        // YMMM copies through the same byte path, with reverse X and Y.
+        word(&mut v, 34, 256);
+        reg(&mut v, 45, 12);
+        setup(&mut v, 3 * unit, 255, 1, 1, 0, 0xe0);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0xff00, 4), [0x12, 0x12, 0x34, 0x56]);
+        // Inspect the command results in a linear mode, through ports.
+        reg(&mut v, 0, 6);
+        assert_eq!(read_bytes(&mut v, 0x8000, 2), [0x12, 0x34]);
+        assert_eq!(read_bytes(&mut v, 0x18000, 2), [0x12, 0x56]);
+        reg(&mut v, 0, mode);
+        let saved = v.vram.clone();
+        reg(&mut v, 45, 0x20);
+        setup(&mut v, 0, 0, 4 * unit, 1, 255, 0xc0);
+        finish(&mut v);
+        assert_eq!(v.vram, saved);
+        reg(&mut v, 45, 0x10);
+        word(&mut v, 32, 0);
+        word(&mut v, 34, 0);
+        setup(&mut v, 0, 0, unit, 1, 0, 0xd0);
+        finish(&mut v);
+        assert_eq!(read_bytes(&mut v, 0, 1), [255]);
+        // Byte fill wraps after logical 1ffffh, while X clips at the right edge.
+        reg(&mut v, 45, 0);
+        setup(
+            &mut v,
+            if mode == 10 { 512 - unit } else { 256 - unit },
+            511,
+            4 * unit,
+            2,
+            0xab,
+            0xc0,
+        );
+        finish(&mut v);
+        assert_eq!(v.vram[0x1ffff], 0xab);
+        assert_eq!(v.vram[0x1007f], 0xab); // Logical 000ffh on wrapped row.
+        let saved = v.vram.clone();
+        reg(&mut v, 45, 0x40);
+        address(&mut v, 0, true);
+        v.write(0x99);
+        assert_eq!(read_bytes(&mut v, 0, 1), [255]);
+        assert_eq!(v.vram, saved);
+        reg(&mut v, 45, 0);
+        setup(&mut v, 0, 0, 4 * unit, 100, 0, 0xc0);
+        v.tick(8);
+        reg(&mut v, 46, 0);
+        let stopped = v.vram.clone();
+        v.tick(1000);
+        assert_eq!(v.vram, stopped);
+        assert_eq!(status(&mut v, 2) & 0x81, 0);
     }
 }

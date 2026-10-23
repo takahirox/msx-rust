@@ -303,7 +303,9 @@ are outside this language subset. The V9938 hardware can support additional mode
 when programmed by cartridges. This is not full Microsoft MSX BASIC 2.0.
 
 Low-level `VDP register,value`, `VPOKE address,value`, and `SOUND register,value`
-use decimal parameters. `BEEP` sustains a tone until silenced.
+use decimal parameters. VPOKE retains the 0–16383 logical address range and
+follows the active VDP mode's [VRAM decoding](docs/msx2.md#vram-storage-and-mode-changes).
+`BEEP` sustains a tone until silenced.
 Still unsupported: `ELSE`, automatic arrays, integer/single/double type suffixes,
 `PLAY`, sprite commands, files/disk/tape, binary tokenized programs, MSX BIOS entry
 points and MSX2 BASIC in C-BIOS mode. This is an independently implemented,

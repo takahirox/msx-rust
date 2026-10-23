@@ -247,14 +247,14 @@ impl Vdp {
                             if c.arg & 0x10 != 0 {
                                 255
                             } else {
-                                self.vram[src]
+                                self.at(src)
                             }
                         }
                         15 => c.pending.take().unwrap(),
                         _ => c.color,
                     };
                     if c.arg & 0x20 == 0 {
-                        self.vram[dest] = value;
+                        self.set_byte(dest, value);
                     }
                     done = self.next_rectangle(&mut c);
                     if c.code == 15 && !done {
