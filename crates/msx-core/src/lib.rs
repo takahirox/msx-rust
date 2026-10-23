@@ -111,6 +111,9 @@ impl Hardware {
         self.ram.fill(0);
         self.ram_segments = [0; 4];
         self.fdc.reset();
+        if self.philips_rom.is_some() {
+            self.fdc.write_philips(5, 0); // Reset latch selects installed A, motor off.
+        }
         self.mapping.reset();
         self.slots = 0xf0;
         self.secondary = [0; 4];

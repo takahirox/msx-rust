@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -212,3 +212,72 @@ assert len(boot) < 192
 # Run the slot-changing bootstrap in page 3, copied by ordinary LDIR.
 entry = [0x21,0x40,0x80,0x11,0,0xc2,0x01,len(boot),0,0xed,0xb0,0xc3,0,0xc2]
 save('philips-scci-sector', [(0,entry),(0x40,boot),(0x100,accessory),(0x1fe,[0,0])])
+
+# Issue #53: AB init runs without media. Position diskless, observe a no-input
+# V=1 search after >1 s, cancel, paint white, then poll for an inserted disk.
+# After insertion verify a no-step SEEK with a >=30 ms polling delay, read
+# retained track 2 and export eight deterministic observations via sector 9.
+q = Z80(0x4400)
+def masked_record(address, register, expected, mask=255):
+    load(register)
+    if mask != 255: q.emit(0xe6, mask)
+    store(address); check(expected)
+def paint(color):
+    for port_value in [color, 0x87, 0, 0x80, 0x40, 0x81]:
+        q.emit(0x3e, port_value, 0xd3, 0x99)
+def busy_poll(label):
+    q.emit(0x11, 0xff, 0xff)
+    q.label(label); load(0x7ff8); q.emit(0xcb, 0x47); q.jump(0xca, label+'_done')
+    q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, label); q.jump(0xc3, 'fail')
+    q.label(label+'_done')
+masked_record(0x9000, 0x7ff8, 0x84, 0x95) # Reset A selection, motor off, zero.
+value(0x7ffb, 2); value(0x7ff8, 0x10)
+busy_poll('position')
+masked_record(0x9001, 0x7ff9, 2)
+masked_record(0x9002, 0x7ff8, 0x80, 0x95)
+value(0x7ff8, 0x14)
+masked_record(0x9003, 0x7ff8, 0x81, 0x91)
+# 65535 * (DEC DE 6 + LD A,D 4 + OR E 4 + JP NZ 10 + four M1 waits)
+# = 1,834,980 cycles per loop; three exceed one second (five revolutions).
+for i in range(3):
+    q.emit(0x11, 0xff, 0xff)
+    q.label('no_input'+str(i)); q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'no_input'+str(i))
+masked_record(0x9004, 0x7ff8, 0x81, 0x91)
+value(0x7ff8, 0xd8)
+masked_record(0x9005, 0x7fff, 0xbf)
+masked_record(0x9006, 0x7ff8, 0x80, 0x91)
+paint(0xff) # White checkpoint: browser/native host inserts media only now.
+value(0x7ffd, 0x80)
+q.label('insert'); load(0x7ff8); q.emit(0xcb, 0x7f); q.jump(0xc2, 'insert')
+value(0x7ff8, 0x14) # Track/Data both 2, no movement, V=1.
+q.emit(0x01, 0, 0)
+q.label('verify'); q.emit(0x03); load(0x7fff); q.emit(0xcb, 0x77); q.jump(0xc2, 'verify')
+# The 37 base cycles plus five ordinary MSX M1 waits give 42 cycles/loop.
+# 30 ms settling + up to ceil(715909/9) ID cycles imply 2550..4455 polls,
+# allowing a few instructions for command/start/final-sample alignment.
+q.emit(0x60, 0x69, 0x11, 0xf6, 9, 0xb7, 0xed, 0x52); q.jump(0xda, 'fail')
+q.emit(0x21, 0x67, 0x11, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
+masked_record(0x9007, 0x7ff8, 0, 0x91)
+value(0x7ffa, 1); value(0x7ff8, 0x80)
+q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+q.label('read_byte'); q.emit(0x11, 0xff, 0xff)
+q.label('read_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'read_data')
+q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
+q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'read_poll'); q.jump(0xc3, 'fail')
+q.label('read_data'); load(0x7ffb); check(0x62)
+q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'read_byte')
+load(0x7ff8); check(0, 0xfd)
+q.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 8, 0, 0xed, 0xb0)
+value(0x7ffa, 9); value(0x7ff8, 0xa0)
+q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+q.label('write_byte'); q.emit(0x11, 0xff, 0xff)
+q.label('write_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'write_data')
+q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
+q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'write_poll'); q.jump(0xc3, 'fail')
+q.label('write_data'); q.emit(0x7e); store(0x7ffb)
+q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write_byte')
+load(0x7ff8); check(0, 0xfd)
+value(0xc040, 0xa5); paint(0xf2); q.jump(0xc3, 'halt')
+q.label('fail'); value(0xc040, 0xee); paint(0xf6)
+q.label('halt'); q.emit(0x76); q.jump(0xc3, 'halt')
+save('philips-readiness', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x400, q.done())])

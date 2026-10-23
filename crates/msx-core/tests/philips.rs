@@ -379,27 +379,97 @@ fn cpu_observes_incremental_seek_interrupts_and_addresses_retained_position() {
 }
 
 #[test]
-fn profile_removal_and_reset_cancel_pending_movement() {
+fn profile_removal_and_reset_cancel_every_type_one_phase() {
     for model in [Model::Msx1, Model::Msx2] {
         for remove in [false, true] {
-            let mut m = machine(model);
-            m.mount_disk(vec![0; 368640], false).unwrap();
-            m.hardware.write(0x7ffd, 0x80);
-            m.hardware.write(0x7ffb, 79);
-            m.hardware.write(0x7ff8, 0x10);
-            m.hardware.fdc.tick(30_000);
-            assert_eq!(m.hardware.fdc.track, 2);
-            if remove {
-                m.remove_philips_disk_rom();
-            } else {
-                m.reset();
+            for elapsed in [30_000, 80_000, 180_000, 2_000_000] {
+                let mut m = machine(model);
+                m.mount_disk(vec![0; 368640], false).unwrap();
+                m.hardware.write(0x7ffd, 0x80);
+                m.hardware.write(0x7ffc, 1); // Missing side keeps verification searching.
+                m.hardware.write(0x7ffb, 3);
+                m.hardware.write(0x7ff8, 0x14);
+                m.hardware.fdc.tick(elapsed);
+                assert_eq!(m.hardware.fdc.track, if elapsed == 30_000 { 2 } else { 3 });
+                if remove {
+                    m.remove_philips_disk_rom();
+                } else {
+                    m.reset();
+                }
+                m.hardware.fdc.tick(u32::MAX);
+                assert_eq!(m.hardware.fdc.track, 0);
+                assert_eq!(m.hardware.fdc.control, u8::from(!remove));
+                assert!(!m.hardware.fdc.irq);
+                assert!(!m.hardware.fdc.drq);
+                assert!(m.hardware.fdc.disk.is_some());
             }
-            m.hardware.fdc.tick(u32::MAX);
-            assert_eq!(m.hardware.fdc.track, 0);
-            assert_eq!(m.hardware.fdc.control, 0);
-            assert!(!m.hardware.fdc.irq);
-            assert!(!m.hardware.fdc.drq);
-            assert!(m.hardware.fdc.disk.is_some());
+        }
+    }
+}
+
+#[test]
+fn cpu_positions_diskless_then_polls_delayed_verification_and_exports_retained_track() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for insertion_delay in [
+            0, 40_000, 80_000, 120_000, 160_000, 200_000, 400_000, 600_000,
+        ] {
+            let mut m = Machine::default();
+            m.set_model(model);
+            let mut main = fixture(
+                include_str!("../../../tests/fixtures/philips-system.hex"),
+                32768,
+                0,
+            );
+            main[0x2d] = u8::from(model == Model::Msx2);
+            if model == Model::Msx2 {
+                let mut sub = vec![0; 16384];
+                sub[..2].copy_from_slice(b"CD");
+                m.load_msx2_firmware(&main, &sub).unwrap();
+            } else {
+                m.load_bios(&main).unwrap();
+            }
+            m.install_philips_disk_rom(fixture(
+                include_str!("../../../tests/fixtures/philips-readiness.hex"),
+                16384,
+                255,
+            ))
+            .unwrap();
+            for _ in 0..1_000_000 {
+                m.step();
+                if m.hardware.vdp.registers[7] == 0xff || m.cpu.halted {
+                    break;
+                }
+            }
+            assert!(!m.cpu.halted, "diskless pc={:04x}", m.cpu.pc);
+            assert_eq!(m.hardware.vdp.registers[7], 0xff);
+            assert_eq!(m.hardware.fdc.track, 2);
+            let mut image = vec![0x35; 368640];
+            image[2 * 9 * 512..3 * 9 * 512].fill(0x62);
+            let mut expected = image.clone();
+            let trace = [0x84, 2, 0x80, 0x81, 0x81, 0xbf, 0x80, 0];
+            expected[(2 * 9 + 8) * 512..(2 * 9 + 8) * 512 + 8].copy_from_slice(&trace);
+            // Vary insertion phase by executing the real wait loop, keeping the
+            // polling bounds independent of frame scheduling and host import time.
+            let start = m.cpu.tstates;
+            while m.cpu.tstates - start < insertion_delay {
+                m.step();
+            }
+            m.mount_disk(image, false).unwrap();
+            for _ in 0..1_000_000 {
+                m.step();
+                if m.cpu.halted {
+                    break;
+                }
+            }
+            assert!(m.cpu.halted);
+            assert_eq!(m.hardware.read(0xc040), 0xa5, "pc={:04x}", m.cpu.pc);
+            assert_eq!(
+                (0x9000..0x9008)
+                    .map(|a| m.hardware.read(a))
+                    .collect::<Vec<_>>(),
+                trace
+            );
+            assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
         }
     }
 }

@@ -148,6 +148,40 @@ for (const site of sites) {
       expect(errors).toEqual([]);
     });
   }
+  for (const model of ['0', '1']) {
+    test(`Philips CPU diskless positioning and delayed verification MSX${Number(model)+1} ${site}`, async ({page}) => {
+      const errors = [], requests = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('request', request => requests.push(request));
+      await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+      if (model === '0') await page.locator('#model').selectOption('0');
+      await page.locator('#advanced-panel > summary').click();
+      await installSystem(page, model);
+      const readiness = await fixture('readiness', 16384, 255);
+      await page.locator('#disk-rom').setInputFiles(file('original-readiness.rom', readiness));
+      await expect(page.locator('#disk-profile-status')).toContainText('original-readiness.rom');
+      // White is painted only after diskless seek, >1 s of BUSY verification
+      // without index input, FORCE INTERRUPT and signal acknowledgement.
+      await expect.poll(() => page.locator('#screen').evaluate(canvas =>
+        [...canvas.getContext('2d').getImageData(20, 20, 1, 1).data]
+      )).toEqual([255, 255, 255, 255]);
+      await expect(page.locator('#disk-status')).toHaveText('Drive A: empty');
+      // Mount resumes ordinary firmware polling without resetting its head or CPU.
+      await page.locator('#pause').click();
+      const disk = Buffer.alloc(368640, 0x35);
+      disk.fill(0x62, 2*9*512, 3*9*512);
+      await page.locator('#disk').setInputFiles(file('original-readiness.dsk', disk));
+      await expect(page.locator('#disk-status')).toContainText('original-readiness.dsk');
+      await page.locator('#disk-protected').uncheck();
+      await page.locator('#pause').click();
+      await greenOutput(page, model);
+      const expected = Buffer.from(disk);
+      Buffer.from([0x84, 2, 0x80, 0x81, 0x81, 0xbf, 0x80, 0]).copy(expected, (2*9+8)*512);
+      expect(await exportDisk(page)).toEqual(expected);
+      expect(errors).toEqual([]);
+      expect(requests.every(request => request.method() === 'GET' && request.url().startsWith(site))).toBe(true);
+    });
+  }
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');

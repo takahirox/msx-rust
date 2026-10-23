@@ -6,6 +6,14 @@ pub const SERVICE_TIMEOUT: u32 = 4096;
 // Deadlines stay in 1/1000 CPU-cycle units; tick observes ceil(n * interval),
 // avoiding accumulated per-step rounding and tick-partition dependence.
 const STEP_MS: [u64; 4] = [6, 12, 20, 30];
+const REVOLUTION: u64 = 715_909_000; // 1/1000 CPU-cycle units, 300 rpm
+const SETTLE: u64 = 3_579_545 * 30; // 30 ms, HLT assumed high
+
+fn id_phase(id: u64) -> u64 {
+    // Nine normal-track IDs, cylinder = physical head, side = selected side,
+    // sector = id + 1, size = 512, good CRC. See docs/disks.md for ordering.
+    (id * 715_909).div_ceil(9) * 1000
+}
 
 #[derive(Debug)]
 pub struct Disk {
@@ -51,6 +59,8 @@ enum Transfer {
     #[default]
     Idle,
     Seek,
+    Settle,
+    Verify,
     Read,
     Write,
 }
@@ -83,9 +93,11 @@ pub struct Controller {
     status: u8,
     physical_track: u8,
     movement: Movement,
-    movement_elapsed: u64,
+    clock: u64,
+    restore_pulses: u8,
+    verify_indexes: u8,
     step_interval: u64,
-    next_step: u64,
+    next_event: u64,
     direction_in: bool,
     type_one: bool,
     verify: bool,
@@ -116,9 +128,11 @@ impl Default for Controller {
             status: 0,
             physical_track: 0,
             movement: Movement::default(),
-            movement_elapsed: 0,
+            clock: 0,
+            restore_pulses: 0,
+            verify_indexes: 0,
             step_interval: 0,
-            next_step: 0,
+            next_event: 0,
             direction_in: true,
             type_one: true,
             verify: false,
@@ -204,6 +218,13 @@ impl Controller {
             _ => {}
         }
     }
+    fn selected_a(&self) -> bool {
+        self.control & 3 == 1
+    }
+    fn track_zero(&self) -> bool {
+        // Installed A has a motor-independent zero sensor in this profile.
+        self.selected_a() && self.physical_track == 0
+    }
     fn ready(&self) -> bool {
         self.disk.is_some() && self.control & 0x83 == 0x81
     }
@@ -211,16 +232,16 @@ impl Controller {
         match register {
             0 => {
                 self.irq = false;
-                let mut s = self.status | if self.ready() { 0 } else { 0x80 };
+                let mut s = (self.status & !0x80) | if self.ready() { 0 } else { 0x80 };
                 if self.type_one {
                     s &= !6;
-                    if self.physical_track == 0 {
+                    if self.track_zero() {
                         s |= 4;
                     }
                     if self.rotation < 7000 && self.ready() {
                         s |= 2;
                     }
-                    if self.disk.as_ref().is_some_and(|d| d.write_protected) {
+                    if self.selected_a() && self.disk.as_ref().is_some_and(|d| d.write_protected) {
                         s |= 0x40;
                     }
                 } else if self.drq {
@@ -273,8 +294,11 @@ impl Controller {
                 } else {
                     self.control = value;
                 }
-                if changed && self.transfer != Transfer::Idle {
+                if changed && matches!(self.transfer, Transfer::Read | Transfer::Write) {
                     self.finish(0x80);
+                }
+                if changed && self.transfer == Transfer::Verify {
+                    self.schedule_search(false);
                 }
                 if (was_ready && !self.ready() && self.force_mask & 2 != 0)
                     || (!was_ready && self.ready() && self.force_mask & 1 != 0)
@@ -307,7 +331,7 @@ impl Controller {
         self.force_mask = 0;
         self.type_one = cmd & 0x80 == 0;
         self.status = 1;
-        if !self.ready() {
+        if !self.type_one && !self.ready() {
             self.finish(0x80);
             return;
         }
@@ -333,9 +357,9 @@ impl Controller {
                 }
             };
             self.transfer = Transfer::Seek;
-            self.movement_elapsed = 0;
+            self.restore_pulses = 0;
             self.step_interval = 3_579_545 * STEP_MS[(cmd & 3) as usize];
-            self.next_step = self.step_interval;
+            self.next_event = self.clock + self.step_interval;
             // Adopt the pinned openMSX scheduling convention: first eligible
             // pulse now, then one interval after every pulse, including the last.
             // Internal command startup latency is not modeled.
@@ -361,14 +385,48 @@ impl Controller {
         }
     }
     fn finish_movement(&mut self) {
-        // Preserve the existing result predicate; settling and rotational ID
-        // search timing remain outside this movement-only correction.
-        let verified = self.track == self.physical_track
-            && self
-                .disk
-                .as_ref()
-                .is_some_and(|disk| disk.offset(self.physical_track, self.side, 1).is_some());
-        self.finish(if self.verify && !verified { 0x10 } else { 0 });
+        if self.verify {
+            self.transfer = Transfer::Settle;
+            self.next_event = self.clock + SETTLE;
+        } else {
+            self.finish(0);
+        }
+    }
+    fn schedule_search(&mut self, inclusive: bool) {
+        self.next_event = u64::MAX;
+        // No rotating selected media means no index/ID input, not a synthetic
+        // wall-clock timeout. Selection/motor writes can resume this search.
+        if !self.ready() {
+            return;
+        }
+        let base = self.clock / REVOLUTION * REVOLUTION;
+        for phase in (0..9).map(id_phase) {
+            let mut event = base + phase;
+            if event < self.clock || (!inclusive && event == self.clock) {
+                event += REVOLUTION;
+            }
+            self.next_event = self.next_event.min(event);
+        }
+    }
+    fn verification_event(&mut self) {
+        let phase = self.clock % REVOLUTION;
+        // ID 1 and rising index coincide. Process the ID first so a matching
+        // good-CRC cylinder wins over the fifth-index failure at this boundary.
+        let has_id = self
+            .disk
+            .as_ref()
+            .is_some_and(|disk| disk.offset(self.physical_track, self.side, 1).is_some());
+        if has_id && self.track == self.physical_track {
+            self.finish(0);
+        } else if phase == 0 {
+            self.verify_indexes += 1;
+            if self.verify_indexes == 5 {
+                self.finish(0x10);
+            }
+        }
+        if self.transfer == Transfer::Verify {
+            self.schedule_search(false);
+        }
     }
     fn movement_event(&mut self) {
         let update = match self.movement {
@@ -392,10 +450,17 @@ impl Controller {
         };
         // The zero sensor suppresses an outward pulse and repairs Track, even
         // for non-updating STEP. In particular Track 0 must not underflow here.
-        if !self.direction_in && self.physical_track == 0 {
+        if !self.direction_in && self.track_zero() {
             self.track = 0;
             self.finish_movement();
             return;
+        }
+        if matches!(self.movement, Movement::Restore) && self.restore_pulses == 255 {
+            self.finish(0x10);
+            return;
+        }
+        if matches!(self.movement, Movement::Restore) {
+            self.restore_pulses += 1;
         }
         if update {
             self.track = if self.direction_in {
@@ -403,6 +468,9 @@ impl Controller {
             } else {
                 self.track.wrapping_sub(1)
             };
+        }
+        if !self.selected_a() {
+            return; // Controller registers advance; absent drives have no mechanics.
         }
         if self.direction_in {
             // This raw-image drive has a hard upper stop at 79. The attempted
@@ -475,24 +543,39 @@ impl Controller {
         }
     }
     pub fn tick(&mut self, cycles: u32) {
-        let old_rotation = self.rotation;
-        self.rotation = ((u64::from(self.rotation) + u64::from(cycles)) % 715_909) as u32; // 300 rpm at Z80 clock
-        if self.force_mask & 4 != 0 && self.rotation < old_rotation && self.ready() {
+        let end = self.clock + u64::from(cycles) * 1000;
+        if self.force_mask & 4 != 0 && end / REVOLUTION > self.clock / REVOLUTION && self.ready() {
             self.irq = true;
         }
-        if self.transfer == Transfer::Idle {
+        // Visit absolute fractional deadlines in chronological order, including
+        // phase transitions inside one large CPU tick.
+        while matches!(
+            self.transfer,
+            Transfer::Seek | Transfer::Settle | Transfer::Verify
+        ) && self.next_event <= end
+        {
+            self.clock = self.next_event;
+            match self.transfer {
+                Transfer::Seek => {
+                    self.next_event += self.step_interval;
+                    self.movement_event();
+                }
+                Transfer::Settle => {
+                    self.transfer = Transfer::Verify;
+                    self.verify_indexes = 0;
+                    self.schedule_search(true);
+                }
+                Transfer::Verify => self.verification_event(),
+                _ => unreachable!(),
+            }
+        }
+        self.clock = end;
+        self.rotation = ((end % REVOLUTION) / 1000) as u32;
+        if !matches!(self.transfer, Transfer::Read | Transfer::Write) {
             return;
         }
         if !self.ready() {
             self.finish(0x80);
-            return;
-        }
-        if self.transfer == Transfer::Seek {
-            self.movement_elapsed += u64::from(cycles) * 1000;
-            while self.transfer == Transfer::Seek && self.movement_elapsed >= self.next_step {
-                self.movement_event();
-                self.next_step += self.step_interval;
-            }
             return;
         }
         if self.drq {
