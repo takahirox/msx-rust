@@ -116,7 +116,20 @@ pub extern "C" fn msx_release_keys() {
 }
 #[no_mangle]
 pub extern "C" fn msx_joystick(value: u32) {
-    APP.with(|a| a.borrow_mut().machine.hardware.joystick = value as u8 & 0x3f);
+    msx_joystick_indexed(0, value);
+}
+/// Zero-based connector (0 or 1), six active-low inputs. Returns 1 on success;
+/// invalid indices return 0 without mutating either connector.
+#[no_mangle]
+pub extern "C" fn msx_joystick_indexed(connector: u32, value: u32) -> u32 {
+    APP.with(|a| {
+        u32::from(
+            a.borrow_mut()
+                .machine
+                .hardware
+                .set_joystick(connector as usize, value as u8),
+        )
+    })
 }
 #[no_mangle]
 pub extern "C" fn msx_pixels() -> *const u8 {
@@ -450,6 +463,43 @@ pub extern "C" fn msx_disk_boot_state() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn joystick_abi_preserves_legacy_masks_indices_and_release_reset() {
+        for model in [0, 1] {
+            msx_model(model);
+            msx_joystick(0xffff_ffee);
+            assert_eq!(msx_joystick_indexed(1, 0xffff_ffd7), 1);
+            for connector in [2, 3, u32::MAX] {
+                assert_eq!(msx_joystick_indexed(connector, 0), 0);
+            }
+            let check = |one, two| {
+                APP.with(|a| {
+                    let mut a = a.borrow_mut();
+                    let h = &mut a.machine.hardware;
+                    for (control, expected) in [(0, one), (0x40, two)] {
+                        h.output(0xa0, 15);
+                        h.output(0xa1, control);
+                        h.output(0xa0, 14);
+                        assert_eq!(h.input(0xa2), expected);
+                    }
+                })
+            };
+            check(0x6e, 0x57);
+            msx_joystick(0x3f);
+            check(0x7f, 0x57); // legacy entry point cannot change connector two
+            msx_key(3, 6, 1);
+            msx_release_keys();
+            check(0x7f, 0x7f);
+            APP.with(|a| assert_eq!(a.borrow().machine.hardware.keyboard, [255; 11]));
+            msx_joystick(0);
+            msx_joystick_indexed(1, 0);
+            msx_key(4, 0, 1);
+            msx_reset();
+            check(0x7f, 0x7f);
+            APP.with(|a| assert_eq!(a.borrow().machine.hardware.keyboard, [255; 11]));
+        }
+    }
 
     #[test]
     fn scci_explicit_ids_replacement_reset_and_invalid_requests_are_atomic() {

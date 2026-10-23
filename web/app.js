@@ -546,9 +546,15 @@ row(8, ['Space','Home','Insert','Delete','ArrowLeft','ArrowUp','ArrowDown','Arro
 matrix.set('ShiftRight', [6, 0]); matrix.set('ControlRight', [6, 1]); matrix.set('NumpadEnter', [7, 7]);
 const editor = { Enter:13, Backspace:8, Delete:127, ArrowLeft:128, ArrowRight:129, Home:130, End:131, Escape:27 };
 function updateJoystick() {
-  let value = 63;
-  for (const [code, bit] of [['ArrowUp',0],['ArrowDown',1],['ArrowLeft',2],['ArrowRight',3],['KeyZ',4],['KeyX',5]]) if (held.has(code)) value &= ~(1 << bit);
-  wasm.msx_joystick(value);
+  const controls = [
+    ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyZ','KeyX'],
+    ['KeyI','KeyK','KeyJ','KeyL','KeyN','KeyM'],
+  ];
+  controls.forEach((keys, connector) => {
+    let value = 63;
+    keys.forEach((code, bit) => { if (held.has(code)) value &= ~(1 << bit); });
+    wasm.msx_joystick_indexed(connector, value);
+  });
 }
 function releaseKeys() { held.clear(); if (wasm) wasm.msx_release_keys(); }
 screen.addEventListener('keydown', event => {

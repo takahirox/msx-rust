@@ -17,6 +17,11 @@ fn main() {
         msx_core::firmware::ram_mapper_cartridge(),
     )
     .unwrap();
+    fs::write(
+        format!("{dir}/joystick-test-cartridge.rom"),
+        msx_core::firmware::joystick_test_cartridge(),
+    )
+    .unwrap();
     for mapper in [
         msx_core::Mapper::Ascii8Sram2,
         msx_core::Mapper::Ascii8Sram8,

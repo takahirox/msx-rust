@@ -203,7 +203,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
 | Konami SCC-I sound cartridges | Explicit ROMless Snatcher/SD Snatcher profiles, 64 KiB banked volatile RAM, compatible/plus sound maps and five waveforms in slot 1; [details](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i) |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
-| Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, PSG joystick 1 input; arrows + Z/X are directions/triggers |
+| Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, two standard digital PSG joysticks; connector 1: arrows + Z/X, connector 2: I/K/J/L + N/M |
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
 
 This is an initial implementation, not a claim of universal MSX software compatibility.
@@ -382,6 +382,40 @@ and graphics statement descriptions), alongside the
 INPUT retry policy and unsupported forms above are deliberate limits of Weave BASIC.
 Only language/hardware documentation was used: no proprietary ROM, implementation,
 disassembly, token table, or third-party interpreter code was used or bundled.
+
+## Two standard joysticks
+
+Focus the display to use a physical keyboard. Connector 1 uses arrows for
+up/down/left/right and Z/X for triggers A/B. Connector 2 uses I/K/J/L for
+up/down/left/right and N/M for triggers A/B. These use physical key codes and
+also reach the normal MSX keyboard matrix. Both players can hold directions and
+buttons together; releasing one key retains the others. Focus loss, visibility
+changes, Pause/Resume, Reset and machine/cartridge transitions release both
+connectors and keyboard keys.
+
+The core routes PSG R15 bit 6 to connector 1/2 and bits 4/5 to their respective
+pin-8 common lines. A high common returns six released inputs without erasing
+held state. R14 bits 6/7 remain 1/0. This emulator uses fixed R14-input/R15-output
+motherboard routing regardless of R7 direction bits; R7 readback and audio
+controls are preserved. This compatibility policy is not a claim about universal
+discrete-AY electrical behavior. See [routing, references and limits](docs/architecture.md#standard-joysticks).
+
+Wasm `msx_joystick(value)` continues to set connector 1. The new
+`msx_joystick_indexed(connector, value)` uses zero-based connector indices 0/1,
+masks values to six active-low bits, and returns 1 for success or 0 for an invalid
+index without changing either connector. `msx_release_keys()` and reset release
+both. Core callers may use `Hardware::set_joystick` with the same indices/mask
+and a boolean result; the existing `Hardware::joystick` field remains connector 1.
+
+The original MIT [joystick diagnostic generator](crates/msx-core/src/firmware/joystick_fixture.rs)
+builds `dist/joystick-test-cartridge.rom`, available in advanced options. Open it
+with automatic firmware on either model to execute direct PSG reads and actual
+C-BIOS `GTSTCK`, `GTTRIG` and `SNSMAT` calls on the Z80. The display labels each
+result byte, with bit 0 first and white meaning 1. The first six rows probe R15
+00/40/10/60/20/50h; the following rows show both sticks, both triggers per stick,
+and keyboard rows 3/4/5. The native tests independently assert RAM and visible
+pixels; Playwright drives real keyboard events through compiled Wasm and reads
+the same Canvas output at both site roots. No proprietary ROM is needed.
 
 ## ROM loading and legal guidance
 

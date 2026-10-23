@@ -40,6 +40,37 @@ external-BIOS CPU execution are independent of this interpreter. No external BIO
 are trapped, replaced or patched. This distinction is visible in the UI, README,
 assembly listing, and license inventory.
 
+### Standard joysticks
+
+Two independent active-low masks store up/down/left/right/trigger A/trigger B in
+bits 0–5, initially 3Fh. PSG R15 bit 6 selects connector 1 (0) or 2 (1). R15 bits
+4/5 independently drive each connector's pin 8. Standard switches connect their
+inputs to this common: low reports held inputs; high reports 3Fh without changing
+stored state. R14 bits 6/7 keep the existing 1/0 values. Other R15 bits retain
+existing latch/readback behavior. The motherboard compatibility policy fixes R14
+to peripheral input and R15 to peripheral output regardless of R7 bits 6/7; R7
+readback and bits 0–5 audio mixer controls remain intact. This describes this
+emulated motherboard, not universal discrete AY-3-8910 direction/electrical behavior.
+
+Routing follows the [MSX2 Technical Handbook, sections 5.1–5.2](https://raw.githubusercontent.com/Konamiman/MSX2-Technical-Handbook/master/md/Chapter5a.md),
+corroborated by pinned openMSX [MSXPSG.cc](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/sound/MSXPSG.cc)
+(routing/default direction override) and [MSXJoystick.cc](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/input/MSXJoystick.cc)
+(released inputs with high pin 8). These are behavioral references; no physical
+measurements were performed. The handbook transcription has errors, and pin-6/7
+feedback remains uncertain upstream. Alternate direction wiring, pin-6/7 feedback,
+mouse/paddle devices, host Gamepad API, Tab delivery and PPI C7 sound are outside
+this implementation.
+
+The original diagnostic stores direct PSG and real C-BIOS call results at
+C200h–C20Eh and renders them to SCREEN 1; C210h=A5h marks a finished update.
+Before BIOS polling it lowers both commons, because the BIOS calls preserve those
+output bits. Native tests compare independent RAM and pixel expectations on both
+models under bundled unmodified C-BIOS. Browser tests compare Canvas values via
+actual keyboard events at `/` and `/msx-rust/`, including release isolation and
+lifecycle boundaries. Window blur and visibility notifications are dispatched by
+the browser test harness; they are not OS window-manager measurements. No host
+BIOS traps or Weave BASIC services participate.
+
 ## CPU tests and vectors
 
 All implementation and tests were independently written for this repository.
