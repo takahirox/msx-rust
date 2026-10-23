@@ -209,3 +209,34 @@ fn staged_philips_install_reset_remove_retain_media_without_allocating() {
         );
     }
 }
+
+#[test]
+fn scci_allocation_failure_preserves_session_and_reset_remove_do_not_allocate() {
+    use msx_core::SoundCartridgeProfile as Profile;
+    for model in [Model::Msx1, Model::Msx2] {
+        for profile in [Profile::Snatcher, Profile::SdSnatcher] {
+            let mut m = Machine::default();
+            m.set_model(model);
+            m.install_sound_cartridge(profile).unwrap();
+            m.hardware.secondary[3] = 255;
+            m.hardware.slots = 0xd4;
+            m.hardware
+                .write(0x5000, if profile == Profile::Snatcher { 0 } else { 8 });
+            m.hardware.write(0xbffe, 1);
+            m.hardware.write(0x4123, 0x7b);
+            m.cpu.pc = 0x1234;
+            FAIL_SIZE.with(|s| s.set(65536));
+            let result = m.install_sound_cartridge(Profile::Snatcher);
+            FAIL_SIZE.with(|s| s.set(0));
+            assert!(result.is_err());
+            assert_eq!(m.cpu.pc, 0x1234);
+            assert_eq!(m.sound_cartridge_profile(), Some(profile));
+            assert_eq!(m.hardware.read(0x4123), 0x7b);
+            DENY.with(|s| s.set(true));
+            m.reset();
+            m.remove_sound_cartridge();
+            DENY.with(|s| s.set(false));
+            assert_eq!(m.sound_cartridge_profile(), None);
+        }
+    }
+}

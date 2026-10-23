@@ -195,3 +195,211 @@ fn deformation_dividers_rotation_protection_and_read_side_effect() {
     chip.write(0, 0x80);
     assert_eq!(chip.read(0), 0x80);
 }
+
+#[test]
+fn scci_maps_fifth_wave_masks_deformation_and_reset() {
+    use super::Mode;
+    let mut chip = Scc::default();
+    chip.set_mode(Mode::Plus);
+    for page in 0xb8..=0xbf {
+        for r in 0..160 {
+            chip.write(page * 256 + r, r as u8 ^ 0xa5);
+            assert_eq!(chip.read(0xb800 + r), r as u8 ^ 0xa5);
+        }
+    }
+    chip.write(0xbfa7, 0xff);
+    chip.write(0xbfa9, 0xff);
+    chip.write(0xbfad, 0xff);
+    chip.write(0xbfae, 0xff);
+    chip.write(0xbfaf, 0xff);
+    assert_eq!(chip.frequency[3..], [0xf00, 0xf00]);
+    assert_eq!(chip.volume[3..], [15, 15]);
+    assert_eq!(chip.enabled, 31);
+    for r in 0xa0..0xc0 {
+        assert_eq!(chip.read(r), 0xff);
+    }
+    chip.set_mode(Mode::Compatible);
+    assert_eq!(chip.read(0xa0), 0x25); // independent fifth survives mode change
+    chip.write(0xa0, 0x77); // compatible fifth is read-only
+    assert_eq!(chip.read(0xa0), 0x25);
+    chip.write(0x60, 0x33); // compatible shared update
+    assert_eq!(chip.read(0xa0), 0x33);
+    chip.set_mode(Mode::Plus);
+    assert_eq!(chip.read(0x80), 0x33);
+    for mode in [Mode::Compatible, Mode::Plus] {
+        chip.set_mode(mode);
+        for deform in [0x80, 0, 0x40, 0xc0] {
+            chip.write(0xc0, deform);
+            chip.write(0, 0x72);
+            assert_eq!(chip.read(0), 0x72); // bit 7 alone never protects SCC-I
+        }
+        chip.write(0xc0, 0);
+        chip.write(0, 0x24);
+        chip.write(0xe0, 0x40); // reserved, unlike classic SCC
+        assert_eq!(chip.read(0xe0), 0xff);
+        chip.write(0, 0x42);
+        assert_eq!(chip.read(0), 0x42);
+        assert_eq!(chip.read(0xdf), 0xff); // deformation read latches FF
+        chip.write(0, 0x12);
+        assert_eq!(chip.waves[0][0], 0x42);
+        assert_eq!(chip.deformation, 255);
+    }
+    // Every SCC-I wave ignores bit 7, and bit 6 protects every writable wave.
+    chip.set_mode(Mode::Plus);
+    for deform in [0x80, 0x40, 0xc0] {
+        chip.write(0xc0, 0);
+        for bank in 0..5u16 {
+            chip.write(bank * 32, 0x11 + bank as u8);
+        }
+        chip.write(0xc0, deform);
+        for bank in 0..5u16 {
+            chip.write(bank * 32, 0x61 + bank as u8);
+            assert_eq!(
+                chip.waves[bank as usize][0] as u8,
+                if deform == 0x80 {
+                    0x61 + bank as u8
+                } else {
+                    0x11 + bank as u8
+                }
+            );
+        }
+    }
+    chip.tick(12345);
+    let position = chip.position;
+    let count = chip.count;
+    let waves = chip.waves;
+    let frequency = chip.frequency;
+    let volume = chip.volume;
+    chip.reset_scci();
+    assert_eq!(chip.waves, waves);
+    assert_eq!(chip.position, position);
+    assert_eq!(chip.count, count);
+    assert_eq!(chip.frequency, frequency);
+    assert_eq!(chip.volume, volume);
+    assert_eq!(chip.mode, Mode::Compatible);
+    assert_eq!(chip.deformation, 0);
+    assert_eq!(chip.enabled, 0);
+}
+
+#[test]
+fn scci_independent_pcm_clock_masks_signed_dac_and_chunk_invariance() {
+    use super::Mode;
+    use crate::psg::Psg;
+    let mut chip = Scc::default();
+    chip.set_mode(Mode::Plus);
+    for c in 0..5u16 {
+        for i in 0..32u16 {
+            chip.write(c * 32 + i, (i as i16 * 5 - 110 + c as i16 * 7) as u8);
+        }
+        chip.write(0xa0 + 2 * c, (19 + c * 13) as u8);
+        chip.write(0xa1 + 2 * c, 0xf0); // high bits masked
+        chip.write(0xaa + c, 0xf0 | (15 - c as u8 * 2));
+    }
+    chip.write(0xaf, 0xff);
+    for elapsed in [1u32, 19, 20, 39, 101, 1057, 100003] {
+        let mut current = chip.clone();
+        current.tick(elapsed);
+        let mut sum = 0;
+        for c in 0..5u32 {
+            let position = elapsed / (20 + c * 13) % 32;
+            let wave = position as i32 * 5 - 110 + c as i32 * 7;
+            let dac = (wave * (15 - c as i32 * 2)).div_euclid(16);
+            current.write(0xaf, 1 << c);
+            assert!((current.output() - dac as f32 / 2000.0).abs() < 1e-6);
+            sum += dac;
+        }
+        current.write(0xaf, 31);
+        assert!((current.output() - sum as f32 / 2000.0).abs() < 1e-6);
+    }
+    let mut a = Psg::default();
+    let mut b = Psg::default();
+    let mut other = chip.clone();
+    a.tick_with_scc(100003, Some(&mut chip));
+    let mut remaining = 100003;
+    for chunk in [1, 19, 3, 512, 7919].into_iter().cycle() {
+        let n = remaining.min(chunk);
+        b.tick_with_scc(n, Some(&mut other));
+        remaining -= n;
+        if remaining == 0 {
+            break;
+        }
+    }
+    assert_eq!(chip, other);
+    assert_eq!(a.samples, b.samples);
+    for (deform, period) in [(0, 0xbcd), (1, 0xb), (2, 0xcd), (3, 0xcd)] {
+        let mut chip = Scc::default();
+        chip.set_mode(Mode::Plus);
+        chip.write(0xa0, 0xcd);
+        chip.write(0xa1, 0xfb);
+        chip.write(0xc0, deform);
+        chip.tick(period + 1);
+        assert_eq!(chip.position[0], 1);
+    }
+    for period in 0..=8 {
+        let mut chip = Scc::default();
+        chip.set_mode(Mode::Plus);
+        chip.write(0xa8, period);
+        chip.write(0xae, 15);
+        chip.write(0xaf, 16);
+        chip.tick(10000);
+        assert_eq!(chip.output(), 0.0);
+        assert_eq!(chip.position[4], 0);
+    }
+}
+
+#[test]
+fn scci_rotation_protection_and_compatible_raw_clock_selection() {
+    use super::Mode;
+    for mode in [Mode::Compatible, Mode::Plus] {
+        for deform in [0x40, 0xc0] {
+            let mut chip = Scc::default();
+            chip.set_mode(Mode::Plus);
+            for c in 0..5u16 {
+                for i in 0..32 {
+                    chip.write(c * 32 + i, i as u8);
+                }
+                chip.write(0xa0 + c * 2, 19 + c as u8 * 10);
+            }
+            chip.set_mode(mode);
+            chip.write(0xc0, deform);
+            chip.tick(100);
+            for (address, plus, compatible) in [
+                (0, 5, 5),
+                (0x60, 2, if deform == 0x40 { 1 } else { 2 }),
+                (0x80, 1, 255),
+                (0xa0, 255, 1),
+            ] {
+                assert_eq!(
+                    chip.read(address),
+                    if mode == Mode::Plus { plus } else { compatible }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn scci_compatible_pcm_retains_plus_fifth_until_shared_wave_is_written() {
+    use super::Mode;
+    let mut chip = Scc::default();
+    chip.set_mode(Mode::Plus);
+    for i in 0..32 {
+        chip.write(0x60 + i, 64);
+        chip.write(0x80 + i, 0x80);
+    }
+    for (r, v) in [(0xa6, 99), (0xa8, 199), (0xad, 15), (0xae, 15)] {
+        chip.write(r, v);
+    }
+    chip.set_mode(Mode::Compatible);
+    chip.write(0x9f, 16);
+    assert!((chip.output() + 0.06).abs() < 1e-6);
+    chip.write(0x9f, 8);
+    assert!((chip.output() - 0.03).abs() < 1e-6);
+    for i in 0..32 {
+        chip.write(0x60 + i, 0x80);
+    }
+    for enable in [8, 16] {
+        chip.write(0x8f, enable);
+        assert!((chip.output() + 0.06).abs() < 1e-6);
+    }
+}

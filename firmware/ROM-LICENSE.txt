@@ -90,3 +90,13 @@ behavioral observations from the pinned openMSX profile documented in docs/disks
 no upstream code or ROM bytes are copied. tests/fixtures/philips.py and its sparse
 hex system/disk-ROM/sector fixtures are original MIT test software. They execute
 normal slots and controller accesses and do not validate commercial compatibility.
+
+ROMless Snatcher / SD Snatcher SCC-I profiles (Issue #49):
+These are hardware configurations, not ROM assets. No Konami or proprietary game,
+system firmware, music or recorded sample bytes are bundled. Sound is synthesized
+by independently authored SCC-I logic. tests/fixtures/philips.py and its added
+philips-scci-sector.hex fixture are original MIT-licensed Z80 code and synthetic
+wave/sector data, written without copying reference implementation or ROM bytes.
+They load a sector, execute accessory RAM, program compatible/plus sound and write
+synthetic disk data alongside the original Philips test interface. See docs/scc.md
+for pinned behavioral references, provisional policies and accuracy limits.

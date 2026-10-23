@@ -44,7 +44,8 @@ function updateControls() {
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
   $('demo').disabled = !ready || loading || !demos;
   $('play-demo').disabled = !ready || loading || catalogLoading;
-  $('eject').disabled = !ready || !cartridge;
+  $('eject').disabled = !ready || (!cartridge && !wasm.msx_sound_cartridge_profile());
+  updateSoundCartridge();
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
   updateDisk();
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
@@ -179,7 +180,7 @@ function updateStatus() {
   $('firmware').value = firmware;
   system = ['Weave BASIC', cbiosName(), diagnosticName, `user BIOS · ${localName}`, 'Weave disk firmware · drive A: boot'][active];
   updateControls();
-  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}`);
+  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}${wasm.msx_sound_cartridge_profile() ? ` · ${soundProfileNames[wasm.msx_sound_cartridge_profile()]} sound cartridge` : ''}`);
 }
 function restart(action) {
   importGeneration++;
@@ -231,6 +232,31 @@ async function load(file, isSystem) {
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
+const soundProfileNames = ['', 'Snatcher', 'SD Snatcher'];
+function updateSoundCartridge() {
+  const profile = ready ? wasm.msx_sound_cartridge_profile() : 0;
+  $('sound-cartridge-status').textContent = profile ? `${soundProfileNames[profile]} · 64 KiB RAM · SCC-I · slot 1` : 'No sound cartridge installed';
+  for (const id of ['sound-cartridge', 'install-sound-cartridge']) $(id).disabled = !ready || loading;
+  $('remove-sound-cartridge').disabled = !ready || (!profile && !loading);
+  $('remove-sound-cartridge').textContent = loading ? 'Cancel import' : 'Remove sound cartridge';
+}
+$('install-sound-cartridge').addEventListener('click', () => {
+  if (!ready || loading) return;
+  persistSave();
+  if (!wasm.msx_install_sound_cartridge(Number($('sound-cartridge').value))) {
+    status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return;
+  }
+  detachSave(); cartridge = ''; $('cartridge').value = '';
+  restart(() => wasm.msx_cancel_upload());
+});
+$('remove-sound-cartridge').addEventListener('click', () => {
+  if (loading) {
+    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
+    status('Import canceled. Session, sound cartridge and media unchanged.'); return;
+  }
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); });
+});
+
 // Disk media and interface imports share the ROM generation token and staging allocation.
 function updateDisk() {
   const philips = ready && wasm.msx_disk_profile() === 1;

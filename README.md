@@ -1,7 +1,7 @@
 # msx-rust
 
 An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
-keyboard and joystick input, Web Audio PSG and classic SCC sound, local ROM loading,
+keyboard and joystick input, Web Audio PSG, SCC and SCC-I sound, local ROM loading,
 and a usable open-source BASIC environment. The core has no third-party dependencies
 or browser APIs.
 
@@ -201,6 +201,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | MSX2 | V9938, 128 KiB VRAM, 256 KiB RAM mapper (FCh–FFh), expanded slot 3 with sub-ROM in 3-0 and RAM in 3-3, deterministic RTC; [coverage](docs/msx2.md) |
 | TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
+| Konami SCC-I sound cartridges | Explicit ROMless Snatcher/SD Snatcher profiles, 64 KiB banked volatile RAM, compatible/plus sound maps and five waveforms in slot 1; [details](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i) |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, PSG joystick 1 input; arrows + Z/X are directions/triggers |
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
@@ -212,8 +213,9 @@ and HALT idle fetch. Standalone `Cpu::new()` retains zero-wait Z80 timing;
 Instruction-level timing is used; individual bus phases, analog video/overscan,
 VDP access contention, and undocumented CPU silicon quirks are not accurately
 modeled. Sprite status at raster/off-screen edges and unusual combined
-VDP modes are not compatibility guarantees. There are no disk/tape drives,
-SCC+/SCC-I or FM audio expansions. MSX2 coverage and optional peripheral limits
+VDP modes are not compatibility guarantees. Raw disk images and the
+[Philips disk interface](docs/disks.md) are supported. Tape drives, expanded
+modern SCC cartridges and FM audio remain unsupported. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
 with classic SCC audio, ASCII8/ASCII16 2/8 KiB SRAM variants and the 384 KiB
 R-Type layout are supported. Other specialized mappers and Game Master 2
@@ -455,8 +457,22 @@ SRAM is readable through selected windows and writable only at 8000h–BFFFh in
 SRAM mode. The 2/8 KiB memory repeats within those windows. Reset retains it.
 Auto cannot establish SRAM hardware or its size; choose these five new mappers
 manually. See [exact wiring, limits, original sources and fixtures](docs/cartridge-sram.md).
-SCC+/SCC-I, reversed ASCII registers, 32 KiB SRAM, other select wiring and
+Expanded modern SCC cartridges, reversed ASCII registers, 32 KiB SRAM, other select
+wiring and
 Game Master 2 / additional cartridge slots remain unsupported.
+
+The separate **ROMless sound cartridge** controls explicitly install Snatcher or
+SD Snatcher 64 KiB RAM + SCC-I hardware in slot 1 on either model. No cartridge
+ROM, fabricated AB header or automatic game detection is involved. Installation
+replaces the ordinary cartridge after the existing outgoing SRAM save step and
+restarts the selected firmware; the disk interface in slot 2 and mounted/modified
+media remain installed. Reset keeps accessory RAM and programmed waves, periods
+and volumes, restores bank selectors 0/1/2/3 and compatible mode, and disables sound.
+Removal/replacement discards volatile RAM. Machine changes, Use Weave BASIC and
+bundled-firmware choices remove it; local firmware application and disk boot retain
+it. Choose compatible firmware/software separately. Neither commercial game's
+execution or playability has been observed. See [the exact decoding, reset policy,
+provisional overlay writes and fixture evidence](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i).
 
 SRAM saves are local to this browser, keyed by the ROM bytes' SHA-256 and selected
 mapper. Reopen the same ROM and mapper after a fresh page to restore the save.
@@ -468,7 +484,7 @@ until explicit import; storage failures allow continued play and export. Origina
 ROM images are never persisted or sent to a server. [Saving and recovery details](docs/cartridge-sram.md#browser-saving-and-recovery).
 
 Loading a valid image resets the machine and banks. Reset retains selected ROMs and
-restores initial banks without erasing cartridge SRAM; Eject removes the cartridge
+restores initial banks without erasing cartridge SRAM; ordinary cartridge Eject removes the ROM
 and returns automatic mode to BASIC, retaining explicit firmware overrides; Use Weave BASIC clears the override and
 cartridge. The browser saves outgoing SRAM before cartridge, model or firmware
 changes. Failed imports leave the running machine, banks and unsaved SRAM intact.

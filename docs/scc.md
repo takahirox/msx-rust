@@ -1,10 +1,11 @@
-# Classic Konami SCC audio
+# Konami SCC and SCC-I audio
 
 The Konami SCC mapper implements the K051649 MegaROM sound chip on MSX1 and
 MSX2. Konami Standard is a separate mapper with no SCC. Five voices have separate
 periods, counters, wave positions, linear volumes and enable bits. Four signed
 32-byte waveforms are stored; voices 4 and 5 share the fourth waveform.
-SCC+/SCC-I (K052539), SCC cartridge SRAM and unrelated FM expansions are unsupported.
+Original ROMless SCC-I (K052539) profiles are described below. Expanded modern
+SCC cartridges, classic SCC cartridge SRAM and FM expansions are unsupported.
 Separate [ASCII SRAM mappers](cartridge-sram.md) provide battery-backed cartridge saves.
 Importing a correctly mapped cartridge does not guarantee commercial-game compatibility.
 
@@ -81,7 +82,8 @@ Issue #39 corrects Issue #23's hidden-window silence requirement. SCC generation
 and mixing depend on the installed mapper, independently of CPU register access.
 Disabling the overlay or selecting another slot leaves both output and phase
 uninterrupted. Explicit channel-enable and volume writes still control silence.
-Reset, Eject, replacement, model or firmware changes clear waves, counters,
+For classic SCC, Reset, Eject, replacement, model or firmware changes clear waves,
+counters,
 controls and queued PCM. Validation/allocation failures commit no machine changes,
 preserving SCC and PSG state. Browser audio activation, scheduling, mute/resume,
 pause and focus handling use the existing audio transport.
@@ -105,8 +107,8 @@ likewise distinguish register exposure from channel controls and restore the old
 slot before hiding the programmed chip. No upstream implementation code or example
 bytes were copied. No new physical measurement or commercial-game failure was
 observed; the Japanese investigation was text-corrupted during Issue #39 planning,
-and the NGS reference returned 403. Delayed DAC updates, SCC-I and bus-phase
-scheduling remain separate work. Optional pinned-openMSX PCM comparison has not
+and the NGS reference returned 403. Delayed DAC updates and bus-phase scheduling
+remain separate work. Optional pinned-openMSX PCM comparison has not
 been performed.
 
 The original MIT-licensed generator in
@@ -162,6 +164,110 @@ Issue #23's published-site check remains **pending after merge**: verify the
 successful main Pages deployment, then use this fixture on the published site,
 record nonzero SCC/PSG and silence on mute/ejection with deployment URL/run.
 Local tests do not establish that deployment succeeded.
+
+## ROMless Snatcher and SD Snatcher SCC-I
+
+Advanced browser controls and `Machine::install_sound_cartridge` explicitly select
+`SoundCartridgeProfile::Snatcher` or `SdSnatcher`. The raw Wasm ABI exposes
+`msx_install_sound_cartridge(1|2)`, `msx_sound_cartridge_profile()` (0 absent), and
+`msx_remove_sound_cartridge()`. Unsupported IDs and failed allocations do not
+change execution. No ROM bytes, AB boot pointer, BIOS trap or game detection are
+used. This occupies the existing unexpanded slot 1, replacing an ordinary
+cartridge; simultaneous cartridges and general slot configuration are outside scope.
+The independently installed Philips disk interface stays in slot 2.
+
+Four 8 KiB windows cover 4000h–BFFFh only. Full selectors are retained; RAM uses
+the low four selector bits. Snatcher populates banks 0–7 and SD Snatcher banks
+8–15; unpopulated/outside reads return FFh and unpopulated writes are ignored.
+Selectors reset to 0/1/2/3, so SD Snatcher initially reads unpopulated RAM.
+Bank registers are 5000h–57FFh, 7000h–77FFh, 9000h–97FFh and B000h–B7FFh.
+Write-only BFFEh/BFFFh mode control takes priority over every other write:
+
+| Mode bits | Effect |
+| --- | --- |
+| 4 | All four windows accept RAM writes |
+| 0, 1 | Otherwise permit RAM writes in windows 1, 2 respectively |
+| 2 and 5 together | Otherwise permit RAM writes in window 3 |
+| 5 | Select plus sound map; clear selects compatible map |
+| 3, 6, 7 | No effect |
+
+Window 4 is protected unless bit 4 is set. RAM writes cannot change selectors or
+sound registers, including at bank-register addresses. Sound overlays still take
+priority on reads in RAM mode. **Provisional overlay-write policy:** RAM-mode
+writes beneath a readable sound overlay update populated underlying RAM. The
+pinned reference explicitly leaves open whether physical hardware instead drops
+these writes. Our tests lock down the selected policy; they are not measurements.
+
+Compatible mode exposes 9800h–9FFFh when selector 3's low six bits equal 3Fh.
+Plus mode exposes B800h–BFFFh when selector 4's bit 7 is set. Only selected-slot
+accesses reach the device; visibility changes never gate clocks or mixing.
+Low-byte register decoding repeats every 256 bytes:
+
+| Offset | Compatible SCC-I | Plus SCC-I |
+| --- | --- | --- |
+| 00h–7Fh | Waves 1–4 read/write; wave-4 writes also update wave 5 | Waves 1–4 read/write |
+| 80h–9Fh | Write-only controls, mirrored at 90h | Wave 5 read/write |
+| A0h–BFh | Wave 5 read-only | Write-only controls, mirrored at B0h |
+| C0h–DFh | Deformation latch, read FFh and latch FFh | Same |
+| E0h–FFh | Reserved, reads FFh | Same |
+
+Controls contain ten period bytes, five 4-bit volumes and five enable bits as in
+classic SCC. Mode changes alone preserve the independently programmed fifth wave,
+including its compatible-mode playback. SCC-I ignores deformation bit 7 for wave
+rotation enable and protection; bit 6 rotates and protects all five waves. The
+pinned compatible read model uses the raw latch for wave 4's clock: voice 5's
+phase for 40h, voice 4's for C0h. Plus mode uses each wave's own voice. SCC-I
+read rotation adds the modeled phase; classic SCC's existing rotation behavior is
+unchanged. Divider bits, phase restart, signed DAC and gain use the existing
+digital synthesis. Rotation follows the modeled oscillator phase rather than an
+independent deformation timer; exact DAC-update latency, bus phases and analog
+behavior remain approximations. This addition does not revise those timing models.
+
+Installation initializes RAM, waveforms, periods, volumes and phases to zero as a
+deterministic **emulator policy**, not a physical power-on measurement. Hardware
+reset retains RAM, waves, periods, volumes and oscillator phase/counters; restores
+selectors 0/1/2/3 and compatible mode; clears deformation, channel enable and
+queued PCM. Installation/replacement starts fresh and removal discards volatile
+RAM. Both restart the selected firmware while retaining BIOS/sub-ROM, boot policy,
+disk interface and mounted/modified media. Reset and external firmware application
+retain the accessory. Model changes and bundled-firmware controls keep their
+existing slot-1 clearing semantics; disk boot retains it. Browser replacement
+uses the existing outgoing SRAM save safeguard and import-generation cancellation.
+Save failures remain visible through the existing recovery/export status.
+
+Behavioral evidence was read from the pinned openMSX
+[sound cartridge decoder](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/sound/MSXSCCPlusCart.cc),
+[SCC register/reset model](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/sound/SCC.cc),
+and the [Snatcher](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/share/extensions/Konami_Snatcher_Sound_Cartridge.xml)
+and [SD Snatcher](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/share/extensions/Konami_SD-Snatcher_Sound_Cartridge.xml)
+extension configurations. These sources define decoding and reset expectations;
+implementation and fixtures here are independently authored. The
+[upstream user guide](https://www.msxblue.com/manual/scc_c.htm) identifies commercial
+applicability, not this emulator's compatibility. No proprietary firmware, game
+bytes, music, physical measurements or commercial gameplay observations were used.
+
+`tests/scci.rs` supplies independent fixed-address bank/protection traces for both
+profiles/models, including boundaries, reserved bits, aliases, window isolation,
+mode priority and the separately labeled provisional overlay policy. SCC unit
+tests check fifth-wave storage/PCM, masks, mirrors, signed DAC, periods, deformation
+and chunk invariance. Native mixing tests compare every sample against a separate
+clock/DAC calculation across hidden overlay/slot transitions and PSG addition.
+Allocation tests force RAM reservation failure and prohibit allocations on reset/removal.
+
+The original MIT `tests/fixtures/philips.py` adds `philips-scci-sector.hex` to the
+existing original system/disk fixtures. The CPU loads sector zero through the
+Philips interface, copies a bootstrap to system RAM and code to accessory RAM,
+executes that accessory code, records compatible/plus fifth-wave reads, programs
+distinct wave-4/5 signals, and writes 512 bytes of 6Ch to disk sector 9. It paints
+green only after checking the independent trace and successful disk write. MSX2
+sub-ROM and RAM mapper access remain covered. Native assertions check the trace,
+exact modified disk bytes and distinct voice-4/5 PCM. `tests/scci.spec.js` runs the
+same CPU fixture through compiled Wasm and local file controls at `/` and
+`/msx-rust/`, on both models/profiles, and checks output, PCM pitch/DAC, browser
+audio, failed/stale operations, SRAM saving and firmware/media lifecycle.
+Fixture success does not establish either game's execution or playability.
+Optional upstream PCM comparison and physical overlay-write confirmation have not
+been performed. Issue #49 requires no post-merge verification.
 
 ## Local verification record (2026-10-21)
 
@@ -221,3 +327,12 @@ explicit silence, five/shared-wave voices, PSG mixing and existing lifecycle and
 failed-import behavior. No blocking findings remain in the local review. PR review,
 publication, physical measurement, commercial-game validation and optional pinned
 openMSX comparison were not performed. Issue #39 requires no post-merge work.
+
+## Issue #49 verification (2026-10-24)
+
+The [validation and local source/full-diff review record](validation.md#issue-49-romless-scc-i-sound-cartridges-2026-10-24)
+reports all required checks passing: 198 Rust tests and 110 browser cases, including
+eight SCC-I cases covering both profiles/models/site roots. The pinned macOS linker
+workaround above was needed; optional reference-emulator and physical comparisons
+remain unperformed. These results establish the specified synthetic hardware paths,
+not commercial-game playability.

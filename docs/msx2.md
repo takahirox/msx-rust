@@ -178,8 +178,8 @@ cartridge; applying a valid local pair restarts the current cartridge. Model swi
 | Slot | Device | CPU address range |
 | --- | --- | --- |
 | 0 (unexpanded) | Main BIOS/BASIC | 0000h–7FFFh, ROM protected |
-| 1 (unexpanded) | Existing plain/ASCII8/ASCII16/Konami/Konami SCC cartridge | Mapper dependent |
-| 2 | Empty | Reads FFh |
+| 1 (unexpanded) | Plain/ASCII8/ASCII16/Konami/Konami SCC cartridge or explicit ROMless SCC-I profile | Mapper dependent |
+| 2 (unexpanded) | Optional Philips interface / Weave disk boot | 4000h–7FFFh; reads FFh when absent |
 | 3-0 | Sub-ROM | 0000h–3FFFh, ROM protected |
 | 3-1, 3-2 | Empty | Reads FFh |
 | 3-3 | 256 KiB RAM mapper | Four independently banked 16 KiB CPU pages |
@@ -293,9 +293,12 @@ superimposition, light pen, mouse color-bus interface or optional expansion VRAM
 Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
 ports read FFh. Raster effects depending on exact hardware timing, changing bitmap
 layouts during an active command, undocumented mixed modes and edge-case sprite
-priority are not compatibility guarantees. No MSX2+, turbo R, disk/tape drives,
-SCC+/SCC-I, FM audio expansions, SRAM cartridges or game-specific patches are added.
-Classic K051649 SCC audio is supported on both models; see [SCC details](scc.md).
+priority are not compatibility guarantees. MSX2+, turbo R, tape drives, expanded
+modern SCC cartridges, FM audio and
+game-specific patches remain unsupported. Raw disk images, the optional Philips
+interface, supported ASCII SRAM cartridges and ROMless Snatcher/SD Snatcher
+SCC-I profiles are available. Classic SCC and SCC-I audio work on both models;
+see [SCC details](scc.md).
 
 Auto mapper inference uses the same local content analysis as MSX1 and never changes
 the selected model. Estimates can be wrong; choose a documented mapper manually
