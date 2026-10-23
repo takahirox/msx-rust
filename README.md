@@ -429,10 +429,11 @@ or extended mapper; they are rejected with an explanation. ASCII mappings are
 unmapped outside 4000h–BFFFh. Konami mirrors page 1 into page 0 and page 2 into
 page 3; SCC swaps those mirrors. Only writes through the selected cartridge slot
 change banks. **Classic SCC audio is supported**: selecting bank 3Fh in the third
-SCC window exposes waveform RAM and sound registers at 9800h–9FFFh. Five independent
-voices share four waveforms (channels 4/5 share storage), and mix with PSG. Konami
-Standard has different banking and no SCC. See [the SCC register map, timing,
-accuracy limits and tests](docs/scc.md).
+SCC window exposes waveform RAM and sound registers at 9800h–9FFFh. Hiding that
+overlay or switching slots leaves programmed voices playing; hidden accesses cannot
+change SCC registers. Five independent voices share four waveforms (channels 4/5
+share storage), and mix with PSG. Konami Standard has different banking and no SCC.
+See [the SCC register map, timing, accuracy limits and tests](docs/scc.md).
 SRAM is readable through selected windows and writable only at 8000h–BFFFh in
 SRAM mode. The 2/8 KiB memory repeats within those windows. Reset retains it.
 Auto cannot establish SRAM hardware or its size; choose these five new mappers
@@ -472,8 +473,10 @@ compatibility. No commercial-game compatibility or manual copyrighted-game play-
 Download the original **SCC test cartridge** in advanced options and open it with
 Konami SCC or Auto on either model. After enabling audio and focusing the display,
 hold Space for a 440 Hz SCC square, Up for all five SCC voices, Left for PSG,
-or combine Left with Space/Up. Right disables the SCC overlay. Release keys for
-silence; Reset restarts it and Eject returns to BASIC. Its code and synthetic
+or combine Left with Space/Up. Right hides the SCC overlay; Down maps another slot
+into its page. Combine Right/Down to hide both while sound continues. Release
+Space/Up to explicitly silence SCC, even while Right/Down remain held; release Left
+to silence PSG. Reset restarts it and Eject returns to BASIC. Its code and synthetic
 waveforms are original MIT-licensed data; no music or game assets are included.
 
 Mapper fixtures are generated, original MIT-licensed code in

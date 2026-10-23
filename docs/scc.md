@@ -12,7 +12,10 @@ Importing a correctly mapped cartridge does not guarantee commercial-game compat
 
 Write a value with low six bits 3Fh to 9000h–97FFh through cartridge slot 1
 to enable the 9800h–9FFFh overlay. Other bank values restore ordinary ROM.
-Only accesses through the selected cartridge slot reach SCC. The overlay is not
+Only accesses through the selected cartridge slot with the overlay enabled reach
+SCC registers. Hidden writes cannot change waves, periods, volumes or enable bits.
+Visibility does not control audio: an installed, programmed SCC keeps playing and
+advancing its phase across overlay and slot changes. The overlay is not
 present in the Konami SCC ROM mirror at 1800h. Existing bank masks, windows,
 reset banks and ROM mirrors are preserved.
 
@@ -74,13 +77,14 @@ digital synthesis, not chip-perfect analog reproduction: sub-instruction bus
 phases, DAC resistor tolerances, analog filtering/distortion, shared-RAM access
 glitches and anti-alias filtering are not modeled. Very high pitches can alias.
 
-Per Issue #23, SCC's contribution is gated off immediately when its overlay is
-disabled or page 2 does not select the cartridge. Oscillators retain state and
-keep time while hidden; selecting it again restores output. Reset, Eject,
-replacement, model or firmware changes clear waves, counters, controls and queued
-PCM. Validation/allocation failures commit no machine changes, preserving SCC
-and PSG state. Browser audio activation, scheduling, mute/resume, pause and focus
-handling use the existing audio transport.
+Issue #39 corrects Issue #23's hidden-window silence requirement. SCC generation
+and mixing depend on the installed mapper, independently of CPU register access.
+Disabling the overlay or selecting another slot leaves both output and phase
+uninterrupted. Explicit channel-enable and volume writes still control silence.
+Reset, Eject, replacement, model or firmware changes clear waves, counters,
+controls and queued PCM. Validation/allocation failures commit no machine changes,
+preserving SCC and PSG state. Browser audio activation, scheduling, mute/resume,
+pause and focus handling use the existing audio transport.
 
 ## Independent sources and provenance
 
@@ -91,6 +95,19 @@ hardware descriptions, without copying emulator implementations or ROM bytes:
 - [SCC Sound Chip](https://ngs.no.coocan.jp/doc/wiki.cgi?page=SCC+Sound+Chip): memory mirrors and write-only register behavior; its preliminary test-mode observations are refined by the hardware investigation above.
 - [MSX Wiki mapper documentation](https://direct.msx.org/wiki/ROM_mappers) and [K051649 overview](https://www.msx.org/wiki/Konami_051649): mapper activation and shared waveforms.
 - [Test-register read discussion](https://www.msx.org/ja/node/63446): FFh read-latch side effect. This discussion also quotes emulator comments; no implementation code was used.
+
+The visibility correction is inferred from pinned openMSX
+[mapper decoding](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/memory/RomKonamiSCC.cc)
+and [SCC synthesis](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/sound/SCC.cc):
+register visibility changes independently of sound generation. The
+[libmsx SCC interface and tone example](https://mori0091.github.io/libmsx/group__SCC__DEVICE.html)
+likewise distinguish register exposure from channel controls and restore the old
+slot before hiding the programmed chip. No upstream implementation code or example
+bytes were copied. No new physical measurement or commercial-game failure was
+observed; the Japanese investigation was text-corrupted during Issue #39 planning,
+and the NGS reference returned 403. Delayed DAC updates, SCC-I and bus-phase
+scheduling remain separate work. Optional pinned-openMSX PCM comparison has not
+been performed.
 
 The original MIT-licensed generator in
 [`scc_fixture.rs`](../crates/msx-core/src/firmware/scc_fixture.rs) builds
@@ -103,26 +120,43 @@ recorded samples, proprietary firmware or third-party game bytes.
 
 Open it with Konami SCC or Auto on either model. Enable audio and focus the display:
 Space plays voice 1 (about 440.397 Hz); Up plays all five SCC voices; Left plays
-PSG (about 588.741 Hz); Right hides SCC. Combine Left with Space/Up for mixed audio;
-release keys for silence. Reset restarts the fixture, and Eject returns to BASIC.
+PSG (about 588.741 Hz); Right hides the register overlay; Down maps BIOS into
+page 2. Combine Right/Down to hide both; programmed sound continues. Combine Left
+with Space/Up for mixed audio. Release Space/Up to explicitly silence SCC, even
+while Right/Down remain held; release Left to silence PSG. The poll loop briefly
+restores register access before updating channel controls, then hides the requested
+access paths and attempts destructive waveform, frequency, volume and enable
+writes, which must be ignored. Code and stack stay in pages 1/3 while real Z80
+memory and slot-port writes change page 2. Reset restarts the fixture, and Eject
+returns to BASIC.
 
 ## Automated verification
 
 `scc` unit tests check the full register map, mirrors, write masks/open bus,
 signed DAC levels, periods, independent voices, shared waves, chunk-invariant
 timing, test modes and write protection. `tests/scc.rs` additionally checks slot
-and mapper gating, exact additive mixing and sample cadence, successful/failed
+and mapper decoding, exact additive mixing and sample cadence, successful/failed
 imports, reset/ejection/replacement, firmware/model changes and actual Z80 fixture
 boot on both machines with explicit and Auto mapping. Its expected pitch and
-samples are calculated from the clock, periods and synthetic wave values.
+samples are calculated from the clock, periods and synthetic wave values. On both
+models, every PCM sample across overlay, slot and combined transitions/restoration
+is checked against an independent clock/DAC oracle and an equal-elapsed-cycle
+visible control, with one/five voices and hidden register-write isolation. Intervals
+cross sample/frame boundaries; irregular tick partitions have an additional PCM
+oracle. Simultaneous PSG mixing is checked while visibility changes.
 
 `tests/scc.spec.js` imports that same generated ROM through the real browser file
 input on MSX1/MSX2 with explicit/Auto selection, at root and Pages subpaths. It
 observes completed native Web Audio buffers from compiled Wasm, checking finite
 bounded samples, independently calculated DAC levels and pitch, five voices,
-PSG alone/together, overlay disable, enable-mask silence, failed imports,
-mute/resume, pause, reset and Eject. Existing PSG, cartridge, C-BIOS, BASIC and
-gallery suites remain part of `npm test`. Physical listening is optional.
+PSG alone/together, overlay/slot/combined hiding and restoration, enable-mask silence,
+failed imports, mute/resume, pause, reset and Eject. Existing PSG, cartridge, C-BIOS,
+BASIC and gallery suites remain part of `npm test`. Deterministic capture copies every Wasm
+PCM frame across visibility transitions, checking signed DAC levels and phase
+against the independently calculated `32 * 254` cycle period. Scheduled Web Audio
+checks use fresh completed buffers after queued audio drains; phase comparisons
+join only consecutive emulated frames, so scheduler gaps cannot invent edges.
+Physical listening is optional. Issue #39 requires no post-merge verification.
 
 Issue #23's published-site check remains **pending after merge**: verify the
 successful main Pages deployment, then use this fixture on the published site,
@@ -152,3 +186,38 @@ its original linker. The build used
 `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER="$PWD/target/local-linker/rust-lld"`
 with the pinned toolchain's `bin` first in `PATH`. No toolchain files, repository
 build settings, dependency versions or deployment configuration were changed.
+
+## Issue #39 verification (2026-10-24)
+
+The new `hidden_registers_preserve_pcm_pitch_and_phase_against_visible_control`
+regression was run before changing production code, which matched evaluation
+baseline `ae711ff47e0ebd0aeb2afdf93326d7e0a71eee95`. It failed at the first
+hidden sample: actual `[0.0]`, visible control `[-0.056500003]`. The same regression
+passes after removing visibility from SCC mixing.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed after simplifying a test expression flagged for precedence |
+| `cargo test --workspace --locked` | Passed, 149 tests |
+| `./scripts/build.sh` | Passed with the documented local toolchain/linker setup |
+| `node scripts/check-dist.mjs` | Passed |
+| `npm ci` / `npx playwright install chromium` | Passed |
+| `npx playwright test tests/scc.spec.js` | Passed, 8 cases, 3.4 minutes |
+| `npm test` | Passed, all 88 browser tests, 9.1 minutes |
+| `git diff --check` and local Markdown links | Passed |
+
+The initial build used a system Rust ahead of rustup and could not find Wasm std;
+putting the pinned 1.99.0 toolchain first in `PATH` resolved that mismatch. Its
+linker then hit the existing macOS `libLLVM.dylib` lookup problem. The ignored
+`target/local-linker/rust-lld` wrapper described above resolved it. Toolchain,
+dependency and production build configuration were unchanged.
+
+Local review followed `docs/review-guidelines.md`, checking the complete diff
+against Issue #39: register decoding, bank masks/mirrors and ROM visibility are
+unchanged; the private mixer no longer accepts visibility; the public Wasm ABI is
+unchanged. Native/browser evidence covers hidden output and phase, write isolation,
+explicit silence, five/shared-wave voices, PSG mixing and existing lifecycle and
+failed-import behavior. No blocking findings remain in the local review. PR review,
+publication, physical measurement, commercial-game validation and optional pinned
+openMSX comparison were not performed. Issue #39 requires no post-merge work.

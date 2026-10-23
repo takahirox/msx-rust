@@ -128,11 +128,7 @@ impl Psg {
     pub fn tick(&mut self, cycles: u32) {
         self.tick_with_scc(cycles, None);
     }
-    pub(crate) fn tick_with_scc(
-        &mut self,
-        cycles: u32,
-        mut scc: Option<(&mut crate::scc::Scc, bool)>,
-    ) {
+    pub(crate) fn tick_with_scc(&mut self, cycles: u32, mut scc: Option<&mut crate::scc::Scc>) {
         let mut scc_cycles = 0;
         for _ in 0..cycles {
             scc_cycles += 1;
@@ -162,17 +158,15 @@ impl Psg {
                 // A simple DC blocker models AC-coupled output and avoids startup clicks.
                 self.dc += 0.001 * (sample - self.dc);
                 let mut mixed = (sample - self.dc) * 0.6;
-                if let Some((chip, audible)) = scc.as_mut() {
+                if let Some(chip) = scc.as_mut() {
                     chip.tick(scc_cycles);
-                    if *audible {
-                        mixed += chip.output();
-                    }
+                    mixed += chip.output();
                 }
                 scc_cycles = 0;
                 self.samples.push(mixed);
             }
         }
-        if let Some((chip, _)) = scc {
+        if let Some(chip) = scc {
             chip.tick(scc_cycles);
         }
     }

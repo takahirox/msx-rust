@@ -1,6 +1,7 @@
 //! Original MIT-licensed SCC diagnostic, generated without third-party ROM bytes.
 /// A 64 KiB Konami SCC MegaROM for either model. Space: 440 Hz SCC square;
-/// Up: all five SCC voices; Left: PSG; Right: hide SCC. Release keys: silence.
+/// Up: all five SCC voices; Left: PSG; Right: hide registers; Down: hide slot.
+/// Hidden registers do not mute sound. Release Space/Up: explicit voice silence.
 pub fn scc_test_cartridge() -> Vec<u8> {
     fn store(code: &mut Vec<u8>, address: u16, value: u8) {
         code.extend([0x3e, value, 0x32, address as u8, (address >> 8) as u8]);
@@ -36,16 +37,32 @@ pub fn scc_test_cartridge() -> Vec<u8> {
     out(&mut code, 0x99, 0x87); // Blue backdrop, independent of BIOS display mode.
     store(&mut code, 0xc000, 0xa5); // Readiness marker for Rust execution tests.
     let poll = 0x4010 + code.len() as u16;
+    // Briefly expose the registers before applying explicit channel controls.
+    // This keeps key release effective even while Right/Down remain held.
+    out(&mut code, 0xa8, 0xd4);
+    store(&mut code, 0x9000, 0x3f);
     out(&mut code, 0xaa, 8);
     code.extend([0xdb, 0xa9, 0x47]); // IN A,(A9); LD B,A (active-low row 8).
-    code.extend([0xe6, 0x80, 0x3e, 2, 0x28, 2, 0x3e, 0x3f]);
-    code.extend([0x32, 0, 0x90]); // Right hides the overlay and cartridge audio.
     code.extend([0x78, 0xe6, 0x20, 0x3e, 31, 0x28, 2, 0x3e, 0, 0x4f]);
     code.extend([0x78, 0xe6, 1, 0x3e, 1, 0x28, 2, 0x3e, 0, 0xb1]);
     code.extend([0x32, 0x8f, 0x98]); // Up: five voices; Space: first voice.
     code.extend([0x78, 0xe6, 0x10, 0x3e, 15, 0x28, 2, 0x3e, 0, 0x4f]);
     out(&mut code, 0xa0, 8);
-    code.extend([0x79, 0xd3, 0xa1, 0xc3, poll as u8, (poll >> 8) as u8]);
+    code.extend([0x79, 0xd3, 0xa1]);
+    // Right: bank 2 instead of 3Fh. Down: BIOS instead of cartridge in page 2.
+    // Code and stack remain in pages 1/3, so actual Z80 slot writes are safe.
+    code.extend([0x78, 0xe6, 0x80, 0x3e, 2, 0x28, 2, 0x3e, 0x3f]);
+    code.extend([0x32, 0, 0x90]);
+    code.extend([
+        0x78, 0xe6, 0x40, 0x3e, 0xc4, 0x28, 2, 0x3e, 0xd4, 0xd3, 0xa8,
+    ]);
+    // Attempt destructive writes only while hidden. They must never reach SCC.
+    code.extend([0x78, 0xe6, 0xc0, 0xfe, 0xc0, 0x28, 25]);
+    for a in [0x9800, 0x9880, 0x9881, 0x988a, 0x988f] {
+        store(&mut code, a, 0);
+    }
+    code.extend([0x78, 0x32, 1, 0xc0]); // Last polled row, for execution tests.
+    code.extend([0xc3, poll as u8, (poll >> 8) as u8]);
     assert!(code.len() < 0x7f0);
     rom[0x10..0x10 + code.len()].copy_from_slice(&code);
     for i in 0..32 {

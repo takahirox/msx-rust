@@ -505,8 +505,8 @@ impl Machine {
         self.hardware.vdp.tick(cycles);
         self.hardware.fdc.tick(cycles);
         let h = &mut self.hardware;
-        let audible = h.mapping.scc_access(0x9800) && h.slot(0x9800) == (1, 0);
-        let scc = (h.mapping.kind == Mapper::KonamiScc).then_some((&mut h.scc, audible));
+        // Register visibility controls CPU access, not the installed chip's audio.
+        let scc = (h.mapping.kind == Mapper::KonamiScc).then_some(&mut h.scc);
         h.psg.tick_with_scc(cycles, scc);
         if self.hardware.model == Model::Msx2 {
             self.hardware.rtc.tick(cycles);

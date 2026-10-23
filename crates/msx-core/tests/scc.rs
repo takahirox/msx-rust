@@ -53,9 +53,9 @@ fn overlay_only_decodes_enabled_selected_slot_and_never_rom_mirrors() {
         for value in [0, 0x3e, 0x40, 0xbe] {
             m.hardware.write(0x9000, value);
             assert_eq!(m.hardware.read(0x9800), 0x5a);
-            m.hardware.write(0x9800, 0x33); // Disabled SCC must ignore sound writes.
+            m.hardware.write(0x9800, 0x33); // Hidden registers must ignore sound writes.
             m.frame();
-            assert!(silent(&m));
+            assert!(!silent(&m));
         }
         for value in [0x3f, 0x7f, 0xbf, 0xff] {
             m.hardware.write(0x9000, value);
@@ -65,7 +65,7 @@ fn overlay_only_decodes_enabled_selected_slot_and_never_rom_mirrors() {
         m.hardware.write(0x9800, 0x33);
         m.hardware.write(0x9000, 2);
         m.frame();
-        assert!(silent(&m));
+        assert!(!silent(&m));
         m.hardware.slots = 0xd4;
         assert_eq!(m.hardware.read(0x9800), 0x89);
         m.frame();
@@ -89,30 +89,131 @@ fn overlay_only_decodes_enabled_selected_slot_and_never_rom_mirrors() {
     }
 }
 
+// This oracle uses only the CPU/sample clocks and the programmed signed wave,
+// not Scc::tick/output. Check every sample, including the hidden intervals.
 #[test]
-fn mixing_preserves_sample_cadence_psg_waveform_and_headroom() {
-    let mut scc = machine(Model::Msx1, true, false);
-    let mut psg = machine(Model::Msx1, false, true);
-    let mut both = machine(Model::Msx1, true, true);
-    let mut total = 0;
-    for _ in 0..60 {
-        scc.frame();
-        psg.frame();
-        both.frame();
-        let a = &scc.hardware.psg.samples;
-        let b = &psg.hardware.psg.samples;
-        let mixed = &both.hardware.psg.samples;
-        assert_eq!(a.len(), b.len());
-        assert_eq!(b.len(), mixed.len());
-        total += mixed.len();
-        for ((a, b), sum) in a.iter().zip(b).zip(mixed) {
-            assert!((a + b - sum).abs() < 0.000001);
-            assert!(sum.is_finite() && sum.abs() <= 0.9);
+fn hidden_registers_preserve_pcm_pitch_and_phase_against_visible_control() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for voices in [1u8, 31] {
+            let mut m = machine(model, true, false);
+            let mut control = machine(model, true, false);
+            m.hardware.write(0x988f, voices);
+            control.hardware.write(0x988f, voices);
+            let mut sample_number = 0u64;
+            for (overlay, slot) in [
+                (true, true),
+                (false, true),
+                (false, false),
+                (true, false),
+                (true, true),
+                (true, false),
+                (false, false),
+                (false, true),
+                (true, true),
+            ] {
+                // Select the cartridge to change its overlay, then select page 2.
+                m.hardware.slots = 0xd4;
+                m.hardware.write(0x9000, if overlay { 0x3f } else { 2 });
+                m.hardware.slots = if slot { 0xd4 } else { 0xc4 };
+                if !overlay || !slot {
+                    for a in 0x9800..0x9880 {
+                        m.hardware.write(a, 0); // Waveform destruction must be ignored.
+                    }
+                    for a in 0x9880..=0x988f {
+                        m.hardware.write(a, 0); // Period, volume and enable isolation.
+                    }
+                    m.hardware.write(0x98e0, 0xff);
+                    m.hardware.read(0x98e0); // Hidden reads must not latch test modes.
+                }
+                // Irregular instruction partitions cross sample boundaries; frames
+                // also exercise PCM clearing, frame debt and many waveform periods.
+                for steps in [1, 17, 503, 3, 17011] {
+                    m.hardware.psg.samples.clear();
+                    control.hardware.psg.samples.clear();
+                    for _ in 0..steps {
+                        assert_eq!(m.step(), control.step());
+                    }
+                    check_pcm(&m, &control, voices, &mut sample_number);
+                }
+                for _ in 0..3 {
+                    m.frame();
+                    control.frame();
+                    check_pcm(&m, &control, voices, &mut sample_number);
+                }
+            }
+            // Explicit volume and enable controls still silence a previously hidden chip.
+            for a in 0x988a..=0x988e {
+                m.hardware.write(a, 0);
+            }
+            m.frame();
+            assert!(silent(&m));
+            for a in 0x988a..=0x988e {
+                m.hardware.write(a, 15);
+            }
+            m.hardware.write(0x988f, 0);
+            m.frame();
+            assert!(silent(&m));
         }
     }
-    // NTSC emulated frames, not a rounded 735 samples/frame accumulator.
-    let expected = both.hardware.vdp.frame_cycles() as usize * 60 * 44100 / 3_579_545;
-    assert!(total.abs_diff(expected) <= 1);
+}
+
+fn check_pcm(m: &Machine, control: &Machine, voices: u8, sample_number: &mut u64) {
+    assert_eq!(m.cpu.tstates, control.cpu.tstates);
+    assert_eq!(m.hardware.psg.samples, control.hardware.psg.samples);
+    for &sample in &m.hardware.psg.samples {
+        *sample_number += 1;
+        // Sample N is emitted at ceil(N * CPU_HZ / SAMPLE_RATE) T-states.
+        let elapsed = (*sample_number * 3_579_545).div_ceil(44100);
+        let mut dac = 0i32;
+        for c in 0..5 {
+            if voices & (1 << c) != 0 {
+                let position = (elapsed / (254 - c * 16)) % 32;
+                let wave = if position < 16 { 120i32 } else { -120 };
+                dac += (wave * 15).div_euclid(16);
+            }
+        }
+        let expected = dac as f32 / 2000.0;
+        assert!(
+            (sample - expected).abs() < 0.000001,
+            "sample {sample_number}: {sample} != {expected}"
+        );
+    }
+    assert_eq!(*sample_number, m.cpu.tstates * 44100 / 3_579_545);
+}
+
+#[test]
+fn mixing_preserves_sample_cadence_psg_waveform_and_headroom() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut scc = machine(model, true, false);
+        let mut psg = machine(model, false, true);
+        let mut both = machine(model, true, true);
+        let mut total = 0;
+        for frame in 0..60 {
+            // Retain exact PSG addition and five-voice headroom while access changes.
+            for m in [&mut scc, &mut psg, &mut both] {
+                m.hardware.slots = 0xd4;
+                m.hardware
+                    .write(0x9000, if frame % 4 < 2 { 0x3f } else { 2 });
+                m.hardware.slots = if frame % 2 == 0 { 0xd4 } else { 0xc4 };
+            }
+            scc.frame();
+            psg.frame();
+            both.frame();
+            let a = &scc.hardware.psg.samples;
+            let b = &psg.hardware.psg.samples;
+            let mixed = &both.hardware.psg.samples;
+            assert_eq!(a.len(), b.len());
+            assert_eq!(b.len(), mixed.len());
+            total += mixed.len();
+            for ((a, b), sum) in a.iter().zip(b).zip(mixed) {
+                assert!((a + b - sum).abs() < 0.000001);
+                assert!(sum.is_finite() && sum.abs() <= 0.9);
+            }
+        }
+        // NTSC emulated frames, not a rounded 735 samples/frame accumulator.
+        let expected = both.hardware.vdp.frame_cycles() as usize * 60 * 44100 / 3_579_545;
+        assert!(total.abs_diff(expected) <= 1);
+    }
 }
 
 #[test]
@@ -231,7 +332,51 @@ fn original_megarom_executes_real_z80_scc_and_psg_on_both_models_and_auto() {
             let rising = pcm.windows(2).filter(|w| w[0] < 0.0 && w[1] > 0.0).count();
             let expected = pcm.len() as f64 / 44100.0 * 3_579_545.0 / (32.0 * 254.0);
             assert!((rising as f64 - expected).abs() < 1.0);
+            // Real Z80 mapper and slot-port writes, with no missing PCM frames.
+            // Keep the square playing while registers, slot, or both are hidden.
+            for (right, down) in [
+                (true, false),
+                (true, true),
+                (false, true),
+                (false, false),
+                (false, true),
+                (true, true),
+                (true, false),
+                (false, false),
+            ] {
+                m.hardware.key(8, 7, right);
+                m.hardware.key(8, 6, down);
+                for _ in 0..12 {
+                    m.frame();
+                    pcm.extend_from_slice(&m.hardware.psg.samples);
+                }
+                assert_eq!(
+                    m.hardware.read(0xc001),
+                    0xfe & if right { 0x7f } else { 0xff } & if down { 0xbf } else { 0xff }
+                );
+            }
+            let rises: Vec<_> = pcm
+                .windows(2)
+                .enumerate()
+                .filter_map(|(i, w)| (w[0] < 0.0 && w[1] > 0.0).then_some(i + 1))
+                .collect();
+            assert!(pcm
+                .iter()
+                .all(|x| (*x - 0.056).abs() < 0.000001 || (*x + 0.0565).abs() < 0.000001));
+            let samples_per_wave = 32.0 * 254.0 * 44100.0 / 3_579_545.0;
+            for (n, &rise) in rises.iter().enumerate() {
+                assert!(((rise - rises[0]) as f64 - n as f64 * samples_per_wave).abs() < 1.0);
+            }
+            // Releasing Space explicitly silences voices even with both hides held.
+            m.hardware.key(8, 7, true);
+            m.hardware.key(8, 6, true);
             m.hardware.key(8, 0, false);
+            for _ in 0..3 {
+                m.frame();
+            }
+            assert!(silent(&m));
+            m.hardware.key(8, 7, false);
+            m.hardware.key(8, 6, false);
             m.hardware.key(8, 5, true); // Up: five independent voices.
             m.frame();
             assert!(m.hardware.psg.samples.iter().any(|x| x.abs() > 0.07));

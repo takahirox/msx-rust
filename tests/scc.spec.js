@@ -7,8 +7,17 @@ test.beforeEach(async ({ page }) => {
     const instantiate = WebAssembly.instantiate;
     WebAssembly.instantiate = async (...args) => {
       const result = await instantiate(...args);
-      window.sccWasm = result.instance.exports;
-      return result;
+      const exports = result.instance.exports;
+      window.sccWasm = exports;
+      window.sccFrame = 0;
+      return { ...result, instance: { exports: { ...exports,
+        msx_frame() {
+          if (!window.sccManual) {
+            exports.msx_frame();
+            window.sccFrame++;
+          }
+        },
+      } } };
     };
     window.sccBuffers = [];
     window.sccScheduled = 0;
@@ -25,8 +34,9 @@ test.beforeEach(async ({ page }) => {
             window.sccScheduled++;
             const data = source.buffer.getChannelData(0);
             const record = {
+              frame: window.sccFrame, rises: [],
               time: args[0], end: args[0] + source.buffer.duration, ended: false,
-              length: data.length, finite: true, peak: 0, energy: 0, crossings: 0,
+              length: data.length, finite: true, peak: 0, energy: 0,
               first: data[0], last: data[data.length - 1],
               square: true,
             };
@@ -34,7 +44,9 @@ test.beforeEach(async ({ page }) => {
               record.finite &&= Number.isFinite(data[i]);
               record.peak = Math.max(record.peak, Math.abs(data[i]));
               record.energy += data[i] * data[i];
-              if (i && data[i - 1] < 0 && data[i] > 0) record.crossings++;
+              if (i && data[i - 1] < 0 && data[i] > 0) {
+                record.rises.push(i);
+              }
               // Independent DAC calculation: floor(+/-120 * 15 / 16) / 2000.
               record.square &&= Math.abs(data[i] - 0.056) < 0.000001 || Math.abs(data[i] + 0.0565) < 0.000001;
             }
@@ -69,17 +81,74 @@ async function square(page) {
   await expect.poll(() => page.evaluate(() => window.sccBuffers.at(-1)?.square), { timeout: 15000 }).toBe(true);
   const buffers = await measure(page);
   expect(buffers.every(r => r.square)).toBe(true);
-  let crossings = buffers.reduce((n, r) => n + r.crossings, 0);
-  for (let i = 1; i < buffers.length; i++) if (buffers[i - 1].last < 0 && buffers[i].first > 0) crossings++;
-  const seconds = buffers.reduce((n, r) => n + r.length, 0) / 44100;
-  expect(Math.abs(crossings / seconds - 3_579_545 / (32 * 254))).toBeLessThan(8);
+  // The scheduler may omit a frame during catch-up. Check phase only across
+  // contiguous emulated frames, including the edge between adjacent buffers.
+  const period = 32 * 254 * 44100 / 3_579_545;
+  let previousFrame, previous, position = 0, firstRise, count = 0, checked = 0;
+  for (const buffer of buffers) {
+    if (buffer.frame !== previousFrame + 1) {
+      previous = undefined; firstRise = undefined; count = 0; position = 0;
+    }
+    const rises = [...buffer.rises];
+    if (previous < 0 && buffer.first > 0) rises.unshift(0);
+    for (const rise of rises) {
+      firstRise ??= position + rise;
+      expect(Math.abs(position + rise - firstRise - count * period)).toBeLessThan(1);
+      count++; checked++;
+    }
+    position += buffer.length;
+    previous = buffer.last;
+    previousFrame = buffer.frame;
+  }
+  expect(checked).toBeGreaterThan(50);
+}
+
+async function capturedContinuity(page) {
+  const result = await page.evaluate(() => {
+    // Deterministic real-Wasm frames: copy every PCM frame so no scheduler gap
+    // can hide a discontinuity at an input transition. No reset between states.
+    window.sccManual = true;
+    const w = window.sccWasm, pcm = [], stages = [];
+    for (const [right, down] of [
+      [false, false], [true, false], [true, true], [false, true], [false, false],
+      [false, true], [true, true], [true, false], [false, false],
+    ]) {
+      w.msx_key(8, 7, Number(right));
+      w.msx_key(8, 6, Number(down));
+      const start = pcm.length;
+      for (let i = 0; i < 12; i++) {
+        w.msx_frame();
+        pcm.push(...new Float32Array(w.memory.buffer, w.msx_audio(), w.msx_audio_len()));
+      }
+      stages.push(pcm.length - start);
+    }
+    const rises = pcm.flatMap((v, i) => i && pcm[i - 1] < 0 && v > 0 ? [i] : []);
+    // Explicit controls still work after hidden intervals, even while hidden.
+    w.msx_key(8, 7, 1); w.msx_key(8, 6, 1); w.msx_key(8, 0, 0);
+    for (let i = 0; i < 3; i++) w.msx_frame();
+    const silent = Array.from(new Float32Array(w.memory.buffer, w.msx_audio(), w.msx_audio_len())).every(v => v === 0);
+    w.msx_key(8, 7, 0); w.msx_key(8, 6, 0); w.msx_key(8, 0, 1);
+    window.sccManual = false;
+    return {
+      stages, silent, rises,
+      square: pcm.every(v => Math.abs(v - 0.056) < 0.000001 || Math.abs(v + 0.0565) < 0.000001),
+    };
+  });
+  expect(result.square).toBe(true);
+  expect(result.silent).toBe(true);
+  expect(result.stages.every(n => n > 8800)).toBe(true);
+  expect(result.rises.length).toBeGreaterThan(700);
+  const period = 32 * 254 * 44100 / 3_579_545;
+  for (let n = 0; n < result.rises.length; n++) {
+    expect(Math.abs(result.rises[n] - result.rises[0] - n * period)).toBeLessThan(1);
+  }
 }
 
 for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
   for (const model of ['0', '1']) {
     for (const mapper of ['5', '0']) {
       test(`classic SCC native audio, lifecycle and PSG: model ${model}, mapper ${mapper} at ${site}`, async ({ page }) => {
-        test.setTimeout(60000);
+        test.setTimeout(90000);
         await page.goto(site);
         await expect(page.locator('#transcript')).toContainText('READY');
         await page.locator('#model').selectOption(model);
@@ -95,11 +164,26 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await page.keyboard.down('Space');
         await expect.poll(() => page.evaluate(() => window.sccBuffers.some(r => r.square)), { timeout: 15000 }).toBe(true);
         await square(page);
-        // Disabling the mapper's overlay must gate SCC even with enabled voices.
+        await capturedContinuity(page);
+        // Fresh completed Web Audio buffers must keep sounding while either or
+        // both register-access paths are hidden by genuine Z80 writes.
         await page.keyboard.down('ArrowRight');
-        await silence(page);
+        await square(page);
+        await page.keyboard.down('ArrowDown');
+        await square(page);
         await page.keyboard.up('ArrowRight');
         await square(page);
+        await page.keyboard.up('ArrowDown');
+        await square(page);
+        // Release the voice control while both access paths remain hidden.
+        await page.keyboard.down('ArrowRight');
+        await page.keyboard.down('ArrowDown');
+        await page.keyboard.up('Space');
+        await silence(page);
+        await page.keyboard.down('Space');
+        await square(page);
+        await page.keyboard.up('ArrowRight');
+        await page.keyboard.up('ArrowDown');
         await page.keyboard.up('Space');
         await silence(page);
         await page.keyboard.down('ArrowLeft');
