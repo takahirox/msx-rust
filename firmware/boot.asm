@@ -3,7 +3,7 @@
 ; firmware service in msx-core, through two private ports only enabled for this ROM.
 ; Standard MSX cartridges and supplied BIOS ROMs use the Z80/hardware path.
         org 0
-        jp 0100h
+        jp 0100h        ; MSX2: jp 0080h, mapper initialization below
         org 002dh
         db 0            ; MSX1 generation; the MSX2 Weave BASIC profile sets 1
         org 0038h
@@ -46,3 +46,19 @@ poll:   in a,(0f0h)     ; queued ASCII/editor key; zero means no key
         jr z,poll
         out (0f1h),a     ; BASIC line editor/interpreter service
         jr poll
+
+; MSX2 only: reset jumps to this trampoline before the routine at 0100h.
+; MSX1 retains the direct JP 0100h and unconnected FCh..FFh ports.
+; The original diagnostic and disk loaders use the same trampoline before
+; their own 0100h routines. C-BIOS and supplied firmware initialize themselves.
+        org 0080h
+        di
+        ld a,3
+        out (0fch),a
+        ld a,2
+        out (0fdh),a
+        ld a,1
+        out (0feh),a
+        ld a,0
+        out (0ffh),a
+        jp 0100h

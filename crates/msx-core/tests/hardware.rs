@@ -317,12 +317,12 @@ fn page_two_cartridge_header_boots_without_a_page_one_header() {
         m.load_cartridge(&rom).unwrap();
         for _ in 0..600 {
             m.frame();
-            if m.hardware.ram[0xc000] == 0x5a {
+            if m.hardware.read(0xc000) == 0x5a {
                 break;
             }
         }
         assert!(m.cpu.halted);
-        assert_eq!(m.hardware.ram[0xc000], 0x5a);
+        assert_eq!(m.hardware.read(0xc000), 0x5a);
     }
 }
 #[test]
@@ -334,11 +334,11 @@ fn returning_cartridge_stays_under_cbios_until_eject() {
     m.load_cartridge(&rom).unwrap();
     for _ in 0..600 {
         m.frame();
-        if m.hardware.ram[0xc000] == 0x5a {
+        if m.hardware.read(0xc000) == 0x5a {
             break;
         }
     }
-    assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    assert_eq!(m.hardware.read(0xc000), 0x5a);
     assert!(m.basic.console.transcript.is_empty());
     m.unload_cartridge();
     m.frame();

@@ -50,7 +50,8 @@ The same original interpreter, editor, cooperative execution, arrays, DATA,
 GOSUB/RETURN, INPUT, SCREEN 0–3, graphics and PSG commands work on both models.
 The private F0h/F1h services run only with active Weave BASIC, never with C-BIOS,
 the diagnostic loader or local firmware. MSX2 BASIC maps expanded slot 3-3 RAM
-before Z80 boot and initializes V9938 mode/scroll/sprite state for its display.
+and initializes its RAM selectors through Z80 I/O before using the stack. It also
+initializes V9938 mode/scroll/sprite state for its display.
 
 | SCREEN | Drawing coordinates | Colors |
 | --- | --- | --- |
@@ -112,7 +113,7 @@ browser only transfers the Rust framebuffer to Canvas.
 The optional **Original diagnostic loader** is the previous minimal AB loader and
 diagnostic sub-ROM, with no BASIC prompt or standard BIOS services. With no
 cartridge it waits on a blue backdrop. It is retained for isolated hardware tests.
-All seven generated ROMs are independently authored and MIT licensed; C-BIOS is
+All original generated ROMs are independently authored and MIT licensed; C-BIOS is
 separately licensed as described above.
 
 ![Original diagnostic in SCREEN 7](msx2-evidence/screen7.png)
@@ -138,16 +139,77 @@ cartridge; applying a valid local pair restarts the current cartridge. Model swi
 | 2 | Empty | Reads FFh |
 | 3-0 | Sub-ROM | 0000h–3FFFh, ROM protected |
 | 3-1, 3-2 | Empty | Reads FFh |
-| 3-3 | 64 KiB RAM | Four 16 KiB pages |
+| 3-3 | 256 KiB RAM mapper | Four independently banked 16 KiB CPU pages |
 
 A8h selects primary slots separately for each page. When page 3 selects expanded
 primary slot 3, FFFFh reads the **inverted** secondary selector; writes set its
 four per-page sub-slot fields, regardless of page 3's selected sub-slot. Otherwise
-FFFFh belongs to the selected device. C-BIOS and local firmware begin with selector
-00h and discover RAM/slots themselves. BIOS RDSLT/WRSLT/ENASLT/CALSLT routines execute as
+FFFFh belongs to the selected device. C-BIOS and local firmware begin with
+secondary-slot selector 00h and discover RAM/slots themselves.
+BIOS RDSLT/WRSLT/ENASLT/CALSLT routines execute as
 Z80 code against these registers; there are no native BIOS traps. The profile
 needs no disk, vendor extension, font or logo ROM to boot the verified cartridges.
-It has fixed RAM, not a RAM mapper at FCh–FFh.
+
+### RAM mapper
+
+One fixed 256 KiB mapper provides sixteen shared 16 KiB segments in slot 3-3.
+Primary/secondary slot selection still gates every memory access. Selecting the
+same segment on multiple pages aliases the same bytes; changing one selector
+leaves the other three unchanged. Translation is `segment * 4000h + (address & 3FFFh)`.
+
+| Low I/O port byte | CPU page |
+| --- | --- |
+| FCh | 0000h–3FFFh |
+| FDh | 4000h–7FFFh |
+| FEh | 8000h–BFFFh |
+| FFh | C000h–FFFFh |
+
+All high port bytes are ignored, consistently with existing I/O decoding. Writes
+keep selector bits 0–3 and ignore bits 4–7; reads return `F0h | selected_segment`.
+Ports operate while RAM is hidden. Memory FFFFh remains the inverted expanded-slot
+register whenever primary slot 3 is selected on page 3, regardless of secondary
+selection; I/O FFh is a separate mapper register. ROM protection and empty-slot
+FFh reads are unchanged. MSX1 retains fixed 64 KiB RAM and FFh reads/ignored writes
+at mapper ports. The core reserves its largest RAM buffer at creation so reset
+and transactional model/firmware/cartridge commits do not allocate replacement RAM.
+
+Hardware reset clears all RAM and resets **all selectors to zero**, before any
+firmware executes. The original MSX2 Weave BASIC, diagnostic and disk reset loaders
+execute a stack-free Z80 trampoline at 0080h that writes **3,2,1,0** to FCh–FFh
+before entering their 0100h routines. See [assembly](../firmware/boot.asm) and
+[byte generator](../crates/msx-core/src/firmware.rs). Bundled unmodified C-BIOS
+0.29a discovers RAM and initializes the same selectors during actual CPU execution;
+supplied firmware chooses its own values. There are no native BIOS traps or
+firmware-specific hardware reset values. Readback/reset are this profile's contract,
+not a claim that every physical mapper behaves identically.
+
+The [original probe](../crates/msx-core/src/firmware/ram_mapper_fixture.rs) is generated
+as `ram-mapper-test-cartridge.rom` (MIT). Open the advanced-options download with
+**Open ROM** on MSX2: it verifies firmware initialization, then writes distinct
+signatures at both ends of all sixteen segments before reading any back. A smaller
+aliased capacity fails even if register readback claims sixteen segments. Z80
+instructions draw `RAM MAPPER PASS` with a green bar, or `RAM MAPPER FAIL` with a red
+bar, using the original font and VDP ports. MSX1 exercises the failure path.
+Reset reboots the probe. No commercial ROM, proprietary firmware or host service
+is used. Multiple mappers, configurable capacities/profiles and additional disk
+firmware support are outside this task.
+
+`tests/ram_mapper.rs` covers capacity through bus accesses, all pages/segments,
+shared aliases, independent selectors, boundaries, masking/readback, hidden-slot
+I/O, ROM/empty-slot isolation, FFFFh precedence, reset and original/supplied firmware
+initialization, C-BIOS execution and failed-import preservation of selectors,
+RAM, firmware, media and unsaved cartridge SRAM. Wasm disk boot status reads the
+mapped CPU address, with a dedicated ABI regression. Existing tests observe RAM
+through the bus. `tests/ram-mapper.spec.js` imports the probe with the ordinary ROM
+picker at `/` and `/msx-rust/`, checks actual Canvas glyphs and the result bar,
+Reset, failed import, authored local firmware and MSX1 failure. Existing BASIC,
+input/audio, disk read/write/export and cartridge/SRAM suites remain mandatory.
+
+The implementation and probe were independently authored from Issue #31's
+behavioral contract. Relevant documentation: [MSX2 Technical Handbook I/O map](https://github.com/Konamiman/MSX2-Technical-Handbook/blob/master/md/Appendix6.md).
+Existing C-BIOS bytes, licenses and provenance are unchanged.
+
+### RTC
 
 RTC ports B4h/B5h implement the RP-5C01 address latch, four banks of thirteen
 nibble registers, common mode/test/reset registers, stopped/running time, 12/24-hour
@@ -252,6 +314,40 @@ local firmware testing; it is not needed by any automated gate:
 ```sh
 cargo run --locked --release --example check_bios -- /local/main.rom /local/sub.rom
 ```
+
+### Issue #31 validation
+
+Validated locally on 2026-10-23, macOS arm64, pinned Rust 1.99.0, Node.js 24.12.0 and
+Playwright 1.64.1 / Chromium. Original fixtures and the unchanged bundled C-BIOS 0.29a
+were used; no proprietary ROMs, physical hardware or human gameplay were required.
+
+| Check | Observed result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 122 tests passed; mapper and Wasm status coverage added |
+| `./scripts/build.sh` | Passed using the existing documented macOS linker wrapper; the initial unwrapped attempt failed to locate `libLLVM.dylib` |
+| `node scripts/check-dist.mjs` | Passed; new original probe inventoried, pinned C-BIOS bytes/notices unchanged |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| `npm test -- tests/ram-mapper.spec.js` | Two tests passed at root and project paths, including C-BIOS, Reset, authored local firmware and MSX1 failure |
+| `npm test -- tests/browser.spec.js -g 'a reserved 2 MiB'` | One test passed, including rejection of a second cartridge allocation |
+| `npm test` | Final run: all 84 tests passed in 8.3 minutes; initial run: 83 passed and the old allocation-test cap failed, corrected as described below |
+| `git diff --check`; updated documentation file links; JavaScript syntax | Passed |
+| Optional openMSX trace comparison | Unperformed: openMSX is not installed in this environment |
+
+The constrained-memory browser regression now permits three additional 64 KiB
+Wasm pages for the extra 192 KiB RAM reservation. It still verifies framebuffer
+reuse, and explicitly rejects reserving a second 2 MiB cartridge copy.
+The final probe screenshot was visually inspected: the PASS text and green bar
+appear on a cleared display. Root/project-path screenshots are generated as
+`test-results/ram-mapper-root.png` and `ram-mapper-pages.png`.
+
+Repository review covered the complete diff against Issue #31: bus translation and
+slot precedence, original-loader Z80 initialization, physical RAM consumers,
+transactional/reset behavior, executable probes, browser import paths and
+license/provenance preservation. No blocking implementation findings remain.
+Issue #31 requires no post-merge verification; historical deployment checks below
+remain separate.
 
 ### Issue #19 validation
 

@@ -556,10 +556,10 @@ function boundedMemoryWasm(bytes, maxPages) {
 }
 
 test('a reserved 2 MiB cartridge installs and resets without extra memory', async ({ page }) => {
-  // 4.6875 MiB permits the upload after MSX2 startup and an explicit MSX1 switch,
-  // including the larger V9938 framebuffer/VRAM allocations. It still cannot fit
-  // a second cartridge copy; pointer checks also verify framebuffer reuse.
-  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 75);
+  // 4.875 MiB permits the upload after MSX2 startup and an explicit MSX1 switch,
+  // including V9938 buffers and the extra 192 KiB reserved for mapped RAM.
+  // It still cannot fit a second cartridge copy; verify that explicitly below.
+  const bounded = boundedMemoryWasm(await readFile('dist/msx_wasm.wasm'), 78);
   await page.addInitScript(base64 => {
     const instantiate = WebAssembly.instantiate.bind(WebAssembly);
     WebAssembly.instantiate = async (...args) => {
@@ -584,6 +584,13 @@ test('a reserved 2 MiB cartridge installs and resets without extra memory', asyn
   await expect(page.locator('#status')).toHaveText(`Running · MSX1 C-BIOS 0.29a · cartridge BIOS (no BASIC) · ${fixture.name} (ASCII8)`);
   expect(await page.evaluate(() => window.memoryTestWasm.msx_pixels())).toBe(pixels);
   await backdrop(page, '212,193,84');
+  // Reserving another full copy must fail without disturbing the installed ROM.
+  expect(await page.evaluate(() => {
+    const w = window.memoryTestWasm;
+    const pointer = w.msx_upload(2 * 1024 * 1024);
+    w.msx_cancel_upload();
+    return pointer;
+  })).toBe(0);
   await page.locator('#screen').focus();
   await page.keyboard.down('Space');
   await backdrop(page, '212,82,77');

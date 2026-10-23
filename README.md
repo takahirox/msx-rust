@@ -131,7 +131,7 @@ provenance and validation](docs/disks.md).
 ## MSX2
 
 Each fresh page load starts **MSX2** in original, independent **Weave BASIC**,
-with the V9938 and 128 KiB VRAM profile. Choose **MSX1** in **Machine** to use
+with the V9938, 128 KiB VRAM and 256 KiB mapped RAM profile. Choose **MSX1** in **Machine** to use
 that model; reloads and new tabs start MSX2 again without remembering a preference.
 Both models support Weave BASIC.
 Selecting a machine clears incompatible ROMs and starts fresh BASIC. Under the
@@ -155,6 +155,20 @@ Space changes a black tile to white and plays a tone after enabling audio. The
 separate original MSX2 diagnostic demonstrates V9938 512×212 palette video,
 256-color video (hold 8; hold 7 to restore), extended VRAM, commands, sprites and RTC.
 
+MSX2 RAM is sixteen shared 16 KiB segments in expanded slot **3-3**. Ports
+**FCh/FDh/FEh/FFh** independently select the segment for CPU pages
+0000h–3FFFh/4000h–7FFFh/8000h–BFFFh/C000h–FFFFh. Writes keep bits 0–3;
+reads return `F0h | segment`. Ports decode the low byte even while RAM is hidden;
+memory still obeys slot selection and FFFFh's expanded-slot register takes precedence.
+Reset clears RAM and sets all four segments to zero before CPU execution. Original
+MSX2 BASIC, diagnostic and disk loaders initialize 3,2,1,0 through Z80 I/O;
+C-BIOS and supplied firmware initialize their own selectors. MSX1 keeps fixed
+64 KiB RAM and unconnected mapper ports. One fixed-capacity mapper is supported;
+multiple mappers and configurable profiles remain outside this implementation.
+The original **RAM mapper probe** download in advanced options reports
+`RAM MAPPER PASS` after checking all sixteen segments through normal ROM import,
+including memory above 64 KiB; Reset repeats the test. See [profile and validation](docs/msx2.md#ram-mapper).
+
 For external firmware, select a matching local **32 KiB MSX2 main BIOS/BASIC** and
 **16 KiB sub-ROM**, then **Apply MSX2 firmware**. The pair is validated before
 replacing active firmware and restarting the current cartridge. Files remain local
@@ -167,7 +181,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | --- | --- |
 | Z80 | Main/alternate registers, flags, base/CB/ED/DD/FD/indexed-CB instruction families, stack, I/O, HALT, EI delay, IRQ/NMI, IM 0/1/2 and instruction T-states |
 | Memory (MSX1) | Four primary slots, four independently selected 16 KiB pages, 64 KiB RAM in slot 3, 32 KiB system ROM in slot 0, plain/MegaROM cartridge in slot 1 |
-| MSX2 | V9938, 128 KiB VRAM, 64 KiB RAM, expanded slot 3 with sub-ROM in 3-0 and RAM in 3-3, deterministic RTC; [coverage](docs/msx2.md) |
+| MSX2 | V9938, 128 KiB VRAM, 256 KiB RAM mapper (FCh–FFh), expanded slot 3 with sub-ROM in 3-0 and RAM in 3-3, deterministic RTC; [coverage](docs/msx2.md) |
 | TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |

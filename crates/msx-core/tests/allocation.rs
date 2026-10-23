@@ -1,5 +1,5 @@
 //! Force real allocation errors without changing production allocation behavior.
-use msx_core::{firmware, BootPolicy, Firmware, Machine, Mapper, Model};
+use msx_core::{cpu::Bus, firmware, BootPolicy, Firmware, Machine, Mapper, Model};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
@@ -75,11 +75,11 @@ fn cartridge_reservation_failure_preserves_active_scc_and_psg() {
                 .unwrap();
             for _ in 0..600 {
                 m.frame();
-                if m.hardware.ram[0xc000] == 0xa5 {
+                if m.hardware.read(0xc000) == 0xa5 {
                     break;
                 }
             }
-            assert_eq!(m.hardware.ram[0xc000], 0xa5);
+            assert_eq!(m.hardware.read(0xc000), 0xa5);
             m.hardware.key(8, 5, true);
             m.hardware.key(8, 4, true);
             m.frame();
@@ -128,7 +128,6 @@ fn demo_model_display_allocation_failure_preserves_running_basic() {
 
 #[test]
 fn sram_reservation_failure_preserves_unsaved_cartridge_and_reset_does_not_allocate() {
-    use msx_core::cpu::Bus;
     for kind in [
         Mapper::Ascii8Sram2,
         Mapper::Ascii8Sram8,

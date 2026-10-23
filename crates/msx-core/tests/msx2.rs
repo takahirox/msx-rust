@@ -393,7 +393,7 @@ fn expanded_slot_register_subrom_protection_and_reset() {
     m.reset();
     assert_eq!(m.hardware.secondary[3], 0xff);
     assert_eq!(m.hardware.slots, 0xf0);
-    assert_eq!(m.hardware.ram[0], 0);
+    assert_eq!(m.hardware.read(0xc000), 0);
     assert!(m.load_bios(&vec![0; 32768]).is_err());
     assert!(m.load_msx2_firmware(&[0; 5], &[0; 4]).is_err());
     assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
@@ -412,7 +412,7 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     for _ in 0..15 {
         m.frame();
     }
-    assert_eq!(m.hardware.ram[0xc100], 0x2a);
+    assert_eq!(m.hardware.read(0xc100), 0x2a);
     assert_eq!(m.hardware.vdp.mode(), 7);
     assert_eq!(m.hardware.vdp.width(), 512);
     assert_eq!(m.hardware.vdp.height(), 212);
@@ -463,7 +463,12 @@ fn external_main_and_subrom_execute_real_slot_interactions() {
         .unwrap();
     m.frame();
     assert!(m.cpu.halted);
-    assert_eq!(&m.hardware.ram[0xc100..0xc102], &[0x2a, 0x37]);
+    assert_eq!(
+        (0xc100..0xc102)
+            .map(|a| m.hardware.read(a))
+            .collect::<Vec<_>>(),
+        &[0x2a, 0x37]
+    );
     assert!(m.basic.console.transcript.is_empty());
     let bios = m.hardware.bios.clone();
     assert!(m.load_msx2_firmware(&main, &[]).is_err());
@@ -471,7 +476,7 @@ fn external_main_and_subrom_execute_real_slot_interactions() {
     assert!(m.cpu.halted);
     m.reset();
     m.frame();
-    assert_eq!(m.hardware.ram[0xc101], 0x37);
+    assert_eq!(m.hardware.read(0xc101), 0x37);
     m.use_diagnostic().unwrap();
     assert_eq!(m.hardware.firmware, Firmware::Diagnostic);
     assert!(m.hardware.cartridge.is_empty());

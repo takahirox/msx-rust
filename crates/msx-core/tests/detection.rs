@@ -101,12 +101,12 @@ fn infers_each_mapper_and_executes_in_both_machine_models() {
             assert_eq!(m.hardware.model, model);
             for _ in 0..600 {
                 m.frame();
-                if m.hardware.ram[0xc000] == 0x5a {
+                if m.hardware.read(0xc000) == 0x5a {
                     break;
                 }
             }
             assert!(m.cpu.halted);
-            assert_eq!(m.hardware.ram[0xc000], 0x5a);
+            assert_eq!(m.hardware.read(0xc000), 0x5a);
         }
     }
     // A small bank-switched image must not be classified solely by its plain-compatible size.
@@ -213,12 +213,12 @@ fn index_prefixed_control_flow_skips_unreachable_mapper_writes() {
                     m.load_cartridge(&rom).unwrap();
                     for _ in 0..600 {
                         m.frame();
-                        if m.hardware.ram[0xc000] == 0x5a {
+                        if m.hardware.read(0xc000) == 0x5a {
                             break;
                         }
                     }
                     assert!(m.cpu.halted);
-                    assert_eq!(m.hardware.ram[0xc000], 0x5a);
+                    assert_eq!(m.hardware.read(0xc000), 0x5a);
                 }
             }
         }
@@ -290,13 +290,13 @@ fn malformed_unsupported_and_ambiguous_loads_preserve_the_active_machine() {
         .unwrap();
     for _ in 0..600 {
         m.frame();
-        if m.hardware.ram[0xc000] == 0x5a {
+        if m.hardware.read(0xc000) == 0x5a {
             break;
         }
     }
-    assert_eq!(m.hardware.ram[0xc000], 0x5a);
+    assert_eq!(m.hardware.read(0xc000), 0x5a);
     m.cpu.pc = 0x8123;
-    m.hardware.ram[0xc001] = 0x33;
+    m.hardware.write(0xc001, 0x33);
     let before = m.hardware.cartridge.clone();
     let pixels = m.hardware.vdp.pixels.clone();
     let bios = m.hardware.bios.clone();
@@ -315,7 +315,7 @@ fn malformed_unsupported_and_ambiguous_loads_preserve_the_active_machine() {
         assert!(d.explanation.contains("same file again"));
         assert!(m.load_cartridge_owned(rom, Mapper::Auto).is_err());
         assert_eq!(m.cpu.pc, 0x8123);
-        assert_eq!(m.hardware.ram[0xc001], 0x33);
+        assert_eq!(m.hardware.read(0xc001), 0x33);
         assert_eq!(m.hardware.read(0x8000), 0x3e); // switched bank retained
         assert_eq!(m.hardware.cartridge, before);
         assert_eq!(m.hardware.vdp.pixels, pixels);

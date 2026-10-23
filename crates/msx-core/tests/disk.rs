@@ -118,7 +118,9 @@ fn z80_disk_boot_and_write_on_both_models() {
             m.frame();
         }
         assert_eq!(
-            &m.hardware.ram[0xd080..0xd08f],
+            (0xd080..0xd08f)
+                .map(|a| m.hardware.read(a))
+                .collect::<Vec<_>>(),
             b"WEAVE DISK BOOT",
             "pc={:04x} status={:02x}",
             m.cpu.pc,
@@ -180,12 +182,16 @@ fn slots_failures_overrides_and_parked_sram() {
         m.frame();
     }
     assert_eq!(
-        &m.hardware.vdp.vram[0x1a00..0x1a0f],
+        m.hardware.vdp.vram[0x1a00..0x1a0f].to_vec(),
         b"WRITE PROTECTED",
         "pc={:04x} src={:?} buf={:?}",
         m.cpu.pc,
-        &m.hardware.ram[0xd320..0xd32f],
-        &m.hardware.ram[0xf100..0xf104]
+        (0xd320..0xd32f)
+            .map(|a| m.hardware.read(a))
+            .collect::<Vec<_>>(),
+        (0xf100..0xf104)
+            .map(|a| m.hardware.read(a))
+            .collect::<Vec<_>>()
     );
     assert!(!m.hardware.fdc.disk.as_ref().unwrap().dirty);
     let pc = m.cpu.pc;
@@ -439,7 +445,7 @@ fn independent_360k_z80_boot_sector_reads_and_writes_through_diskio() {
         for _ in 0..60 {
             m.frame();
         }
-        assert_eq!(m.hardware.ram[0xdf00], 0xa5, "pc={:04x}", m.cpu.pc);
+        assert_eq!(m.hardware.read(0xdf00), 0xa5, "pc={:04x}", m.cpu.pc);
         assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
         // Pulling media at the controller level makes a new read complete not-ready.
         m.hardware.fdc.disk.as_mut().unwrap().dirty = false;
@@ -499,7 +505,9 @@ fn firmware_buffer_bounds_preserve_stack_and_report_completed_sectors() {
         m.hardware.slots = 0xf8;
         m.hardware.secondary[3] = 0xff;
         let code = [0xcd, 0x10, 0x40, 0x76];
-        m.hardware.ram[0xc000..0xc004].copy_from_slice(&code);
+        for (i, byte) in code.into_iter().enumerate() {
+            m.hardware.write(0xc000 + i as u16, byte);
+        }
         m.cpu.pc = 0xc000;
         m.cpu.sp = 0xf000;
         m.cpu.set_bc(0x02f9);
@@ -512,7 +520,12 @@ fn firmware_buffer_bounds_preserve_stack_and_report_completed_sectors() {
         assert_eq!(m.cpu.r[0], completed);
         assert_eq!(m.cpu.f & 1, 1);
         if completed == 1 {
-            assert_eq!(&m.hardware.ram[0xed00..0xef00], &image[..512]);
+            assert_eq!(
+                (0xed00..0xef00)
+                    .map(|a| m.hardware.read(a))
+                    .collect::<Vec<_>>(),
+                &image[..512]
+            );
         }
         assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), image);
     }

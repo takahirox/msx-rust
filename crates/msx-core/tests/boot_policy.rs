@@ -9,7 +9,7 @@ fn enter(m: &mut Machine, text: &str) {
 fn boot_cart(m: &mut Machine) {
     for _ in 0..600 {
         m.frame();
-        if m.hardware.ram[0xc202] == 0xa5 {
+        if m.hardware.read(0xc202) == 0xa5 {
             m.frame();
             return;
         }
@@ -53,19 +53,19 @@ fn automatic_boot_services_reset_and_eject_on_both_models() {
         m.step();
         assert!(m.basic.console.transcript.is_empty());
         boot_cart(&mut m);
-        assert_eq!(m.hardware.ram[0xc200], 0x5a); // WRSLT/RDSLT
+        assert_eq!(m.hardware.read(0xc200), 0x5a); // WRSLT/RDSLT
         assert_eq!(rgb(&m, 0, 16), [255, 255, 255]);
         assert_eq!(rgb(&m, 1, 16), [0, 0, 0]);
         m.hardware.key(8, 0, true);
         for _ in 0..3 {
             m.frame();
         }
-        assert_eq!(m.hardware.ram[0xc201], 1); // SNSMAT
+        assert_eq!(m.hardware.read(0xc201), 1); // SNSMAT
         assert_eq!(rgb(&m, 8, 16), [255, 255, 255]);
         assert!(m.hardware.psg.samples.iter().any(|v| v.abs() > 0.05));
         m.reset();
         boot_cart(&mut m);
-        assert_eq!(m.hardware.ram[0xc201], 0);
+        assert_eq!(m.hardware.read(0xc201), 0);
         m.unload_cartridge();
         m.frame();
         assert_eq!(m.hardware.model, model);
