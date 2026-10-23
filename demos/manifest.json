@@ -60,12 +60,12 @@
       "file": "msx2-test-cartridge.rom",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "source": "https://github.com/takahirox/msx-rust/blob/1836ca473e72e2057a40eadab8177a4254b4eac4/crates/msx-core/src/firmware.rs",
-      "download": "https://github.com/takahirox/msx-rust/blob/1836ca473e72e2057a40eadab8177a4254b4eac4/crates/msx-core/src/firmware.rs",
-      "version": "msx2_cartridge generator at 1836ca473e72e2057a40eadab8177a4254b4eac4 (Issue #35 cross-mode VRAM probe)",
-      "changes": "Generated from the checked-out original project source by scripts/build.sh; Issue #35 adds SCREEN 5 uploads reinterpreted through SCREEN 7/8 ports and pixels.",
+      "source": "https://github.com/takahirox/msx-rust/blob/b4ce3b23914b24b49cee5f43eb3f3b02b9838020/crates/msx-core/src/firmware.rs",
+      "download": "https://github.com/takahirox/msx-rust/blob/b4ce3b23914b24b49cee5f43eb3f3b02b9838020/crates/msx-core/src/firmware.rs",
+      "version": "msx2_cartridge generator at b4ce3b23914b24b49cee5f43eb3f3b02b9838020 (Issue #45 reverse-top and LINE completion probes)",
+      "changes": "Generated from the checked-out original project source by scripts/build.sh; retains Issue #35 cross-mode VRAM probes and adds Issue #45 reverse-top sentinel and chained LINE/fill port probes.",
       "size": 16384,
-      "sha256": "806e8ec15010229cb8da08863e94ecec5edde21cd22946d7b4750d86b5468dd9",
+      "sha256": "db7316cd4b2d1c419787349572a26d3dfed863da35b95bd99fb3ef285699bb5f",
       "notices": [
         "demos/PROVENANCE.txt",
         "LICENSE",
@@ -78,6 +78,6 @@
     "demos/Z88DK-LICENSE.txt": "83ac98165b8bd7e95a57d78c8d634e66ac646a6730da8237d6330be7de598a0d",
     "demos/PLUSTAKER-LICENSE.txt": "9b4e0bead8930f867a688bd2efec26e9a54c892a8dd4b6de41b67b0fd7363db2",
     "demos/YOKO-LICENSE.txt": "bd8b6b20a54450472a7e7ed624af4931549b4e8781e6e8b7ac86689c081eaf36",
-    "demos/PROVENANCE.txt": "15a65f628f52281adae6182af9c6df40c6f310c2db80a978ed5f7d99b0253303"
+    "demos/PROVENANCE.txt": "2364dab7ec2267ec4ca46b020f791a27f9ddc88c77ae34f3ec8356193a34fa81"
   }
 }

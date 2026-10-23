@@ -279,6 +279,9 @@ is unwired. Test acceleration and external clock pulse outputs are not modeled.
   IMP/AND/OR/XOR/NOT and their transparent variants, direction/edge handling,
   overlapping copies, CE busy and TR CPU-transfer handshakes, STOP and final
   coordinate/count registers. Work proceeds during CPU time, not status reads.
+  Reverse-Y blocks include row zero once and stop when any relevant source or
+  destination would cross above it. Forward Y still wraps, including physical
+  VRAM aliasing in SCREEN 7/8. LINE writes back DY while retaining DX/NX/NY.
 - The Wasm ABI exposes width, height and frame cycles. Canvas resizes on mode
   changes, recreates memory views and keeps a 4:3 display area with pixelated
   scaling, including the 512-pixel modes. Existing audio and input remain active.
@@ -303,6 +306,84 @@ not prove that a game has booted. Commercial games, including Ganbare Goemon /
 Samurai, have not been tested and are not guaranteed. Proprietary original
 BIOS/BASIC has not been validated or distributed. None is needed for the automated
 gates, and human gameplay is not an approval requirement.
+
+
+### Reverse-Y and LINE completion (Issue #45)
+
+LMMV/LMMC/HMMV/HMMC stop after destination row zero; LMCM stops after source
+row zero; LMMM/HMMM/YMMM stop after either relevant coordinate reaches zero.
+Completion advances the relevant Y registers by the rows actually processed
+and subtracts those rows from NY (encoded zero requests 1024 rows). Thus reverse
+LMMV at DY=0, NY=3 leaves DY=1023, NY=2. Reverse LMMM at SY=0, DY=2, NY=3 leaves
+SY=1023, DY=1, NY=2. Horizontal clipping, byte alignment and overlap order still
+apply within every processed row.
+
+LINE includes both endpoints. X-major execution tests completion after advancing
+X, before a final minor-axis Y step. Y-major execution advances Y before testing
+completion: a vertical major length of 3 at DY=10 draws four pixels and leaves
+DY=14 downward or DY=6 upward. Reverse LINE stops before a negative-Y access;
+forward LINE wraps. Minor-axis half-step ties advance toward the next row/column.
+Only DY changes among LINE's DX/DY/NX/NY registers.
+
+The [Yamaha V9938 manual](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
+printed pages 76–77 and 85, describes LINE parameters and completion registers.
+The pinned [openMSX command engine](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDPCmdEngine.cc)
+(`clipNY_1`, `clipNY_2`, `startLine`, `executeLine`) provides behavioral evidence
+for top clipping, half-step ties and major-axis endpoint ordering; its hardware
+confirmation comments are upstream evidence, not measurements made here.
+Implementation, expected pixel vectors and Z80 port probes were independently
+authored. No upstream implementation code or fixture bytes were copied.
+
+The native [edge regressions](../crates/msx-core/tests/vdp_command_edges.rs)
+check 704 block cases across SCREEN 5–8, including source/destination-first top
+clipping, Y=0/1, exact/excess heights, zero NY, forward ten-bit wrapping and
+SCREEN 7/8 physical aliasing. They compare the entire physical VRAM against an
+independent calculation and check completion registers and bounded CE/TR state.
+LMCM/LMMC/HMMC deliberately stall transfers, including the last LMCM read, and
+check that final transfers cannot restart a completed command. Explicit LINE
+pixel vectors cover both directions and axes, horizontal/vertical/sloped and
+zero-length lines, top/horizontal edges and forward wrapping.
+
+The existing original [Z80 diagnostic](../crates/msx-core/src/firmware.rs)
+now preserves a row-511 sentinel across a reverse fill from row zero, then copies
+it into displayed row 120. It also chains a four-pixel Y-major LINE into a fill
+that reuses DY without rewriting it, producing a white marker at displayed row
+124. Native CPU execution and compiled-Wasm Canvas tests observe these results
+in SCREEN 7/8 at both `/` and `/msx-rust/`, retaining reset/video/input/audio
+coverage. The demo manifest pins the updated original ROM and provenance; the
+third-party game ROMs and C-BIOS bytes/notices are unchanged.
+
+Baseline proof: with only `vdp_command.rs` restored to the unchanged pre-fix
+version (identical to Issue #45's evaluation baseline), all 11 new native tests
+fail. The sentinel test observes physical VRAM `1ff00h` changing from `55h` to
+`35h`; the half-step LINE test observes `33h` where `30h` is expected. All eight
+command-family tests detect CE still set (and extra TR for LMMC/HMMC) after the
+clipped transfer budget. The zero-length Y-major LINE retains DY=10 instead of
+11. The CPU probe also fails, displaying cyan where its preserved white sentinel
+belongs. The corrected engine passes these regressions.
+
+Local validation on 2026-10-24 used macOS arm64, pinned Rust 1.99.0, Node.js
+24.12.0 and Playwright 1.64.1 / Chromium. `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings` and
+`cargo test --workspace --locked` passed (176 Rust tests). `./scripts/build.sh`
+passed with the existing [macOS linker wrapper](deployment.md#pre-merge-validation)
+after the unwrapped linker failed to locate `libLLVM.dylib`.
+`node scripts/check-dist.mjs` passed after refreshing the generated diagnostic
+ROM hash and its provenance hash; the initial inventory check caught the stale
+manifest entry. No compiler, toolchain, third-party ROM or CI configuration was
+changed for these local environment adjustments.
+`npm ci`, `npx playwright install chromium` and `npm test` passed: all 98 browser
+tests completed in 9.3 minutes, including the new Canvas probe assertions at
+both site roots and retained firmware/slots, video/reset, audio, disk and SRAM
+coverage. `git diff --check` passed. Local source-Issue/full-diff review followed
+[the review guidelines](review-guidelines.md), checked all acceptance criteria
+against the implementation and evidence, and found no remaining blocking issues.
+
+Exact arbitration, command-speed modeling and live color writes remain separate
+work. No physical-device execution, upstream-emulator comparison run, proprietary
+ROM acquisition or human gameplay was performed; commercial compatibility remains
+unestablished. Issue #45 requires no post-merge verification.
+
 
 ## Verification
 
