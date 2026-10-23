@@ -65,11 +65,11 @@ fn irregular_tick_partitions_preserve_all_state_and_pcm_with_writes_and_scc() {
             (3101, 13, 9),
             (99991, 13, 14),
         ] {
-            a.tick_with_scc(duration, with_scc.then_some((&mut sa, true)));
+            a.tick_with_scc(duration, with_scc.then_some(&mut sa));
             let mut remaining = duration;
             for size in [1, 17, 3, 79, 2049].into_iter().cycle() {
                 let count = size.min(remaining);
-                b.tick_with_scc(count, with_scc.then_some((&mut sb, true)));
+                b.tick_with_scc(count, with_scc.then_some(&mut sb));
                 remaining -= count;
                 if remaining == 0 {
                     break;
@@ -101,4 +101,31 @@ fn reset_reproduces_fresh_envelope_phase_state_and_pcm() {
     used.tick(19997);
     fresh.tick(19997);
     same_state(&used, &fresh);
+}
+
+#[test]
+fn scc_pcm_matches_clock_and_dac_oracle_across_irregular_tick_partitions() {
+    let mut psg = Psg::default();
+    let mut scc = Scc::default();
+    for i in 0..32 {
+        scc.write(i, if i < 16 { 120 } else { 136 });
+    }
+    scc.write(0x80, 253);
+    scc.write(0x8a, 15);
+    scc.write(0x8f, 1);
+    let mut elapsed = 0u64;
+    for duration in [1, 17, 3, 79, 2049, 59737, 2, 99991] {
+        psg.tick_with_scc(duration, Some(&mut scc));
+        elapsed += u64::from(duration);
+        assert_eq!(psg.samples.len() as u64, elapsed * 44100 / 3_579_545);
+        for (i, &sample) in psg.samples.iter().enumerate() {
+            let instant = ((i as u64 + 1) * 3_579_545).div_ceil(44100);
+            let expected = if instant / 254 % 32 < 16 {
+                0.056
+            } else {
+                -0.0565
+            };
+            assert!((sample - expected).abs() < 0.000001);
+        }
+    }
 }
