@@ -23,6 +23,7 @@ let mainFile;
 let subFile;
 let cartridge = '';
 let diskName = '';
+let diskRomName = '';
 let activeSave;
 let importGeneration = 0;
 let demos;
@@ -178,7 +179,7 @@ function updateStatus() {
   $('firmware').value = firmware;
   system = ['Weave BASIC', cbiosName(), diagnosticName, `user BIOS · ${localName}`, 'Weave disk firmware · drive A: boot'][active];
   updateControls();
-  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}`);
+  status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}`);
 }
 function restart(action) {
   importGeneration++;
@@ -223,16 +224,21 @@ async function load(file, isSystem) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
     const message = error instanceof RangeError ? 'Not enough browser/Wasm memory to import this image. Close other tabs or try a smaller image.' : `ROM import failed: ${error.message}`;
-    status(`${message} Selected ROMs are unchanged: ${system}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
+    status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
     $(isSystem ? 'bios' : 'cartridge').value = '';
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
-// Disk imports share the ROM generation token and staging allocation. Firmware is
-// already built into Wasm, so no asynchronous firmware fetch can partially boot.
+// Disk media and interface imports share the ROM generation token and staging allocation.
 function updateDisk() {
+  const philips = ready && wasm.msx_disk_profile() === 1;
+  const profile = philips ? `Philips NMS1200-style · ${diskRomName} · slot 2 · selected system firmware` : 'Weave disk/demo boot option · no external interface installed';
+  if ($('disk-profile-status').textContent !== profile) $('disk-profile-status').textContent = profile;
+  for (const id of ['open-disk-rom', 'disk-rom']) $(id).disabled = !ready || loading;
+  $('remove-disk-rom').disabled = !ready || (!philips && !loading);
+  $('remove-disk-rom').textContent = loading ? 'Cancel import' : 'Remove disk interface';
   const flags = ready ? wasm.msx_disk_flags() : 0;
   const mounted = Boolean(flags & 1);
   for (const id of ['open-dsk', 'disk']) $(id).disabled = !ready || loading;
@@ -244,6 +250,42 @@ function updateDisk() {
   const text = mounted ? `Drive A: ${diskName} · ${wasm.msx_disk_len() / 1024} KiB · ${flags & 2 ? 'read-only' : 'writable'} · ${flags & 4 ? 'unsaved modifications — export to keep' : 'no unsaved modifications'}${bootError}` : 'Drive A: empty';
   if ($('disk-status').textContent !== text) $('disk-status').textContent = text;
 }
+$('open-disk-rom').addEventListener('click', () => $('disk-rom').click());
+$('disk-rom').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const generation = ++importGeneration;
+  loading = true; updateControls();
+  status(`Loading Philips disk ROM ${file.name}…`);
+  try {
+    if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a 16 KiB AB-header .rom or .bin disk ROM.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    persistSave();
+    if (!wasm.msx_install_disk_rom(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    diskRomName = file.name;
+    restart(() => {});
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`Disk ROM import failed: ${error.message} Session, interface and media unchanged.`, 'error');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    event.target.value = '';
+  }
+});
+$('remove-disk-rom').addEventListener('click', () => {
+  if (loading) {
+    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
+    status('Import canceled. Session, interface and media unchanged.');
+    return;
+  }
+  persistSave();
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; });
+});
 $('open-dsk').addEventListener('click', () => $('disk').click());
 $('disk').addEventListener('change', async event => {
   const file = event.target.files[0];
@@ -259,7 +301,7 @@ $('disk').addEventListener('change', async event => {
     new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
     if (!wasm.msx_mount_disk(bytes.length, $('disk-protected').checked ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     diskName = file.name;
-    status('Disk mounted in drive A:. Choose Boot disk to restart with original disk firmware.');
+    status(wasm.msx_disk_profile() === 1 ? 'Disk mounted in drive A:. Boot disk restarts the selected system firmware with the Philips interface.' : 'Disk mounted in drive A:. Choose Boot disk to restart with original disk firmware.');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
@@ -459,7 +501,7 @@ $('play-demo').addEventListener('click', async () => {
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
-    status(`Demo load failed: ${error.message} Session unchanged: ${system}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
+    status(`Demo load failed: ${error.message} Session unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
   } finally { if (generation === importGeneration) { loading = false; updateControls(); } }
 });
 // International MSX keyboard matrix (US key placement). Matrix keys continue

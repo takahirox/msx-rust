@@ -82,3 +82,11 @@ in crates/msx-core/src/font.rs is included. No proprietary firmware, DOS system
 files, commercial disk bytes, external routines or game assets are used. The disk
 ROM is also embedded in Wasm, with an original main reset loader from the same
 source. See docs/disks.md for exact wiring, boot contract, limits and build steps.
+
+Philips NMS1200-style interface and tests (Issue #41):
+No Philips disk ROM or proprietary system/disk software is included. Local ROMs
+are private user inputs. The independently authored controller adapter follows
+behavioral observations from the pinned openMSX profile documented in docs/disks.md;
+no upstream code or ROM bytes are copied. tests/fixtures/philips.py and its sparse
+hex system/disk-ROM/sector fixtures are original MIT test software. They execute
+normal slots and controller accesses and do not validate commercial compatibility.
