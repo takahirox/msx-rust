@@ -381,6 +381,21 @@ pub fn msx2_cartridge() -> Vec<u8> {
         c.reg(45, 0);
         c.reg(46, 0x80);
         c.wait();
+        // Original live-color probe: 128-pixel horizontal LINE at displayed
+        // row 140. Including the MSX M1 wait, OUT takes 12 T-states and LD A,n
+        // takes 8. R44's direct write arrives at t=40, then its indirect
+        // write at t=60: pixels 64..68 white, 69..70 ink, 71..191 white.
+        // Both writes happen while CE is set and must preserve LINE progress.
+        c.word(36, 64);
+        c.word(38, 396);
+        c.word(40, 127);
+        c.word(42, 0);
+        c.reg(17, 0x80 | 44);
+        c.reg(44, if mode == 10 { 15 } else { 255 });
+        c.reg(46, 0x70);
+        c.reg(44, line);
+        c.out(0x9b, if mode == 10 { 15 } else { 255 });
+        c.wait();
         c.reg(1, 0x40);
         c.emit(&[0xc9]);
     }

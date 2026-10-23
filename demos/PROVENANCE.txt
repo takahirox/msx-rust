@@ -76,6 +76,13 @@ Issue #45 adds original reverse-top sentinel and chained LINE/fill probes,
 visible at display-page-1 rows 120 and 124 in SCREEN 7/8. The new Z80 port
 sequences and pixel expectations are independently authored; no upstream
 emulator code, third-party assets or specification sample programs are included.
+Issue #51 adds an independently authored 128-pixel LINE at displayed row 140,
+with direct port 99h and R17/port 9Bh color changes while the command is active.
+The fixture retains the earlier probes and uses no upstream code or ROM bytes.
+The updated generator is based on
+https://github.com/takahirox/msx-rust/blob/3bdf49f4ef1a8c8ace906d340298b34c27250e7a/crates/msx-core/src/firmware.rs
+plus the Issue #51 probe; the checked-out project source generates the exact
+ROM bytes pinned in the manifest.
 Uses automatic MSX2 C-BIOS; its optional original diagnostic sub-ROM check
 requires the existing explicit Original diagnostic loader selection.
 

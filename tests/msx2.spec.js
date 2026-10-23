@@ -39,6 +39,16 @@ async function commandEdges(page, screen8) {
   for (const [x,y,color] of [[20,120,white],[23,120,white],
     [30,120,ink],[30,123,ink],[30,124,white],[33,124,white],[30,125,[255,0,0]]])
     await expect.poll(() => pixel(page,x,y)).toEqual(color);
+  // CPU-executed direct/indirect R44 writes during LINE, with independently
+  // budgeted boundaries at pixels 69 and 71. Check the entire line + neighbors.
+  const expected = Array.from({length:130}, (_,i) => {
+    const x = i + 63;
+    return x === 63 || x === 192 ? [255,0,0] : x === 69 || x === 70 ? ink : white;
+  });
+  await expect.poll(() => page.locator('#screen').evaluate(canvas => {
+    const data = canvas.getContext('2d').getImageData(63,140,130,1).data;
+    return Array.from({length:130}, (_,i) => Array.from(data.slice(i*4,i*4+3)));
+  })).toEqual(expected);
 }
 test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and returns to MSX1 locally', async ({page}) => {
   const errors=[], requests=[];
@@ -84,6 +94,7 @@ test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and retu
   await page.screenshot({path:'test-results/msx2-screen8.png',fullPage:true});
   await page.keyboard.down('7');await expect(page.locator('#screen')).toHaveAttribute('width','512');await page.keyboard.up('7');
   await page.locator('#reset').click();await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
+  await commandEdges(page, false);
   await page.locator('#cartridge').setInputFiles({name:'invalid.rom',mimeType:'application/octet-stream',buffer:Buffer.alloc(17)});
   await expect(page.locator('#status')).toContainText('unchanged');await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
   await page.locator('#model').selectOption('0');await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
@@ -124,6 +135,9 @@ test('MSX2 boots from the GitHub Pages project subpath with relative fixture lin
   await expect.poll(()=>pixel(page,0,130)).toEqual([255,0,0]);
   await expect.poll(()=>pixel(page,1,130)).toEqual([0,255,0]);
   await commandEdges(page, true);
+  await page.locator('#reset').click();
+  await expect(page.locator('#screen')).toHaveAttribute('width','512');
+  await commandEdges(page, false);
   for(const file of ['msx2-test-cartridge.rom','weave-msx2-boot.rom','msx2-diagnostic-sub.rom','cbios-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) expect((await page.request.get(`http://127.0.0.1:41874/msx-rust/${file}`)).ok()).toBe(true);
   await page.setViewportSize({width:320,height:720});
   await page.locator('#advanced-panel > summary').click();

@@ -1,4 +1,4 @@
-//! Original, independently calculated command edge vectors (Issue #45).
+//! Original, independently calculated command edge/color vectors (Issues #45/#51).
 use msx_core::vdp::Vdp;
 
 fn reg(v: &mut Vdp, r: u8, value: u8) {
@@ -367,6 +367,283 @@ fn line_pixels_endpoints_and_unchanged_registers() {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+fn color_write(v: &mut Vdp, indirect: bool, value: u8) {
+    if indirect {
+        reg(v, 17, 0x80 | 44); // R17 fixed at R44, through port 9Bh.
+        v.write_indirect(value);
+        assert_eq!(v.registers[17], 0x80 | 44);
+    } else {
+        reg(v, 44, value); // Two control-port writes, through port 99h.
+    }
+    assert_eq!(v.registers[44], value);
+}
+
+#[test]
+fn live_line_fixed_screen5_and_tick_partitions() {
+    for indirect in [false, true] {
+        for partitioned in [false, true] {
+            let mut v = bitmap(6);
+            word(&mut v, 40, 7);
+            reg(&mut v, 44, 1);
+            reg(&mut v, 46, 0x70);
+            for cycles in if partitioned {
+                &[3, 5, 7, 9][..]
+            } else {
+                &[24][..]
+            } {
+                v.tick(*cycles);
+            }
+            assert_eq!(status(&mut v, 2) & 0x81, 1);
+            color_write(&mut v, indirect, 2);
+            assert_eq!(status(&mut v, 2) & 0x81, 1);
+            for cycles in if partitioned {
+                &[1, 6, 9, 24][..]
+            } else {
+                &[40][..]
+            } {
+                v.tick(*cycles);
+            }
+            let mut expected = vec![0; v.vram.len()];
+            expected[..4].copy_from_slice(&[0x11, 0x12, 0x22, 0x22]);
+            same_vram(&v.vram, &expected);
+            assert_eq!(status(&mut v, 2) & 0x81, 0);
+            assert_eq!(&v.registers[36..44], &[0, 0, 0, 0, 7, 0, 0, 0]);
+        }
+    }
+}
+
+fn live_drawing(code: u8) {
+    for mode in [6, 8, 10, 14] {
+        for indirect in [false, true] {
+            for partitioned in [false, true] {
+                // IMP, XOR, transparent IMP and transparent XOR. HMMV ignores LOP.
+                for op in if code == 12 {
+                    &[0][..]
+                } else {
+                    &[0, 3, 8, 11][..]
+                } {
+                    let mut v = bitmap(mode);
+                    v.vram.fill(0x5a);
+                    let unit = if code == 12 {
+                        match mode {
+                            8 => 4,
+                            14 => 1,
+                            _ => 2,
+                        }
+                    } else {
+                        1
+                    };
+                    let start_x = unit;
+                    // Byte commands discard the sub-byte X bits.
+                    word(&mut v, 36, (start_x + unit - 1) as u16);
+                    word(&mut v, 38, 3);
+                    word(&mut v, 40, if code == 7 { 7 } else { 4 * unit as u16 });
+                    word(&mut v, 42, if code == 7 { 0 } else { 2 });
+                    reg(&mut v, 44, 0xf1);
+                    reg(&mut v, 46, (code << 4) | op);
+                    let coordinates = v.registers[32..44].to_vec();
+                    let mut expected = v.vram.clone();
+                    for cycles in if partitioned {
+                        &[7, 1, 3, 8][..]
+                    } else {
+                        &[19][..]
+                    } {
+                        v.tick(*cycles);
+                    }
+                    color_write(&mut v, indirect, 0);
+                    assert_eq!(status(&mut v, 2) & 0x81, 1);
+                    assert_eq!(&v.registers[32..44], coordinates);
+                    for cycles in if partitioned {
+                        &[2, 5, 3][..]
+                    } else {
+                        &[10][..]
+                    } {
+                        v.tick(*cycles);
+                    }
+                    // The 5 accumulated T-states must survive both writes.
+                    color_write(&mut v, !indirect, 0xe3);
+                    assert_eq!(status(&mut v, 2) & 0x81, 1);
+                    assert_eq!(&v.registers[32..44], coordinates);
+                    for cycles in if partitioned {
+                        &[3, 8, 1, 23][..]
+                    } else {
+                        &[35][..]
+                    } {
+                        v.tick(*cycles);
+                    }
+                    for i in 0..8 {
+                        let (x, y) = if code == 7 {
+                            (start_x + i, 3)
+                        } else {
+                            (start_x + (i % 4) * unit, 3 + i / 4)
+                        };
+                        let color = match i {
+                            0 | 1 => 0xf1,
+                            2 => 0,
+                            _ => 0xe3,
+                        };
+                        if code == 12 {
+                            // Full packed byte, including its high bits.
+                            expected[location(mode, x, y).0] = color;
+                        } else {
+                            let src = color & location(mode, x, y).2;
+                            let old = get(&expected, mode, x, y);
+                            let result = match (*op, src) {
+                                (8 | 11, 0) => old,
+                                (0 | 8, _) => src,
+                                (3 | 11, _) => old ^ src,
+                                _ => unreachable!(),
+                            };
+                            put(&mut expected, mode, x, y, result);
+                        }
+                    }
+                    same_vram(&v.vram, &expected);
+                    assert_eq!(
+                        status(&mut v, 2) & 0x81,
+                        0,
+                        "mode={mode} code={code} op={op}"
+                    );
+                    assert_eq!(v.registers[46], *op);
+                    let mut completed = coordinates;
+                    if code != 7 {
+                        completed[6] = 5; // DY advances by two completed rows.
+                        completed[10] = 0; // NY exhausted.
+                    }
+                    assert_eq!(&v.registers[32..44], completed);
+                    color_write(&mut v, indirect, 2);
+                    v.tick(80);
+                    same_vram(&v.vram, &expected);
+                    assert_eq!(status(&mut v, 2) & 0x81, 0);
+                    // A subsequent PSET picks up the latest visible R44.
+                    word(&mut v, 36, 30);
+                    word(&mut v, 38, 10);
+                    reg(&mut v, 46, 0x50);
+                    v.tick(8);
+                    put(&mut expected, mode, 30, 10, 2);
+                    same_vram(&v.vram, &expected);
+                    assert_eq!(status(&mut v, 2) & 0x81, 0);
+                }
+            }
+        }
+    }
+}
+#[test]
+fn live_line_all_bitmap_modes_logic_and_neighbors() {
+    live_drawing(7);
+}
+#[test]
+fn live_lmmv_all_bitmap_modes_logic_and_neighbors() {
+    live_drawing(8);
+}
+#[test]
+fn live_hmmv_all_bitmap_modes_full_bytes() {
+    live_drawing(12);
+}
+
+#[test]
+fn live_pset_before_first_unit() {
+    for mode in [6, 8, 10, 14] {
+        for indirect in [false, true] {
+            let mut v = bitmap(mode);
+            v.vram.fill(0x55);
+            let mut expected = v.vram.clone();
+            word(&mut v, 36, 1);
+            reg(&mut v, 44, 1);
+            reg(&mut v, 46, 0x50);
+            v.tick(7);
+            color_write(&mut v, indirect, 0xfe);
+            same_vram(&v.vram, &expected);
+            assert_eq!(status(&mut v, 2) & 0x81, 1);
+            v.tick(1);
+            put(&mut expected, mode, 1, 0, 0xfe);
+            same_vram(&v.vram, &expected);
+            assert_eq!(status(&mut v, 2) & 0x81, 0);
+        }
+    }
+}
+
+#[test]
+fn live_srch_before_next_comparison() {
+    for mode in [6, 8, 10, 14] {
+        for indirect in [false, true] {
+            let mut v = bitmap(mode);
+            for eq in [0, 2] {
+                // Keep colors in range; retain the existing EQ contract.
+                put(&mut v.vram, mode, 0, 1, 1);
+                put(&mut v.vram, mode, 1, 1, 2);
+                put(&mut v.vram, mode, 2, 1, 3);
+                word(&mut v, 32, 0);
+                word(&mut v, 34, 1);
+                reg(&mut v, 45, eq);
+                reg(&mut v, 44, if eq == 0 { 3 } else { 1 });
+                reg(&mut v, 46, 0x60);
+                let saved = v.vram.clone();
+                v.tick(11); // First comparison fails; retain three T-states.
+                assert_eq!(status(&mut v, 2) & 0x91, 1);
+                color_write(&mut v, indirect, if eq == 0 { 2 } else { 3 });
+                v.tick(5); // The next comparison succeeds at X=1.
+                assert_eq!(status(&mut v, 2) & 0x91, 0x10);
+                assert_eq!(status(&mut v, 8), 1);
+                assert_eq!(status(&mut v, 9) & 1, 0);
+                color_write(&mut v, !indirect, 0);
+                v.tick(80);
+                same_vram(&v.vram, &saved);
+                assert_eq!(status(&mut v, 2) & 0x91, 0x10);
+            }
+        }
+    }
+}
+
+#[test]
+fn color_writes_preserve_accepted_transfer_data_and_final_completion() {
+    for mode in [6, 8, 10, 14] {
+        for code in [11, 15] {
+            for indirect in [false, true] {
+                let mut v = bitmap(mode);
+                let unit = if code == 11 {
+                    1
+                } else {
+                    match mode {
+                        8 => 4,
+                        14 => 1,
+                        _ => 2,
+                    }
+                };
+                word(&mut v, 40, 3 * unit as u16);
+                word(&mut v, 42, 1);
+                reg(&mut v, 44, 0xab);
+                reg(&mut v, 46, code << 4);
+                let mut expected = v.vram.clone();
+                // Writes with TR clear must preserve initial/accepted data.
+                for (i, accepted) in [0xab, 0x5c, 0xe3].into_iter().enumerate() {
+                    if i != 0 {
+                        assert_eq!(status(&mut v, 2) & 0x81, 0x81);
+                        let saved = v.vram.clone();
+                        v.tick(80); // Deliberate CPU transfer stall.
+                        same_vram(&v.vram, &saved);
+                        color_write(&mut v, indirect, accepted);
+                    }
+                    assert_eq!(status(&mut v, 2) & 0x81, 1);
+                    v.tick(7);
+                    color_write(&mut v, !indirect, 0x99);
+                    v.tick(1);
+                    if code == 15 {
+                        expected[location(mode, i * unit, 0).0] = accepted;
+                    } else {
+                        put(&mut expected, mode, i, 0, accepted);
+                    }
+                    same_vram(&v.vram, &expected);
+                }
+                assert_eq!(status(&mut v, 2) & 0x81, 0);
+                color_write(&mut v, indirect, 0xff);
+                v.tick(80);
+                same_vram(&v.vram, &expected);
+                assert_eq!(status(&mut v, 2) & 0x81, 0);
             }
         }
     }

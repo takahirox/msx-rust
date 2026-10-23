@@ -425,6 +425,16 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
         ] {
             assert_eq!(rgb(v, x, y), color, "CPU command probe ({x},{y})");
         }
+        // Independent instruction budgets: direct R44 at 40 T-states,
+        // indirect at 60; one work unit every eight T-states.
+        for x in 63..=192 {
+            let color = match x {
+                63 | 192 => [255, 0, 0],
+                69 | 70 => ink,
+                _ => white,
+            };
+            assert_eq!(rgb(v, x, 140), color, "CPU live-color probe ({x},140)");
+        }
     }
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
@@ -440,6 +450,7 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     assert_eq!(rgb(&m.hardware.vdp, 0, 0), [255, 0, 0]);
     assert_eq!(rgb(&m.hardware.vdp, 10, 10), [0, 255, 255]);
     command_edges(&m.hardware.vdp, false);
+    assert_eq!(status(&mut m.hardware.vdp, 2) & 0x81, 0);
     assert!(m.basic.console.transcript.is_empty());
     m.hardware.key(8, 0, true);
     m.frame();
@@ -456,6 +467,7 @@ fn original_msx2_cartridge_boots_and_uses_input_audio_and_extended_hardware() {
     assert_eq!(rgb(&m.hardware.vdp, 0, 211), [255, 0, 0]);
     assert_eq!(rgb(&m.hardware.vdp, 10, 10), [0, 255, 0]);
     command_edges(&m.hardware.vdp, true);
+    assert_eq!(status(&mut m.hardware.vdp, 2) & 0x81, 0);
     assert_eq!(rgb(&m.hardware.vdp, 35, 32), [255, 255, 255]);
     m.reset();
     for _ in 0..15 {
@@ -1028,4 +1040,49 @@ fn interleaved_commands_share_ports_banks_pages_and_transfer_handshakes() {
         assert_eq!(v.vram, stopped);
         assert_eq!(status(&mut v, 2) & 0x81, 0);
     }
+}
+
+#[test]
+fn live_color_stop_replacement_and_reset_discard_command_state() {
+    let mut m = Machine::default();
+    m.set_model(Model::Msx2);
+    m.use_diagnostic().unwrap();
+    let v = &mut m.hardware.vdp;
+    reg(v, 0, 6);
+    setup(v, 0, 0, 16, 2, 1, 0x80);
+    v.tick(19); // Two pixels completed and three T-states accumulated.
+    reg(v, 17, 0x80 | 44);
+    v.write_indirect(2);
+    reg(v, 46, 0); // STOP, then another color write cannot resume work.
+    let stopped = v.vram.clone();
+    assert_eq!(&stopped[..2], &[0x11, 0]);
+    reg(v, 44, 3);
+    v.tick(80);
+    assert_eq!(status(v, 2) & 0x81, 0);
+    assert_eq!(v.vram, stopped);
+
+    setup(v, 0, 2, 16, 2, 5, 0xb0); // Pending initial LMMC data.
+    v.tick(7);
+    reg(v, 44, 6); // Not accepted transfer data, but visible to replacement.
+    word(v, 36, 4);
+    reg(v, 46, 0x50); // Replacement PSET gets a fresh work budget and color.
+    v.tick(1);
+    assert_eq!(v.vram, stopped);
+    assert_eq!(status(v, 2) & 0x81, 1);
+    v.tick(7);
+    assert_eq!(v.vram[258], 0x60);
+    assert_eq!(status(v, 2) & 0x81, 0);
+
+    setup(v, 0, 4, 16, 2, 1, 0x80);
+    v.tick(7);
+    v.write_indirect(2);
+    m.reset();
+    let v = &mut m.hardware.vdp;
+    assert_eq!(status(v, 2) & 0x81, 0);
+    assert_eq!(v.registers[44], 0);
+    let reset = v.vram.clone();
+    reg(v, 44, 3);
+    v.tick(80);
+    assert_eq!(v.vram, reset);
+    assert_eq!(status(v, 2) & 0x81, 0);
 }
