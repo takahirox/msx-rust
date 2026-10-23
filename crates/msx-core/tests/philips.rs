@@ -327,3 +327,79 @@ fn bus_write_timeout_abort_side_motor_and_media_changes_never_commit_partial_sec
         }
     }
 }
+
+#[test]
+fn cpu_observes_incremental_seek_interrupts_and_addresses_retained_position() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut m = Machine::default();
+        m.set_model(model);
+        let mut main = fixture(
+            include_str!("../../../tests/fixtures/philips-system.hex"),
+            32768,
+            0,
+        );
+        main[0x2d] = u8::from(model == Model::Msx2);
+        if model == Model::Msx2 {
+            let mut sub = vec![0; 16384];
+            sub[..2].copy_from_slice(b"CD");
+            m.load_msx2_firmware(&main, &sub).unwrap();
+        } else {
+            m.load_bios(&main).unwrap();
+        }
+        let mut image = fixture(
+            include_str!("../../../tests/fixtures/philips-movement.hex"),
+            368640,
+            0x35,
+        );
+        image[2 * 9 * 512..3 * 9 * 512].fill(0x62);
+        let mut expected = image.clone();
+        let trace = [2, 1, 0xff, 2, 0xbf, 0, 0xff, 2];
+        expected[(2 * 9 + 8) * 512..(2 * 9 + 8) * 512 + 8].copy_from_slice(&trace);
+        m.mount_disk(image, false).unwrap();
+        m.install_philips_disk_rom(rom()).unwrap();
+        m.boot_disk().unwrap();
+        for _ in 0..1_000_000 {
+            m.step();
+            if m.cpu.halted {
+                break;
+            }
+        }
+        assert!(m.cpu.halted);
+        assert_eq!(m.hardware.read(0xc020), 0xa5, "pc={:04x}", m.cpu.pc);
+        assert_eq!(
+            (0x9000..0x9008)
+                .map(|a| m.hardware.read(a))
+                .collect::<Vec<_>>(),
+            trace
+        );
+        assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
+        assert_eq!(m.hardware.fdc.track, 2);
+        assert!(!m.hardware.irq());
+    }
+}
+
+#[test]
+fn profile_removal_and_reset_cancel_pending_movement() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for remove in [false, true] {
+            let mut m = machine(model);
+            m.mount_disk(vec![0; 368640], false).unwrap();
+            m.hardware.write(0x7ffd, 0x80);
+            m.hardware.write(0x7ffb, 79);
+            m.hardware.write(0x7ff8, 0x10);
+            m.hardware.fdc.tick(30_000);
+            assert_eq!(m.hardware.fdc.track, 2);
+            if remove {
+                m.remove_philips_disk_rom();
+            } else {
+                m.reset();
+            }
+            m.hardware.fdc.tick(u32::MAX);
+            assert_eq!(m.hardware.fdc.track, 0);
+            assert_eq!(m.hardware.fdc.control, 0);
+            assert!(!m.hardware.fdc.irq);
+            assert!(!m.hardware.fdc.drq);
+            assert!(m.hardware.fdc.disk.is_some());
+        }
+    }
+}

@@ -173,11 +173,24 @@ retaining media/change/dirty/protect state. Disk change clears only by 7FFEh rea
 Supported WD command families: restore, seek, step, step-in, step-out (track update
 bit honored); single/multiple read and write sector; force interrupt (immediate,
 ready transitions and index condition). Busy ignores new commands except force
-interrupt. Seek is bounded to 0..79; the physical head and track register are
-separate. SEEK moves the head by the difference between Data and Track, so equal
-registers cause no movement and existing head/register offsets persist. Type I
-commands with V set verify the resulting Track against the physical head and the
-mounted track/side geometry, reporting seek error on a mismatch; V clear skips
+interrupt. The physical head is bounded to 0..79 and is separate from the Track
+register. Each issued SEEK pulse moves the head and updates Track by one toward
+the latched Data target; equal registers cause no movement and existing
+head/register offsets persist. STEP retains the last direction; STEP-IN/OUT set
+it. The T bit controls STEP-family register updates independently of head motion.
+RESTORE sets Track=FFh and Data=0, steps outward following the track-zero sensor,
+then repairs Track=0. An outward attempt when already at zero suppresses the pulse,
+repairs Track=0 even with T clear, and completes immediately. Register arithmetic
+otherwise remains eight-bit, independently of the head.
+
+At the drive's upper stop, an attempted inward pulse performs any requested Track
+update but keeps the head at 79 and immediately reports seek error, regardless of
+V. Earlier movement is retained; an out-of-range or mismatched Track cannot alias
+an image sector. A later RESTORE can recover the head/register correspondence.
+This hard upper stop/error is the bounded raw-image drive's policy, not a claim
+about physical drives' extra cylinders. Type I commands with V set verify the
+resulting Track against the physical head and mounted track/side geometry,
+reporting seek error on a mismatch; V clear skips
 that check. Side compare is honored when enabled. Multi-record transfers increment
 the sector register and terminate with record-not-found after sector 9 rather than
 silently crossing a track. Unsupported read-address/read-track/write-track/format
@@ -190,12 +203,42 @@ bit 2 for track zero, bit 1 for index, bit 6 for the media protect signal instea
 Status errors persist until the next command. A drive is ready only with media,
 A: selected and motor on. Writes check protection before and after transfer.
 
-Timing uses Z80 cycles: seek/step commands take 21,478 × (1,2,3,5), selected by the
-two step-rate bits (approximately 6/12/18/30 ms). Data DRQ is first raised after
-114 cycles, then 114 cycles after each serviced byte. An unserviced DRQ aborts with
-lost-data after 4,096 cycles. This generous deterministic service window and
-command-level seek timing are deliberate approximations, not rotational/flux
-accuracy. Index repeats every 715,909 cycles (300 rpm), high for 7,000 cycles.
+Type-I movement uses the 1 MHz WD2793 profile: rate bits 00/01/10/11 select
+6/12/20/30 ms **per pulse**. At the 3,579,545 Hz CPU clock, event `n` is observed at
+`ceil(n × rate_ms × 3,579,545 / 1000)` elapsed cycles. Fractional-cycle deadlines
+are retained across pulses, so rounding never accumulates. Every elapsed movement
+event is consumed even when a single `tick()` spans multiple pulses; large,
+irregular and single-cycle partitions give the same movement and completion.
+
+The first eligible pulse occurs at command start, subsequent pulses at the chosen
+interval, and completion after the final interval. Thus a synchronized 0→79 SEEK
+at rate 00 issues pulses at 0, 6, …, 468 ms and completes at 474 ms (1,696,705 CPU
+cycles). Equal Track/Data with V=0 completes immediately with no artificial delay.
+BUSY stays asserted and DRQ clear until completion, when interface IRQ rises.
+FORCE INTERRUPT cancels future events but retains all issued head/register changes;
+status/signal acknowledgement and polarity are unchanged. Side/drive/motor abort,
+media replacement/ejection, reset and interface removal cancel pending events;
+reset/removal retain their existing reset-to-zero lifecycle.
+
+The first-pulse/final-interval convention follows the
+[pinned openMSX scheduling reference](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/WD2793.cc)
+(`startType1Cmd`, `seek`, `step`, `seekNext`), independently implemented here.
+The rate table and movement/register/zero-sensor behavior are supported by the
+[TI second-source TMS279X/WD279X manual](https://deramp.com/swtpc.com/DC_5/TMS279X_DataSheet.pdf),
+printed pages 12–13 and 17, an edited transcription without physical-device
+confirmation. The upstream verification sequence itself has a TODO. We retain
+our existing verification-result predicate after movement; verification settling
+and rotational ID search, READY-independent Type-I execution, head-load fidelity
+and exact internal startup latency remain separate gaps. In particular this
+profile still requires READY for Type I and omits internal command startup delay.
+CPU accesses and ticks remain instruction-boundary events (see
+[CPU timing](architecture.md#cpu-fetch-timing)).
+
+Sector-transfer timing is unchanged: DRQ is first raised after 114 CPU cycles,
+then 114 cycles after each serviced byte. An unserviced DRQ aborts with lost-data
+after 4,096 cycles. This generous deterministic service window is an approximation,
+not rotational/flux accuracy. Index repeats every 715,909 cycles (300 rpm), high
+for 7,000 cycles.
 Sector data is bounded to a fixed 512-byte transfer buffer. Writes commit only
 once all 512 bytes arrive, retaining all bytes outside that sector. A canceled,
 protected or timed-out partial write leaves the mounted image unchanged.
@@ -252,6 +295,13 @@ expected full images prove exact writes and unchanged partial writes. The system
 also accesses a parked ASCII8 SRAM cartridge, the MSX2 sub-ROM and separate mapper
 RAM segments. No host BIOS traps or proprietary inputs are involved. Tests cover
 both geometries/models and the browser suite runs at `/` and `/msx-rust/`.
+The separate original `philips-movement.hex` sector probe (#47) observes an
+intermediate Track=2 and BUSY during a five-track seek, forces an immediate IRQ,
+checks active-low signals/acknowledgement, waits beyond the original seek duration,
+then reads track 2/sector 1 and writes its eight-byte observation trace to track
+2/sector 9. Native tests and compiled-Wasm browser tests execute the same bytes
+on both models; green VDP output and the exact exported image require every CPU
+check to succeed. Existing generated fixtures remain byte-for-byte unchanged.
 These fixtures establish the selected bus contract, not commercial compatibility.
 
 ## Provenance and reproducibility

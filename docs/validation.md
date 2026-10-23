@@ -1,3 +1,96 @@
+# Issue 47 WD2793 incremental movement
+
+Source: [Correct WD2793 Type-I per-step movement, timing and interruption](https://github.com/takahirox/msx-rust/issues/47).
+Local pre-merge validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0 and Playwright 1.64.1 / Chromium. The assigned upstream checkpoint
+was `49a55ca`; its controller matched evaluation baseline
+`843a0861af7818e4a28405f039a81f984576a58d`. The live source Issue and its comments
+were read before implementation. All checks below were run by this node.
+
+The eight original `disk_type_one` tests all fail with the baseline controller.
+Examples: after 30,000 cycles a 0→5 SEEK has already finished at Track 5 instead
+of remaining BUSY at Track 2; STEP-IN leaves Track 5 until completion instead of
+immediately issuing its first pulse to Track 6; a 79-track seek is already idle
+one cycle before the required final deadline. The separate CPU-executed Philips
+probe fails with marker EEh instead of A5h (PC=813Eh), because it never observes
+the required intermediate Track 2. These baseline failures were reproduced by
+temporarily substituting only the baseline controller source, restoring the
+corrected source in a `finally` block, and rerunning both focused test binaries.
+The corrected controller passes all eight traces and seven Philips tests.
+
+The independent oracle uses `ceil(3,579,545 × milliseconds × intervals / 1000)`;
+no production movement constants or private physical-position fields are read.
+For a synchronized SEEK with V=0, the independently calculated completion cycles
+are:
+
+| Rate | 0 tracks | 1 track | 5 tracks | 79 tracks |
+| --- | ---: | ---: | ---: | ---: |
+| 00 (6 ms) | 0 | 21,478 | 107,387 | 1,696,705 |
+| 01 (12 ms) | 0 | 42,955 | 214,773 | 3,393,409 |
+| 10 (20 ms) | 0 | 71,591 | 357,955 | 5,655,682 |
+| 11 (30 ms) | 0 | 107,387 | 536,932 | 8,483,522 |
+
+Traces inspect the first pulse at command start and immediately before, at and
+after each subsequent SEEK event, including final BUSY/IRQ transitions. They
+cover every rate, distances 0/1/5/79 in both directions, sensor-driven RESTORE,
+all STEP/T variants and remembered directions, head/register offsets, both drive
+boundaries, invalid-sector rejection, interruption between pulses and subsequent
+sector addressing. Large, irregular and single-cycle tick partitions retain the
+same final position and exact completion boundary without accumulated rounding.
+Abort, reset, mount/eject, direct media loss and Philips profile-removal tests
+check cancellation and existing lifecycle behavior. Existing verification-result,
+partial-write, protection and Weave firmware boot regressions remain passing.
+
+The same original generated Philips sector runs through normal AB-ROM boot and
+real Z80 register accesses in native and compiled-Wasm tests. It observes Track 2
+and BUSY during a 0→5 seek, checks active-low signals, forces an IRQ, acknowledges
+it, waits beyond the original completion, reads all of track 2/sector 1 and writes
+a trace to track 2/sector 9. The expected exported image changes only that sector's
+first eight bytes to `02 01 FF 02 BF 00 FF 02`. Both models at `/` and `/msx-rust/`
+produce green Canvas output and byte-for-byte expected exports. The fixture source
+and new hex are original MIT code; regeneration preserves the three older hex
+fixtures unchanged. See [the supported timing and boundary policy](disks.md).
+
+| Check | Actual result |
+| --- | --- |
+| Baseline `disk_type_one` | Expected failure: 8 failed |
+| Baseline Philips CPU movement probe | Expected failure: 1 failed |
+| Corrected focused `disk_type_one` / `philips` | Passed: 8 / 7 tests |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 186 tests, none failed or ignored |
+| `./scripts/build.sh` | Passed with pinned toolchain and local linker workaround below |
+| `node scripts/check-dist.mjs` | Passed: inventory, hashes/notices, provenance, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm movement probe | Passed: 4 cases, both models and roots |
+| `npm test` | Passed: all 102 cases in 9.3 minutes, none failed or skipped |
+| Fixture regeneration, JS syntax and `git diff --check` | Passed; four fixtures reproduce, three existing fixtures unchanged |
+
+Every Cargo command selects Rust 1.99.0 using `rustup run 1.99.0` or README's
+pinned sysroot-first PATH. The initial Wasm build failed because this host's
+pinned `rust-lld` could not locate `libLLVM.dylib`. The successful build uses the
+previously documented ignored linker wrapper: set `DYLD_LIBRARY_PATH` to the
+pinned sysroot's `lib` and execute that same sysroot's `rust-lld` with unchanged
+arguments. Only `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` selects the wrapper;
+tracked build configuration and host toolchain files are unchanged. The first
+browser probe attempt timed out in four cases because its test tried to uncheck
+the disabled Read-only control before mounting media. Moving that test action
+after mount fixed all four cases; no product change was needed.
+
+Source-Issue/full-diff self-review found no blocking findings. All mandatory
+checks passed; none were skipped or left unperformed. The full browser run includes
+the existing 98 cases for Weave boot, private disk ownership/export, dirty-media
+protection, firmware/sub-ROM/mappers, SRAM persistence, video, audio and input,
+plus four movement probes. Production changes are limited to the shared controller
+movement engine; both bus decoders and sector-transfer timing retain their existing
+behavior. Optional upstream timestamped trace execution/comparison, physical
+hardware, proprietary software and commercial gameplay were not performed. These
+authored diagnostics establish the supported movement contract, not broad software
+compatibility. Verification
+settling/search, READY-independent Type I, head-load fidelity and exact internal
+startup latency remain explicitly excluded as requested. Required post-merge
+verification: none. No push, PR, merge or GitHub comment is part of this node.
+
 # Issue 43 stack and exchange access order
 
 Source: [Correct Z80 stack and EX (SP) memory-access ordering](https://github.com/takahirox/msx-rust/issues/43).

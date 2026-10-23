@@ -2,7 +2,10 @@
 pub const SECTOR_SIZE: usize = 512;
 pub const BYTE_CYCLES: u32 = 114;
 pub const SERVICE_TIMEOUT: u32 = 4096;
-const SEEK_CYCLES: u32 = 21_478;
+// 1 MHz WD2793 rate profile, measured against the 3,579,545 Hz CPU clock.
+// Deadlines stay in 1/1000 CPU-cycle units; tick observes ceil(n * interval),
+// avoiding accumulated per-step rounding and tick-partition dependence.
+const STEP_MS: [u64; 4] = [6, 12, 20, 30];
 
 #[derive(Debug)]
 pub struct Disk {
@@ -52,6 +55,19 @@ enum Transfer {
     Write,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+enum Movement {
+    #[default]
+    Restore,
+    Seek {
+        target: u8,
+    },
+    Step {
+        update: bool,
+    },
+    Complete,
+}
+
 pub struct Controller {
     pub disk: Option<Disk>,
     pub track: u8,
@@ -66,8 +82,10 @@ pub struct Controller {
     empty_changed: bool,
     status: u8,
     physical_track: u8,
-    target: u8,
-    track_target: Option<u8>,
+    movement: Movement,
+    movement_elapsed: u64,
+    step_interval: u64,
+    next_step: u64,
     direction_in: bool,
     type_one: bool,
     verify: bool,
@@ -97,8 +115,10 @@ impl Default for Controller {
             empty_changed: false,
             status: 0,
             physical_track: 0,
-            target: 0,
-            track_target: None,
+            movement: Movement::default(),
+            movement_elapsed: 0,
+            step_interval: 0,
+            next_step: 0,
             direction_in: true,
             type_one: true,
             verify: false,
@@ -268,6 +288,7 @@ impl Controller {
     fn finish(&mut self, error: u8) {
         self.status = error;
         self.transfer = Transfer::Idle;
+        self.movement = Movement::Complete;
         self.drq = false;
         self.irq = true;
     }
@@ -292,50 +313,33 @@ impl Controller {
         }
         if self.type_one {
             self.verify = cmd & 4 != 0;
-            self.target = match cmd & 0xe0 {
-                0 => {
-                    if cmd & 0x10 == 0 {
-                        self.direction_in = false;
-                        0
-                    } else {
-                        // SEEK emits steps until Track equals Data; it cannot
-                        // discover or repair a pre-existing physical head offset.
-                        if self.data != self.track {
-                            self.direction_in = self.data > self.track;
-                        }
-                        if self.data >= self.track {
-                            self.physical_track.saturating_add(self.data - self.track)
-                        } else {
-                            self.physical_track.saturating_sub(self.track - self.data)
-                        }
-                    }
-                }
-                0x20 => {
-                    if self.direction_in {
-                        self.physical_track.saturating_add(1)
-                    } else {
-                        self.physical_track.saturating_sub(1)
-                    }
-                }
-                0x40 => {
-                    self.direction_in = true;
-                    self.physical_track.saturating_add(1)
-                }
-                _ => {
+            self.movement = match cmd & 0xf0 {
+                0x00 => {
                     self.direction_in = false;
-                    self.physical_track.saturating_sub(1)
+                    self.track = 0xff;
+                    self.data = 0;
+                    Movement::Restore
                 }
-            };
-            self.track_target = match cmd & 0xe0 {
-                0 if cmd & 0x10 == 0 => Some(0), // restore uses the track-zero sensor
-                0 => Some(self.data),
-                _ if cmd & 0x10 == 0 => None,
-                // Updating steps change the register independently of the head.
-                _ if self.direction_in => Some(self.track.wrapping_add(1)),
-                _ => Some(self.track.wrapping_sub(1)),
+                0x10 => Movement::Seek { target: self.data },
+                _ => {
+                    match cmd & 0xe0 {
+                        0x40 => self.direction_in = true,
+                        0x60 => self.direction_in = false,
+                        _ => {} // STEP retains the preceding direction.
+                    }
+                    Movement::Step {
+                        update: cmd & 0x10 != 0,
+                    }
+                }
             };
             self.transfer = Transfer::Seek;
-            self.delay = SEEK_CYCLES * [1, 2, 3, 5][(cmd & 3) as usize];
+            self.movement_elapsed = 0;
+            self.step_interval = 3_579_545 * STEP_MS[(cmd & 3) as usize];
+            self.next_step = self.step_interval;
+            // Adopt the pinned openMSX scheduling convention: first eligible
+            // pulse now, then one interval after every pulse, including the last.
+            // Internal command startup latency is not modeled.
+            self.movement_event();
         } else {
             match cmd & 0xe0 {
                 0x80 | 0xa0 => {
@@ -354,6 +358,64 @@ impl Controller {
                 }
                 _ => self.finish(0x10), // Read address/track and format are outside raw-sector profile.
             }
+        }
+    }
+    fn finish_movement(&mut self) {
+        // Preserve the existing result predicate; settling and rotational ID
+        // search timing remain outside this movement-only correction.
+        let verified = self.track == self.physical_track
+            && self
+                .disk
+                .as_ref()
+                .is_some_and(|disk| disk.offset(self.physical_track, self.side, 1).is_some());
+        self.finish(if self.verify && !verified { 0x10 } else { 0 });
+    }
+    fn movement_event(&mut self) {
+        let update = match self.movement {
+            Movement::Complete => {
+                self.finish_movement();
+                return;
+            }
+            Movement::Restore => true,
+            Movement::Seek { target } => {
+                if self.track == target {
+                    self.finish_movement();
+                    return;
+                }
+                self.direction_in = target > self.track;
+                true
+            }
+            Movement::Step { update } => {
+                self.movement = Movement::Complete;
+                update
+            }
+        };
+        // The zero sensor suppresses an outward pulse and repairs Track, even
+        // for non-updating STEP. In particular Track 0 must not underflow here.
+        if !self.direction_in && self.physical_track == 0 {
+            self.track = 0;
+            self.finish_movement();
+            return;
+        }
+        if update {
+            self.track = if self.direction_in {
+                self.track.wrapping_add(1)
+            } else {
+                self.track.wrapping_sub(1)
+            };
+        }
+        if self.direction_in {
+            // This raw-image drive has a hard upper stop at 79. The attempted
+            // pulse updates Track but cannot move the head; report seek error
+            // immediately and retain every earlier pulse. Invalid Track values
+            // cannot alias valid sectors (start_sector checks geometry/mismatch).
+            if self.physical_track == 79 {
+                self.finish(0x10);
+                return;
+            }
+            self.physical_track += 1;
+        } else {
+            self.physical_track -= 1;
         }
     }
     fn start_sector(&mut self) {
@@ -425,6 +487,14 @@ impl Controller {
             self.finish(0x80);
             return;
         }
+        if self.transfer == Transfer::Seek {
+            self.movement_elapsed += u64::from(cycles) * 1000;
+            while self.transfer == Transfer::Seek && self.movement_elapsed >= self.next_step {
+                self.movement_event();
+                self.next_step += self.step_interval;
+            }
+            return;
+        }
         if self.drq {
             self.deadline = self.deadline.saturating_sub(cycles);
             if self.deadline == 0 {
@@ -433,24 +503,8 @@ impl Controller {
         } else {
             self.delay = self.delay.saturating_sub(cycles);
             if self.delay == 0 {
-                if self.transfer == Transfer::Seek {
-                    if self.target >= 80 {
-                        self.finish(0x10);
-                    } else {
-                        self.physical_track = self.target;
-                        if let Some(track) = self.track_target {
-                            self.track = track;
-                        }
-                        let verified = self.track == self.physical_track
-                            && self.disk.as_ref().is_some_and(|disk| {
-                                disk.offset(self.physical_track, self.side, 1).is_some()
-                            });
-                        self.finish(if self.verify && !verified { 0x10 } else { 0 });
-                    }
-                } else {
-                    self.drq = true;
-                    self.deadline = SERVICE_TIMEOUT;
-                }
+                self.drq = true;
+                self.deadline = SERVICE_TIMEOUT;
             }
         }
     }

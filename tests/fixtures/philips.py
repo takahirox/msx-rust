@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issue #41; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -91,3 +91,69 @@ p.label('done'); p.emit(0x3a, 0xf8, 0x7f)
 p.label('record'); p.emit(0x32, 1, 0xc0, 0x3e, 0x5a, 0x32, 2, 0xc0)
 p.label('halt'); p.emit(0x76); p.jump(0xc3, 'halt')
 save('philips-sector', [(0, p.done()), (0x1f0, [0, 0])])
+
+# Issue #47 movement probe, executed as a sector through the same AB disk ROM.
+# All instructions and trace expectations are original. Seek 0 -> 5 at 6 ms,
+# observe Track 2 with BUSY, force interrupt, wait beyond the original seek,
+# then read track 2 / sector 1 and write a trace to track 2 / sector 9.
+q = Z80(0x8000)
+def load(address):
+    q.emit(0x3a, address & 255, address >> 8)
+def store(address):
+    q.emit(0x32, address & 255, address >> 8)
+def value(address, byte):
+    q.emit(0x3e, byte); store(address)
+def check(byte, mask=255):
+    if mask != 255:
+        q.emit(0xe6, mask)
+    q.emit(0xfe, byte); q.jump(0xc2, 'fail')
+def record(address, register, expected, mask=255):
+    load(register); store(address); check(expected, mask)
+
+value(0x7ffb, 5); value(0x7ff8, 0x10)
+q.emit(0x11, 0xff, 0xff)
+q.label('moving'); load(0x7ff9); q.emit(0xfe, 2); q.jump(0xca, 'progress')
+q.jump(0xd2, 'fail') # A > 2 means intermediate motion was skipped.
+q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'moving'); q.jump(0xc3, 'fail')
+q.label('progress')
+record(0x9000, 0x7ff9, 2)
+record(0x9001, 0x7ff8, 1, 0x11) # BUSY, no seek error.
+record(0x9002, 0x7fff, 0xff) # Active-low IRQ and DRQ both inactive.
+value(0x7ff8, 0xd8)
+record(0x9003, 0x7ff9, 2)
+record(0x9004, 0x7fff, 0xbf) # Immediate IRQ, no DRQ.
+record(0x9005, 0x7ff8, 0, 0x11) # Not BUSY; acknowledge IRQ.
+record(0x9006, 0x7fff, 0xff)
+q.emit(0x11, 0xff, 0xff)
+q.label('delay'); q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'delay')
+record(0x9007, 0x7ff9, 2) # Future pulses must remain canceled.
+value(0x7ffa, 1); value(0x7ff8, 0x80)
+q.emit(0x21, 0x00, 0x92, 0x01, 0, 2)
+q.label('read_byte'); q.emit(0x11, 0xff, 0xff)
+q.label('read_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'read_data')
+q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
+q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'read_poll'); q.jump(0xc3, 'fail')
+q.label('read_data'); load(0x7ffb); check(0x62)
+q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'read_byte')
+load(0x7ff8); check(0, 0xfd)
+# Copy eight observations over the first eight bytes of the read buffer.
+q.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 8, 0, 0xed, 0xb0)
+value(0x7ffa, 9); value(0x7ff8, 0xa0)
+q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+q.label('write_byte'); q.emit(0x11, 0xff, 0xff)
+q.label('write_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'write_data')
+q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
+q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'write_poll'); q.jump(0xc3, 'fail')
+q.label('write_data'); q.emit(0x7e); store(0x7ffb)
+q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write_byte')
+load(0x7ff8); check(0, 0xfd)
+q.emit(0x3e, 0xa5); store(0xc020)
+q.emit(0x3e, 0xf2); q.jump(0xc3, 'paint') # Green success, red failure.
+q.label('fail'); q.emit(0x3e, 0xee); store(0xc020); q.emit(0x3e, 0xf6)
+q.label('paint'); q.emit(0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99,
+    0xaf, 0xd3, 0x99, 0x3e, 0x80, 0xd3, 0x99,
+    0x3e, 0x40, 0xd3, 0x99, 0x3e, 0x81, 0xd3, 0x99)
+q.label('halt'); q.emit(0x76); q.jump(0xc3, 'halt')
+movement = q.done()
+assert len(movement) <= 510
+save('philips-movement', [(0, movement)])

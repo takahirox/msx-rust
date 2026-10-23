@@ -125,6 +125,29 @@ for (const site of sites) {
       });
     }
   }
+  for (const model of ['0', '1']) {
+    test(`Philips CPU incremental movement and interrupted-position sector access MSX${Number(model)+1} ${site}`, async ({page}) => {
+      const errors = []; page.on('pageerror', error => errors.push(error.message));
+      await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+      if (model === '0') await page.locator('#model').selectOption('0');
+      await page.locator('#advanced-panel > summary').click();
+      await installSystem(page, model);
+      const disk = await fixture('movement', 368640, 0x35);
+      disk.fill(0x62, 2*9*512, 3*9*512);
+      await page.locator('#disk').setInputFiles(file('original-movement.dsk', disk));
+      await expect(page.locator('#disk-status')).toContainText('original-movement.dsk');
+      await page.locator('#disk-protected').uncheck();
+      await page.locator('#disk-rom').setInputFiles(file('original-disk.rom', diskRom));
+      await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');
+      // Green is painted only after the CPU checks intermediate BUSY/Track,
+      // active-low IRQ/DRQ, cancellation, a full read and a full trace write.
+      await greenOutput(page, model);
+      const expected = Buffer.from(disk);
+      Buffer.from([2, 1, 0xff, 2, 0xbf, 0, 0xff, 2]).copy(expected, (2*9+8)*512);
+      expect(await exportDisk(page)).toEqual(expected);
+      expect(errors).toEqual([]);
+    });
+  }
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
