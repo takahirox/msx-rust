@@ -9,6 +9,125 @@ fn machine() -> Machine {
     m
 }
 
+fn stack_probe(model: Model, code: &[u8]) -> Machine {
+    let mut m = Machine::default();
+    m.set_model(model);
+    m.hardware.output(0xa8, 0xff);
+    if model == Model::Msx2 {
+        m.hardware.write(0xffff, 0xff);
+        m.hardware.output(0xfd, 2); // Code stays visible in page 1.
+        m.hardware.output(0xfe, 7); // Observe page 3's underlying RAM via page 2.
+        m.hardware.output(0xff, 7);
+        m.hardware.write(0xbfff, 0x91);
+    }
+    m.hardware.write(0xfffe, 0x6b);
+    for (offset, &byte) in code.iter().enumerate() {
+        m.hardware.write(0x4000 + offset as u16, byte);
+    }
+    m.cpu.pc = 0x4000;
+    m
+}
+
+fn probe_step(m: &mut Machine, cycles: u32) {
+    let before = m.cpu.tstates;
+    assert_eq!(m.step(), cycles);
+    assert_eq!(m.cpu.tstates - before, u64::from(cycles));
+}
+
+#[test]
+fn push_redecodes_msx2_slot_between_high_and_low_writes() {
+    for (initial, high, retained) in [(0xff, 0x3f, 0x6b), (0x3f, 0xff, 0x5a)] {
+        // LD SP,0000; LD BC,high:5A; PUSH BC. All bytes are original fixtures.
+        let mut m = stack_probe(Model::Msx2, &[0x31, 0, 0, 0x01, 0x5a, high, 0xc5]);
+        m.hardware.write(0xffff, initial);
+        assert_eq!(
+            m.hardware.read(0xfffe),
+            if initial == 0xff { 0x6b } else { 0xff }
+        );
+        for cycles in [11, 11, 12] {
+            probe_step(&mut m, cycles);
+        }
+        assert_eq!(m.cpu.sp, 0xfffe);
+        assert_eq!(m.cpu.bc(), u16::from_be_bytes([high, 0x5a]));
+        assert_eq!(m.hardware.secondary[3], high);
+        assert_eq!(m.hardware.read(0xffff), !high);
+        assert_eq!(
+            m.hardware.read(0xfffe),
+            if high == 0xff { 0x5a } else { 0xff }
+        );
+        // Reselect RAM and inspect its storage, including the byte behind FFFFh.
+        m.hardware.write(0xffff, 0xff);
+        assert_eq!(m.hardware.read(0xfffe), retained);
+        assert_eq!(m.hardware.read(0xbffe), retained);
+        assert_eq!(m.hardware.read(0xbfff), 0x91);
+    }
+}
+
+#[test]
+fn exchange_captures_msx2_reads_before_slot_changing_writes() {
+    for code in [&[0xe3][..], &[0xdd, 0xe3], &[0xfd, 0xe3]] {
+        for (initial, high, captured, retained) in
+            [(0xff, 0x3f, 0x006b, 0x6b), (0x3f, 0xff, 0xc0ff, 0x5a)]
+        {
+            let mut m = stack_probe(Model::Msx2, code);
+            m.hardware.write(0xffff, initial);
+            m.cpu.sp = 0xfffe;
+            let value = u16::from_be_bytes([high, 0x5a]);
+            m.cpu.set_hl(value);
+            m.cpu.ix = value;
+            m.cpu.iy = value;
+            m.cpu.f = 0xa5;
+            probe_step(&mut m, if code.len() == 1 { 20 } else { 25 });
+            assert_eq!(m.cpu.sp, 0xfffe);
+            assert_eq!(m.cpu.f, 0xa5);
+            assert_eq!(m.cpu.hl(), if code[0] == 0xe3 { captured } else { value });
+            assert_eq!(m.cpu.ix, if code[0] == 0xdd { captured } else { value });
+            assert_eq!(m.cpu.iy, if code[0] == 0xfd { captured } else { value });
+            assert_eq!(m.hardware.secondary[3], high);
+            assert_eq!(m.hardware.read(0xffff), !high);
+            m.hardware.write(0xffff, 0xff);
+            assert_eq!(m.hardware.read(0xfffe), retained);
+            assert_eq!(m.hardware.read(0xbffe), retained);
+            assert_eq!(m.hardware.read(0xbfff), 0x91);
+        }
+    }
+}
+
+#[test]
+fn msx1_stack_probes_keep_ffff_as_flat_ram() {
+    for high in [0x3f, 0xff] {
+        let mut m = stack_probe(Model::Msx1, &[0x31, 0, 0, 0x01, 0x5a, high, 0xc5]);
+        for cycles in [11, 11, 12] {
+            probe_step(&mut m, cycles);
+        }
+        assert_eq!(m.cpu.sp, 0xfffe);
+        assert_eq!(m.hardware.read(0xffff), high);
+        assert_eq!(m.hardware.read(0xfffe), 0x5a);
+        assert_eq!(m.hardware.secondary, [0; 4]);
+    }
+    for code in [&[0xe3][..], &[0xdd, 0xe3], &[0xfd, 0xe3]] {
+        let mut m = stack_probe(Model::Msx1, code);
+        m.hardware.write(0xffff, 0x89);
+        m.cpu.sp = 0xfffe;
+        m.cpu.set_hl(0x3f5a);
+        m.cpu.ix = 0x3f5a;
+        m.cpu.iy = 0x3f5a;
+        m.cpu.f = 0xa5;
+        probe_step(&mut m, if code.len() == 1 { 20 } else { 25 });
+        let exchanged = match code[0] {
+            0xdd => m.cpu.ix,
+            0xfd => m.cpu.iy,
+            _ => m.cpu.hl(),
+        };
+        assert_eq!(exchanged, 0x896b);
+        assert_eq!(m.cpu.sp, 0xfffe);
+        assert_eq!(m.cpu.f, 0xa5);
+        assert_eq!(m.hardware.read(0xffff), 0x3f);
+        assert_eq!(m.hardware.read(0xfffe), 0x5a);
+        assert_eq!(m.hardware.secondary, [0; 4]);
+    }
+}
+
 #[test]
 fn all_segments_all_pages_boundaries_and_alias_based_capacity() {
     let mut m = machine();

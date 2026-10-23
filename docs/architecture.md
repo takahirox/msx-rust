@@ -75,6 +75,40 @@ ZEX/Fuse corpus or physical-machine differential test has been run. The supplied
 integration example also boots an unmodified local C-BIOS and then checks our
 independent cartridge's VDP, keyboard and PSG behavior.
 
+## CPU memory-access order
+
+PUSH, taken CALL, RST and interrupt stack entry write the high byte at the
+original SP−1, then the low byte at SP−2, with 16-bit wrapping. EX (SP),HL/IX/IY
+reads the low byte at SP and the high byte at SP+1 before either write, then
+writes the original register's high byte at SP+1 and low byte at SP. The captured
+word becomes the register value; SP and flags are preserved. Ordinary word stores
+remain low-byte-first, as do POP/RET reads.
+
+Each byte goes through the current Bus mapping. In particular, writing FFFFh on
+MSX2 can change expanded-slot selection before the next access to FFFEh. No CPU
+instruction bypasses slot decoding or captures a mapped device for the whole word.
+This orders observable accesses within an instruction; peripherals still advance
+after the instruction, without access-phase synchronization or contention.
+
+Original `tests/stack_order.rs` recording-bus vectors distinguish instruction-byte
+reads from stack/vector accesses and assert complete address/value sequences,
+final state, returned cycles and `tstates` increments under both fetch policies.
+They cover all PUSH pairs, conditional CALL outcomes, all RST destinations,
+NMI/IM0/IM1/IM2, all three exchanges, ordinary HL/IX/IY and ED word stores,
+and POP/RET reads, including wrapping addresses. `tests/ram_mapper.rs` executes
+original CPU probes that hide/reveal RAM between stack writes, inspect retained
+RAM through a mapper alias, and exchange at SP=FFFEh; MSX1 flat RAM is the control.
+The [Issue #43 validation record](validation.md#issue-43-stack-and-exchange-access-order)
+records actual baseline failures and corrected results.
+
+Zilog UM0080 printed pages 115–118 explicitly establish PUSH sequencing.
+Its pages 127–129 describe EX results without explicitly specifying write order.
+The pinned openMSX [CPU implementation](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/cpu/CPUCore.cc)
+corroborates both paths through `PUSH`, `ex_xsp_SS` and `WR_WORD_rev_slow`.
+It was consulted as behavioral evidence; implementation and fixtures here are
+independently authored. No reference-emulator trace comparison, physical hardware
+measurement or broad commercial compatibility claim follows from these tests.
+
 ## CPU fetch timing
 
 `Cpu::new()` and `Cpu::default()` retain zero-wait standalone Z80 timing.
