@@ -158,7 +158,7 @@ Behavioral references:
 [openMSX CPU/table decoding](https://github.com/openMSX/openMSX/blob/master/src/video/VDP.cc)
 and [command addresses](https://github.com/openMSX/openMSX/blob/master/src/video/VDPCmdEngine.cc).
 Implementation and fixtures are original; no upstream code was copied.
-VRAM arbitration, command speed/color corrections, expansion VRAM and exact
+VRAM arbitration, command-speed corrections, expansion VRAM and exact
 mid-command mode-change timing remain outside this correction. Commercial-title
 compatibility and optional openMSX/hardware comparison remain unestablished.
 
@@ -278,7 +278,9 @@ is unwired. Test acceleration and external clock pulse outputs are not modeled.
 - POINT, PSET, SRCH, LINE, LMMV/LMMM/LMCM/LMMC and HMMV/HMMM/YMMM/HMMC, logical
   IMP/AND/OR/XOR/NOT and their transparent variants, direction/edge handling,
   overlapping copies, CE busy and TR CPU-transfer handshakes, STOP and final
-  coordinate/count registers. Work proceeds during CPU time, not status reads.
+  coordinate/count registers. R44 writes update active PSET, LINE, LMMV, HMMV
+  and SRCH color for subsequent work without restarting the command. Work proceeds
+  during CPU time, not status reads.
   Reverse-Y blocks include row zero once and stop when any relevant source or
   destination would cross above it. Forward Y still wraps, including physical
   VRAM aliasing in SCREEN 7/8. LINE writes back DY while retaining DX/NX/NY.
@@ -382,10 +384,106 @@ coverage. `git diff --check` passed. Local source-Issue/full-diff review followe
 [the review guidelines](review-guidelines.md), checked all acceptance criteria
 against the implementation and evidence, and found no remaining blocking issues.
 
-Exact arbitration, command-speed modeling and live color writes remain separate
-work. No physical-device execution, upstream-emulator comparison run, proprietary
-ROM acquisition or human gameplay was performed; commercial compatibility remains
+Exact arbitration and command-speed modeling remain separate work. Live color
+writes are covered below. No physical-device execution, upstream-emulator
+comparison run, proprietary ROM acquisition or human gameplay was performed; commercial compatibility remains
 unestablished. Issue #45 requires no post-merge verification.
+
+
+### Live command color (Issue #51)
+
+Direct port 99h register writes and indirect port 9Bh writes through R17 now
+update active PSET, LINE, LMMV, HMMV and SRCH color. Completed pixels retain their
+results; the next modeled work unit consumes the latest value. Writes preserve
+command position, accumulated T-states, CE and completion registers. Pixel writes
+retain mode-specific color masking and logical/transparent operations; HMMV
+consumes all eight bits as a packed byte. SRCH uses the existing EQ comparison
+contract; comparison-mask, EQ and expansion-VRAM ambiguities are separate work.
+
+LMMC/HMMC retain their initial R44 data and TR-gated pending-data latch. An R44
+write while TR is clear changes the visible register but cannot replace an
+already accepted transfer. LMCM/S7 read handshakes, stalls and final-transfer
+completion are unchanged. Drawing color writes do not create persistent TR.
+Transient TR behavior around R44 writes remains uncertain and is not modeled;
+the pinned upstream engine itself records uncertainty for non-transfer commands.
+
+The [physical V9938 measurements](https://openmsx.org/vdp-vram-timing/vdp-timing.html),
+Introduction, report color changes during an executing LINE on a Philips NMS8250.
+The [Yamaha V9938 manual](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
+printed pages 1, 64–65 and 74–77, defines direct/indirect register access and
+pixel/packed-byte formats. Its setup instructions alone do not establish live
+writes. The pinned [openMSX command engine](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDPCmdEngine.cc)
+synchronizes before updating COL in `setCmdReg`; these five commands consume
+that state. These references inform behavior only: the correction, native vectors
+and Z80 probe are independently authored, without upstream code or ROM bytes.
+
+Timing still uses one work unit per eight CPU T-states. In `Machine::step`, Z80
+I/O side effects occur before the VDP receives that instruction's elapsed budget,
+including MSX M1 fetch waits. Thus a register write affects the work advanced by
+its own OUT instruction. Access-phase synchronization, exact VRAM arbitration,
+command speeds and physical transition timing are outside this correction.
+
+The [native vectors](../crates/msx-core/tests/vdp_command_edges.rs) cover SCREEN
+5–8 LINE/LMMV/HMMV with multiple writes at partial work budgets, split versus
+combined ticks at identical write timestamps, full-VRAM sentinels, packed-pixel
+neighbors, XOR and transparent operations, all eight HMMV bits, bounded completion
+and completion registers. The fixed SCREEN 5 LINE vector changes color 1 to 2 at
+24 T-states and produces `11 12 22 22`. Separate tests cover PSET before its first
+unit, SRCH before a subsequent comparison with in-range colors and both existing
+EQ settings, completed-command writes, latest-color reuse and transfer latches.
+The retained reverse-Y, LMCM/S7 and interleaving suites and the new
+[STOP/replacement/reset test](../crates/msx-core/tests/msx2.rs) cover lifecycle
+boundaries alongside the color changes.
+
+The existing [original Z80 diagnostic](../crates/msx-core/src/firmware.rs) adds a
+128-pixel horizontal LINE at displayed row 140 in SCREEN 7/8. It changes R44
+through direct and fixed-R17 indirect ports while CE is active. Independently
+counting OUT=12 and LD A,n=8 T-states (including M1 waits) places the writes at
+40 and 60 T-states after command creation: pixels 64–68 remain white, 69–70 are
+cyan in SCREEN 7 / green in SCREEN 8, and 71–191 return to white. Red neighbors
+at 63 and 192 remain untouched. Native CPU execution and compiled-Wasm Canvas
+assertions check every pixel in this region at `/` and `/msx-rust/`, including
+reset. Existing diagnostic video, input/audio and firmware checks remain active.
+The [manifest](../demos/manifest.json), [provenance](../demos/PROVENANCE.txt) and
+[fixture inventory](../firmware/ROM-LICENSE.txt) describe the updated original ROM;
+third-party ROMs and C-BIOS bytes/notices are unchanged.
+
+Baseline proof: removing only the five-line production correction restores the
+unchanged evaluation-baseline command engine. All six `live_` native tests fail:
+the fixed LINE observes `11` instead of `12` at physical byte 1, HMMV keeps `f1`
+instead of `00`, PSET writes `51` instead of `5e`, and SRCH remains busy at the
+expected second-comparison completion. The CPU probe observes white instead of
+cyan at (69,140). Restoring the correction passes these regressions.
+An initial CPU-probe expectation omitted the MSX M1 waits; it was corrected
+before this baseline replay and the passing CPU execution check.
+
+Local validation on 2026-10-24 used macOS arm64, pinned Rust 1.99.0, Node.js
+24.12.0 and Playwright 1.64.1 / Chromium. `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings` and
+`cargo test --workspace --locked` passed (206 Rust tests). `./scripts/build.sh`
+passed with the existing [macOS linker wrapper](deployment.md#pre-merge-validation)
+after the unwrapped linker failed to locate `libLLVM.dylib`. The wrapper is an
+ignored local file; no toolchain, compiler or CI changes were needed.
+`node scripts/check-dist.mjs` passed with the updated original diagnostic ROM
+and provenance hashes. `npm ci` and `npx playwright install chromium` passed.
+`npm test` passed all 110 browser tests in 9.7 minutes, including the new live-color
+Canvas assertions at both roots and after Reset, and retained firmware/slots,
+PSG/SCC/SCC-I audio, disk and SRAM persistence coverage. JavaScript syntax,
+local documentation links and `git diff --check` passed. No mandatory check was
+skipped or left unperformed; the deliberate baseline failures and initial linker
+failure are distinguished above from the corrected passes.
+
+Local source-Issue/full-diff review followed the [review guidelines](review-guidelines.md).
+It checked all acceptance criteria against the five-command update, unchanged
+transfer latches and scheduler, independent native/CPU/Canvas expectations,
+completion/lifecycle behavior, fixture attribution and pinned hashes. Only the
+nine intended files changed; no blocking findings remain. No push, PR, merge,
+CI run or deployment was performed by this implementation node.
+
+Optional upstream-emulator comparison and physical-device execution were not
+performed. Commercial-title compatibility and exact physical transition timing
+remain unestablished. No proprietary ROM acquisition or human gameplay is needed.
+Issue #51 requires no post-merge verification.
 
 
 ## Verification

@@ -95,6 +95,11 @@ impl Vdp {
     }
     pub(super) fn command_write(&mut self, value: u8) {
         if let Some(c) = &mut self.command {
+            // Drawing/search consume the current color on their next work unit.
+            // Transfer data remains separately latched and gated by TR below.
+            if matches!(c.code, 5..=8 | 12) {
+                c.color = value;
+            }
             if matches!(c.code, 11 | 15) && self.statuses[2] & 0x80 != 0 {
                 c.pending = Some(value);
                 self.statuses[2] &= !0x80;
