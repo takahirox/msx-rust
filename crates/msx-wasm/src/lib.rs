@@ -285,6 +285,33 @@ pub extern "C" fn msx_restore_sram(length: u32) -> u32 {
     })
 }
 
+/// Profile 1 is the explicit Philips NMS1200-style local disk ROM. Unknown
+/// profiles and incomplete/canceled uploads are rejected before touching hardware.
+#[no_mangle]
+pub extern "C" fn msx_install_disk_rom(length: u32, profile: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let rom = std::mem::take(&mut a.upload);
+        let result = if profile != 1 {
+            Err("Select the Philips NMS1200-style disk interface profile.".into())
+        } else if length as usize != rom.len() {
+            Err("Invalid disk ROM transfer length.".into())
+        } else {
+            a.machine.install_philips_disk_rom(rom)
+        };
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_remove_disk_rom() {
+    APP.with(|a| a.borrow_mut().machine.remove_philips_disk_rom());
+}
+/// 1: independently installed Philips interface; 0: default Weave boot option.
+#[no_mangle]
+pub extern "C" fn msx_disk_profile() -> u32 {
+    APP.with(|a| u32::from(a.borrow().machine.has_philips_disk_rom()))
+}
+
 /// Consume only an exactly sized staged disk; failures preserve the running session.
 #[no_mangle]
 pub extern "C" fn msx_mount_disk(length: u32, protected: u32) -> u32 {
@@ -399,6 +426,58 @@ pub extern "C" fn msx_disk_boot_state() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_rom_staging_profile_validation_and_cancellation_are_atomic() {
+        msx_model(1);
+        assert_eq!(msx_cbios(), 1);
+        APP.with(|a| {
+            let mut a = a.borrow_mut();
+            a.machine.mount_disk(vec![0x39; 368640], false).unwrap();
+            a.machine.cpu.pc = 0x1234;
+        });
+        for (length, profile) in [(16383, 1), (16384, 0), (16384, 2)] {
+            msx_upload(16384);
+            APP.with(|a| a.borrow_mut().upload[..2].copy_from_slice(b"AB"));
+            assert_eq!(msx_install_disk_rom(length, profile), 0);
+            assert_eq!(msx_disk_profile(), 0);
+        }
+        msx_upload(16384);
+        msx_cancel_upload();
+        assert_eq!(msx_install_disk_rom(16384, 1), 0);
+        msx_upload(16384); // correct size but missing AB header
+        assert_eq!(msx_install_disk_rom(16384, 1), 0);
+        APP.with(|a| {
+            let a = a.borrow();
+            assert_eq!(a.machine.cpu.pc, 0x1234);
+            assert_eq!(a.machine.hardware.firmware, msx_core::Firmware::Cbios);
+        });
+        msx_upload(16384);
+        APP.with(|a| a.borrow_mut().upload[..2].copy_from_slice(b"AB"));
+        assert_eq!(msx_install_disk_rom(16384, 1), 1);
+        assert_eq!(msx_disk_profile(), 1);
+        assert_eq!(msx_boot_disk(), 1);
+        assert_eq!(msx_firmware(), 1);
+        msx_reset();
+        assert_eq!(msx_disk_profile(), 1);
+        msx_remove_disk_rom();
+        assert_eq!(msx_disk_profile(), 0);
+        assert_eq!(msx_firmware(), 1);
+        assert_eq!(msx_disk_len(), 368640);
+        APP.with(|a| {
+            assert!(a
+                .borrow()
+                .machine
+                .hardware
+                .fdc
+                .disk
+                .as_ref()
+                .unwrap()
+                .bytes()
+                .iter()
+                .all(|b| *b == 0x39))
+        });
+    }
 
     #[test]
     fn disk_boot_status_follows_logical_ram_mapping() {

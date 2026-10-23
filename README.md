@@ -116,14 +116,31 @@ changes; export is required before ejecting or replacing modified media. Disk
 images stay in this page's memory and are never uploaded or persisted.
 
 Both MSX1 and MSX2 are supported. A fresh page still starts MSX2 Weave BASIC.
-Mounting alone leaves execution unchanged. Boot disk takes priority over a parked
-cartridge; Open ROM restores automatic C-BIOS cartridge boot. An explicit firmware
-override must be cleared with Use Weave BASIC before disk boot; that action keeps
-the mounted image. C-BIOS alone cannot boot disks. This milestone supplies a
-limited original boot contract and disk driver, without MSX-DOS or Disk BASIC;
-it does not claim arbitrary disk-game compatibility. Standard raw DSK cannot
-represent arbitrary copy-protected tracks. External software may require additional
-lawful firmware/OS software that is not bundled.
+Mounting alone leaves execution unchanged. The default **Weave disk/demo** option
+boots the original disk firmware, takes priority over a parked cartridge, and
+requires its `WV` sector signature. Clear an explicit system firmware override
+with Use Weave BASIC before using that option.
+
+For conventional wiring, open **ROMs & advanced system options → Disk interface →
+Install Philips disk ROM** and supply a local **16 KiB AB-header disk ROM**. This
+explicit **Philips NMS1200-style** single-drive interface installs in slot 2,
+page 1, independently of media and selected system firmware. Installation restarts
+execution while retaining the main BIOS, MSX2 sub-ROM, cartridge and SRAM.
+**Boot disk** then restarts the selected system firmware with the disk interface;
+it does not install Weave firmware or require `WV`. Leave an active Weave disk
+boot with Use Weave BASIC or Open ROM before installing this profile.
+
+Reset, disk ejection, firmware/cartridge changes and model changes retain the
+installed disk ROM. Model/firmware controls still follow their existing rules for
+system ROMs and cartridges. **Remove disk interface** removes the
+external interface and restores the default Weave boot option, retaining system
+firmware and media. Failed, canceled or stale imports preserve the current session.
+
+Compatible system/disk firmware and software must be supplied separately. C-BIOS
+alone is not a complete disk environment. Neither profile promises complete Disk
+BASIC/MSX-DOS or commercial-game compatibility. Standard raw DSK cannot represent
+arbitrary copy-protected tracks. External software may require additional lawful
+firmware/OS software that is not bundled.
 
 See [exact geometry, slot/register wiring, boot/driver ABI, limitations, source,
 provenance and validation](docs/disks.md).

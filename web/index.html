@@ -57,7 +57,8 @@
     export before ejecting or replacing modified media. Reset keeps disk changes.</p>
     <p>Raw 360/720 KiB DSK only. Boot disk selects original Weave disk firmware with priority over a parked cartridge;
     Open ROM selects cartridge firmware again. Use Weave BASIC returns to BASIC and keeps the mounted disk.
-    Clear an explicit firmware override with Use Weave BASIC before Boot disk.
+    For the Weave option, clear an explicit firmware override with Use Weave BASIC before Boot disk.
+    Advanced options also offer a separately supplied Philips NMS1200-style disk ROM with your selected system BIOS.
     This is a limited disk boot environment, without MSX-DOS or Disk BASIC; C-BIOS alone cannot boot disks.
     External games may need additional lawful firmware/OS software. Nonstandard/copy-protected tracks are unsupported.
     Disk bytes stay in memory on this page; export to keep changes before closing it.</p>
@@ -124,7 +125,7 @@
         <h2>Cartridges</h2>
         <label class="file" for="mapper">Cartridge mapper</label>
         <select id="mapper" disabled><option value="0">Auto (infer mapper)</option><option value="1">Plain</option><option value="2">ASCII8</option><option value="3">ASCII16</option><option value="4">Konami Standard</option><option value="5">Konami SCC (classic audio)</option><option value="6">ASCII8SRAM2 (2 KiB)</option><option value="7">ASCII8SRAM8 (8 KiB)</option><option value="8">ASCII16SRAM2 (2 KiB)</option><option value="9">ASCII16SRAM8 (8 KiB)</option><option value="10">R-Type (384 KiB)</option></select>
-        <p>Choose the mapper, then use <strong>Open ROM</strong> above for a local .rom or .bin cartridge. Auto recognizes plain AB images and estimates supported MegaROM mappers from local code evidence. If uncertain, choose the documented mapper manually and open the same file again. Konami Standard provides banking; Konami SCC also provides five-voice classic K051649 wavetable audio alongside PSG. Channels 4/5 share a waveform. Digital timing is deterministic; analog distortion and bus-contention noise are approximated. Inference does not verify game identity or boot compatibility. No fixed upload size cap; available browser/Wasm memory and mapper address range apply. ASCII SRAM variants and the 384 KiB R-Type layout require manual selection. SRAM select wiring varies: ASCII8 uses the first bit above the ROM bank number (up to 1 MiB); ASCII16 uses bit 4 (up to 256 KiB). SCC+/SCC-I, FM expansions, disks, other specialized mappers and Game Master 2 / second cartridge slots are unsupported. Loading resets the machine; Eject removes the cartridge. Many commercial cartridges require a compatible system BIOS.</p>
+        <p>Choose the mapper, then use <strong>Open ROM</strong> above for a local .rom or .bin cartridge. Auto recognizes plain AB images and estimates supported MegaROM mappers from local code evidence. If uncertain, choose the documented mapper manually and open the same file again. Konami Standard provides banking; Konami SCC also provides five-voice classic K051649 wavetable audio alongside PSG. Channels 4/5 share a waveform. Digital timing is deterministic; analog distortion and bus-contention noise are approximated. Inference does not verify game identity or boot compatibility. No fixed upload size cap; available browser/Wasm memory and mapper address range apply. ASCII SRAM variants and the 384 KiB R-Type layout require manual selection. SRAM select wiring varies: ASCII8 uses the first bit above the ROM bank number (up to 1 MiB); ASCII16 uses bit 4 (up to 256 KiB). SCC+/SCC-I, FM expansions, other specialized mappers and Game Master 2 / second cartridge slots are unsupported. Loading resets the machine; Eject removes the cartridge. Many commercial cartridges require a compatible system BIOS.</p>
         <p><a href="scc-test-cartridge.rom" download>Download our original SCC test cartridge</a> and select Konami SCC or Auto. Enable audio, focus the display, then hold Space for a 440 Hz SCC square, Up for all five SCC voices, Left for PSG, or combine Left with Space/Up. Right hides SCC registers; Down hides its slot. Combine Right/Down while sound continues. Release Space/Up to silence SCC, even while hidden; release Left to silence PSG. Works on MSX1 and MSX2.</p>
         <p><a href="test-cartridge.rom" download>Download our original test cartridge</a>, then open it above. Hold Space to hear its PSG tone after enabling audio.</p>
         <p><a href="ram-mapper-test-cartridge.rom" download>Download our original MSX2 RAM mapper probe</a>. Open it above to test all sixteen 16 KiB RAM segments through C-BIOS. The screen reports RAM MAPPER PASS or FAIL.</p>
@@ -137,6 +138,17 @@
         <p id="save-status" role="status">No SRAM cartridge loaded.</p>
         <p>Import validates ROM identity, mapper, size, version and checksum before replacing SRAM. Reset afterward for games that read saves only at startup. Corrupt or conflicting browser saves are preserved and automatic saving pauses until you explicitly import a valid backup. Execution continues if storage is unavailable.</p>
         <p>Original mapper probes (MIT): <a href="mapper-6.rom" download>ASCII8SRAM2</a> · <a href="mapper-7.rom" download>ASCII8SRAM8</a> · <a href="mapper-8.rom" download>ASCII16SRAM2</a> · <a href="mapper-9.rom" download>ASCII16SRAM8</a> · <a href="mapper-10.rom" download>R-Type</a>. Select the matching mapper before Open ROM. SRAM probes show a blue backdrop; Space advances the saved color once per press. R-Type shows yellow after executing its second ROM chip.</p>
+        <h2>Disk interface</h2>
+        <p id="disk-profile-status" role="status">Weave disk/demo boot option · no external interface installed</p>
+        <button id="open-disk-rom" disabled>Install Philips disk ROM</button>
+        <input id="disk-rom" type="file" accept=".rom,.bin" aria-label="Philips NMS1200-style disk ROM (16 KiB)" hidden disabled>
+        <button id="remove-disk-rom" disabled>Remove disk interface</button>
+        <p>Install a local 16 KiB AB-header ROM for the Philips NMS1200-style single-drive external interface in slot 2.
+        This restarts your selected system firmware and retains its BIOS, sub-ROM, cartridge, SRAM and mounted disk.
+        Boot disk then restarts that system firmware with the interface available, without requiring a WV boot sector.
+        Compatible disk firmware and system software are required; C-BIOS alone is not a complete disk environment.
+        Reset, Eject disk, firmware and machine changes retain the interface. Remove disk interface returns to the
+        Weave disk/demo boot option and keeps system firmware and media. Local ROMs stay in this tab.</p>
         <h2>Local system BIOS / BASIC</h2>
         <div id="msx2-builtins">
           <label class="file" for="firmware">Firmware policy</label>

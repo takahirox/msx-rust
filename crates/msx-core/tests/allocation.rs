@@ -182,3 +182,30 @@ fn disk_mount_boot_and_reset_commit_without_allocating() {
         assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
     }
 }
+
+#[test]
+fn staged_philips_install_reset_remove_retain_media_without_allocating() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut m = Machine::default();
+        m.set_model(model);
+        m.use_cbios().unwrap();
+        let mut rom = vec![0xff; 16384];
+        rom[..2].copy_from_slice(b"AB");
+        m.mount_disk(vec![0x35; 368640], false).unwrap();
+        DENY.with(|s| s.set(true));
+        m.install_philips_disk_rom(rom).unwrap();
+        m.boot_disk().unwrap();
+        m.reset();
+        DENY.with(|s| s.set(false));
+        m.hardware.slots = 0xf8;
+        assert_eq!(m.hardware.read(0x4000), b'A');
+        assert_eq!(m.hardware.firmware, Firmware::Cbios);
+        DENY.with(|s| s.set(true));
+        m.remove_philips_disk_rom();
+        DENY.with(|s| s.set(false));
+        assert_eq!(
+            m.hardware.fdc.disk.as_ref().unwrap().bytes(),
+            vec![0x35; 368640]
+        );
+    }
+}

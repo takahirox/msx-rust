@@ -47,6 +47,7 @@ pub struct Hardware {
     pub rtc: rtc::Rtc,
     pub fdc: disk::Controller,
     pub disk_rom: Vec<u8>,
+    philips_rom: Option<Vec<u8>>,
     /// Physical RAM storage. CPU-address observations must use the Bus mapping.
     pub ram: Vec<u8>,
     ram_segments: [u8; 4],
@@ -76,6 +77,7 @@ impl Default for Hardware {
             rtc: rtc::Rtc::default(),
             fdc: disk::Controller::default(),
             disk_rom: firmware::disk_rom(),
+            philips_rom: None,
             // Reserve the largest profile up front; model changes and reset
             // must not allocate during a transactional cartridge commit.
             ram: vec![0; 256 * 1024],
@@ -168,11 +170,21 @@ impl Bus for Hardware {
         let a = address as usize;
         match self.slot(address) {
             (0, 0) => self.bios.get(a).copied().unwrap_or(255),
-            (2, 0) if self.firmware == Firmware::Disk && (0x7ff8..=0x7fff).contains(&address) => {
-                self.fdc.read((address - 0x7ff8) as u8)
+            (2, 0)
+                if (self.philips_rom.is_some() || self.firmware == Firmware::Disk)
+                    && (0x7ff8..=0x7fff).contains(&address) =>
+            {
+                if self.philips_rom.is_some() {
+                    self.fdc.read_philips((address - 0x7ff8) as u8)
+                } else {
+                    self.fdc.read((address - 0x7ff8) as u8)
+                }
             }
-            (2, 0) if self.firmware == Firmware::Disk && (0x4000..0x8000).contains(&address) => {
-                self.disk_rom[(address - 0x4000) as usize]
+            (2, 0)
+                if (self.philips_rom.is_some() || self.firmware == Firmware::Disk)
+                    && (0x4000..0x8000).contains(&address) =>
+            {
+                self.philips_rom.as_ref().unwrap_or(&self.disk_rom)[(address - 0x4000) as usize]
             }
             (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
@@ -189,8 +201,15 @@ impl Bus for Hardware {
             return;
         }
         match self.slot(address) {
-            (2, 0) if self.firmware == Firmware::Disk && (0x7ff8..=0x7fff).contains(&address) => {
-                self.fdc.write((address - 0x7ff8) as u8, value)
+            (2, 0)
+                if (self.philips_rom.is_some() || self.firmware == Firmware::Disk)
+                    && (0x7ff8..=0x7fff).contains(&address) =>
+            {
+                if self.philips_rom.is_some() {
+                    self.fdc.write_philips((address - 0x7ff8) as u8, value);
+                } else {
+                    self.fdc.write((address - 0x7ff8) as u8, value);
+                }
             }
             (1, 0) if self.mapping.scc_access(address) => self.scc.write(address, value),
             (1, 0) => self.mapping.write(address, value),
@@ -466,6 +485,29 @@ impl Machine {
         self.hardware.mapping = Mapping::default();
         self.reset();
     }
+    /// Install a separately supplied, already reserved Philips disk ROM. A failed
+    /// validation leaves CPU, firmware, cartridge/SRAM and media untouched.
+    pub fn install_philips_disk_rom(&mut self, rom: Vec<u8>) -> Result<(), String> {
+        if rom.len() != 16384 || &rom[..2] != b"AB" {
+            return Err("Philips NMS1200-style requires a 16 KiB AB-header disk ROM.".into());
+        }
+        if self.hardware.firmware == Firmware::Disk {
+            return Err("Choose Use Weave BASIC or Open ROM to leave Weave disk firmware before installing the Philips interface.".into());
+        }
+        self.hardware.philips_rom = Some(rom);
+        self.reset();
+        Ok(())
+    }
+    /// Hardware installation survives all firmware, cartridge and model switches.
+    pub fn has_philips_disk_rom(&self) -> bool {
+        self.hardware.philips_rom.is_some()
+    }
+    /// Return to the default Weave boot option without discarding mounted media.
+    pub fn remove_philips_disk_rom(&mut self) {
+        if self.hardware.philips_rom.take().is_some() {
+            self.reset();
+        }
+    }
     /// Mount a private staged image without changing execution, slots or firmware.
     pub fn mount_disk(&mut self, bytes: Vec<u8>, protected: bool) -> Result<(), String> {
         let disk = disk::Disk::new(bytes, protected)?;
@@ -475,6 +517,10 @@ impl Machine {
     pub fn boot_disk(&mut self) -> Result<(), String> {
         if self.hardware.fdc.disk.is_none() {
             return Err("Mount a DSK in drive A: first.".into());
+        }
+        if self.has_philips_disk_rom() {
+            self.reset();
+            return Ok(());
         }
         if self.boot_policy == BootPolicy::Explicit {
             return Err("Disk boot needs the original disk firmware. Choose Use Weave BASIC to clear the explicit firmware override first.".into());

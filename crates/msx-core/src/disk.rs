@@ -61,6 +61,9 @@ pub struct Controller {
     pub control: u8,
     pub irq: bool,
     pub drq: bool,
+    side_latch: u8,
+    drive_latch: u8,
+    empty_changed: bool,
     status: u8,
     physical_track: u8,
     target: u8,
@@ -89,6 +92,9 @@ impl Default for Controller {
             control: 0,
             irq: false,
             drq: false,
+            side_latch: 0,
+            drive_latch: 0,
+            empty_changed: false,
             status: 0,
             physical_track: 0,
             target: 0,
@@ -111,8 +117,10 @@ impl Default for Controller {
 impl Controller {
     pub fn reset(&mut self) {
         let disk = self.disk.take();
+        let empty_changed = self.empty_changed;
         *self = Self {
             disk,
+            empty_changed,
             sector: 1,
             ..Self::default()
         };
@@ -130,8 +138,51 @@ impl Controller {
             return Err("Export modified DSK before ejecting this disk.".into());
         }
         self.disk = None;
+        self.empty_changed = true;
         self.finish(0x80);
         Ok(())
+    }
+    /// Philips NMS1200-style latches/readback, selected from the pinned openMSX
+    /// profile. Only Hardware's page-1 slot decoder may call these methods.
+    pub fn read_philips(&mut self, register: u8) -> u8 {
+        match register {
+            0..=3 => self.read(register),
+            4 => self.side_latch,
+            5 => {
+                // Absent B and no-drive use the upstream dummy drive (unchanged).
+                let changed = if self.drive_latch & 1 == 0 {
+                    if let Some(disk) = &mut self.disk {
+                        std::mem::take(&mut disk.changed)
+                    } else {
+                        std::mem::take(&mut self.empty_changed)
+                    }
+                } else {
+                    false
+                };
+                (self.drive_latch & !4) | if changed { 0 } else { 4 }
+            }
+            7 => !(if self.irq { 0x40 } else { 0 }) & !(if self.drq { 0x80 } else { 0 }),
+            _ => 0xff,
+        }
+    }
+    pub fn write_philips(&mut self, register: u8, value: u8) {
+        match register {
+            0..=3 => self.write(register, value),
+            4 => {
+                self.side_latch = value;
+                self.write(4, value);
+            }
+            5 => {
+                self.drive_latch = value;
+                let selected = match value & 3 {
+                    0 | 2 => 1, // A
+                    1 => 2,     // absent B
+                    _ => 0,     // no drive
+                };
+                self.write(5, (value & 0x80) | selected);
+            }
+            _ => {}
+        }
     }
     fn ready(&self) -> bool {
         self.disk.is_some() && self.control & 0x83 == 0x81

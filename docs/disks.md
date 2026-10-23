@@ -1,11 +1,12 @@
-# Floppy disks and original disk firmware
+# Floppy disks and interface profiles
 
 Issue #29 adds one drive A: and the **Weave WD2793** interface profile on MSX1
 and MSX2. This deliberately small boot environment runs Z80 firmware and programs
 loaded from disk. It does not provide MSX-DOS, a FAT filesystem, Disk BASIC, or
-universal compatibility with disk games. C-BIOS alone has no disk firmware.
+universal compatibility with disk games. C-BIOS alone has no disk firmware. Issue #41 adds a separately supplied
+**Philips NMS1200-style** external interface, described below.
 
-## Browser workflow and ownership
+## Weave browser workflow and ownership
 
 The page still starts in MSX2 Weave BASIC. Download the original bootable demo,
 choose **Open DSK**, then **Boot disk**. Focus the screen and press Space. The
@@ -17,7 +18,7 @@ image, with identical geometry and all other bytes preserved. The demo includes
 original source, text and glyphs, and is MIT licensed.
 
 Mounting validates and stages the entire image without resetting execution or
-changing the model, firmware, cartridge, SRAM, or previous disk on failure. Firmware
+changing the model, firmware, cartridge, SRAM, or previous disk on failure. Weave firmware
 and its slot ROM are prepared with the machine, embedded in Wasm; no firmware fetch
 is needed at mount/boot. An import generation token and synchronous Wasm commits
 prevent stale disk/ROM/firmware imports from changing a newer session. Eject is a
@@ -63,7 +64,85 @@ weak bits, CRC anomalies and copy-protected/nonstandard tracks are unsupported.
 A standard raw DSK cannot encode arbitrary physical track/protection information.
 The generated demo is a raw boot disk, not a DOS-formatted FAT disk.
 
-## Slots and exact controller wiring
+## Philips NMS1200-style external interface
+
+In **ROMs & advanced system options → Disk interface**, choose **Install Philips
+disk ROM** and select a local `.rom`/`.bin` of exactly 16,384 bytes beginning `AB`.
+The UI explicitly names this profile; a header/size check does not establish ROM
+compatibility. It is a single-drive, upstream-backed profile, not an independently
+verified physical replica. No Philips ROM is bundled or downloaded.
+
+Installation reserves the complete upload before committing ownership in the core.
+The core validates before any state change. Installation then resets execution,
+retaining selected main BIOS, MSX2 sub-ROM, boot policy, cartridge/SRAM, media,
+protection and dirty bytes. Failed validation/reservation/read, native picker
+cancellation and stale asynchronous results leave the running session unchanged.
+The shared import generation and synchronous Wasm commits prevent cross-import
+races. Cancel import preserves the running session and installed interface; media/cartridge
+Eject also invalidates pending imports. An
+active Weave reset loader is incompatible with this wiring, so installation is
+rejected until Use Weave BASIC or Open ROM returns to system firmware.
+
+With this interface installed, Boot disk requires mounted media and restarts the
+**selected system firmware**. It never substitutes a main BIOS or imposes the
+Weave `WV` signature. The supplied system firmware must discover/initialize the
+AB disk ROM and provide any needed BIOS/OS services. Installing an interface does
+not add Disk BASIC or MSX-DOS. C-BIOS alone is not a complete disk environment.
+
+| Action | Philips interface and media | System firmware / cartridge |
+| --- | --- | --- |
+| Reset / Boot disk | Retain ROM/media, abort partial transfer, reset FDC/latches | Retain BIOS/sub-ROM, cartridge/SRAM; restart CPU |
+| Eject disk | Retain interface; reject dirty eject, otherwise abort transfer and signal change | Retain firmware, cartridge/SRAM; browser resumes session |
+| Install/replace disk ROM | Validate/reserve first, reset FDC, retain media including dirty bytes | Retain firmware, cartridge/SRAM; restart CPU |
+| Remove interface | Abort transfer, remove ROM/FDC decode, retain media including dirty bytes | Retain firmware, cartridge/SRAM; restart CPU |
+| Firmware / cartridge switch | Retain interface and mounted media, reset FDC | Existing explicit/automatic firmware and SRAM persistence rules apply |
+| Machine switch | Retain interface and mounted media, reset FDC | Existing model controls clear incompatible system/cartridge selections |
+| Use Weave BASIC | Retain interface and media | Clear explicit system firmware and cartridge; start automatic BASIC |
+
+The ROM is read-only in **primary slot 2, secondary 0, 4000h–7FFFh**, with the
+following eight-byte overlay. No other pages or slots decode registers or
+acknowledge IRQ, DRQ or media change. MSX2 FFFFh expanded-slot precedence, slot
+3-0 sub-ROM, and slot 3-3 mapper RAM continue to work normally. Interface IRQ is
+polled and remains disconnected from CPU IRQ.
+
+| Address | Read | Write |
+| --- | --- | --- |
+| 7FF8h | WD status, acknowledges IRQ | WD command |
+| 7FF9h | Track | Track (idle only) |
+| 7FFAh | Sector | Sector (idle only) |
+| 7FFBh | Data, consumes a read byte when DRQ | Data, supplies a write byte when DRQ |
+| 7FFCh | Full side latch | Full latch retained; bit 0 selects side |
+| 7FFDh | Drive latch with bit 2 replaced by active-low media-change | Bits 1:0: 00/10 A:, 01 absent B:, 11 no drive; bit 7 motor |
+| 7FFEh | FFh; no Weave media/geometry extension | Ignored |
+| 7FFFh | Bit 6 **active-low IRQ**, bit 7 **active-low DRQ**, all other bits pulled high | Ignored |
+
+Signal reads do not acknowledge either signal. Data transfer services DRQ; status
+reads acknowledge IRQ. Drive readback reports bit 2 low once after A: insert/eject,
+then high; it acknowledges change only for selected A:, even with the motor off.
+Absent B:/no drive behave as unchanged upstream dummy drives and do not consume
+A:'s change. Reset sets side/drive latches to 00h (A selected, motor off) and
+clears IRQ/DRQ, retaining media/change/dirty/protect state. Other drive-latch bits
+read back; bit 2 is always replaced by change status. Only effective side,
+drive or motor changes abort an in-progress sector. Equivalent A selectors and
+unused latch bits do not abort it. Controller timing and command limitations below
+apply to both profiles; motor spin-up, drive mechanics and flux timing remain
+approximations.
+
+Behavioral evidence is pinned to openMSX commit
+`26e1e4945df406e250a05122889f88d40edd828b`:
+[NMS1200 configuration](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/share/extensions/Philips_NMS_1200.xml),
+[Philips register implementation](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/PhilipsFDC.cc),
+and [drive change contract/dummy drive](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/DiskDrive.cc).
+The generic upstream decoder has aliases; its selected external configuration
+maps **only page 1**, which is the boundary implemented here. Upstream explicitly
+leaves side/drive unused-bit readback and the applicability of change bit 2 to
+other physical machines uncertain. We deliberately select that latch/readback
+policy, including pull-ups at 7FFFh. The Philips service manual was inaccessible
+during planning. No independent physical-hardware verification is claimed.
+Implementation and fixtures are independently authored from these behavioral
+observations; no upstream implementation or ROM bytes are copied.
+
+## Weave slots and exact controller wiring
 
 This is an original MSX-compatible memory-mapped profile, not a claim to duplicate
 a particular manufacturer's complete interface. The ROM and wiring must be used
@@ -121,7 +200,7 @@ Sector data is bounded to a fixed 512-byte transfer buffer. Writes commit only
 once all 512 bytes arrive, retaining all bytes outside that sector. A canceled,
 protected or timed-out partial write leaves the mounted image unchanged.
 
-## Firmware ABI and boot contract
+## Weave firmware ABI and boot contract
 
 The source generator is [disk.rs](../crates/msx-core/src/firmware/disk.rs); the
 hardware implementation is [disk.rs](../crates/msx-core/src/disk.rs). Everything
@@ -160,13 +239,29 @@ DOS/BASIC services, a different controller wiring, mapper RAM, or copy-protectio
 features. No commercial or arbitrary external disk-game compatibility is claimed.
 Supply any additional firmware/OS only with lawful permission; none is bundled.
 
+## Original Philips fixtures
+
+[philips.py](../tests/fixtures/philips.py) generates the original, MIT-licensed
+sparse hex system/disk-ROM/sector fixtures used by native and compiled-Wasm tests.
+Regenerate with `python3 tests/fixtures/philips.py`. They discover the AB header and
+call its initialization vector through normal slot mapping. The disk ROM polls
+active-low signals, reads a sector without `WV` into RAM, then executes its code.
+The sector renders a green VDP backdrop and polls a complete 512-byte A6h write to
+sector 9 (side 0 for 360 KiB, side 1 for 720 KiB). Native variants test protection, forced abort and service timeout;
+expected full images prove exact writes and unchanged partial writes. The system
+also accesses a parked ASCII8 SRAM cartridge, the MSX2 sub-ROM and separate mapper
+RAM segments. No host BIOS traps or proprietary inputs are involved. Tests cover
+both geometries/models and the browser suite runs at `/` and `/msx-rust/`.
+These fixtures establish the selected bus contract, not commercial compatibility.
+
 ## Provenance and reproducibility
 
-The drive, controller, reset loader, disk ROM, demo program, synthetic sector data,
+The drive, controller, reset loader, Weave disk ROM, demo program, synthetic sector data,
 text and original font are independently authored under this repository's MIT
 license. No proprietary disk BIOS, MSX-DOS files, Microsoft BASIC, commercial disk,
 third-party routines or copied ROM bytes are inputs. The separately bundled
-BSD-licensed C-BIOS remains exclusively the cartridge boot option. Retain LICENSE
+BSD-licensed C-BIOS remains a cartridge BIOS. Local Philips-compatible ROMs remain
+private user inputs and are not included in assets or tests. Retain LICENSE
 and [ROM-LICENSE.txt](../firmware/ROM-LICENSE.txt) when redistributing assets.
 
 Build with `./scripts/build.sh`, or generate standalone assets with:
@@ -237,3 +332,40 @@ toolchain/build configuration, compiler version, or external system files were
 changed to work around this host setup. Normal installations/CI use the unchanged
 build command. These are local pre-merge results; the published-site check above
 remains pending after merge and deployment.
+
+
+## Issue #41 validation (2026-10-24)
+
+The final implementation passed these local checks with pinned Rust 1.99.0:
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 156 tests, including seven new native/Wasm cases |
+| `./scripts/build.sh` | Passed with the local linker wrapper described above |
+| `node scripts/check-dist.mjs` | Passed: inventory, notices, new ABI exports and import-free Wasm |
+| `npm test` | Passed: 98 browser cases, including ten Philips cases at both roots |
+| `git diff --check` and staged whitespace review | Passed |
+| Fixture regeneration | Passed: generated hex unchanged |
+
+Regression sensitivity was checked by temporarily restoring the baseline firmware
+visibility gate, then separately routing the new interface through Weave wiring.
+Each mutation failed three of the five new core regressions, including the
+CPU-executed fixture; restoring the implementation passed all five again. These
+are behavioral mutation checks, not a claim that the new APIs exist on the
+baseline. All 88 existing browser cases, including disk, MSX1/MSX2, PSG/SCC audio,
+firmware and SRAM coverage, remain in the passing full suite.
+
+Initial attempts failed because this host's pinned rust-lld could not locate
+libLLVM.dylib, and the first browser fixtures assumed the MSX1 palette on MSX2 and
+did not await a preceding import. The same pinned linker succeeded with the
+ignored task-local wrapper documented above; corrected fixtures and final full
+runs passed. One distribution check ran before the updated notice was rebuilt;
+rebuilding synchronized it and the final distribution check passed.
+
+No required automated check was skipped or left unperformed. Optional physical
+hardware/trace comparison and proprietary firmware/software boot testing were not
+performed; no commercial compatibility is inferred. Coordinator review remains a
+separate pre-merge step. Issue #41 requires no post-merge verification. Nothing was
+pushed, published, merged or commented during this implementation.
