@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -55,6 +55,8 @@ r = Z80(0x4100)
 r.emit(0x3e, 0x80, 0x32, 0xfd, 0x7f, 0xaf, 0x32, 0xfc, 0x7f,
        0x32, 0xf9, 0x7f, 0x3e, 1, 0x32, 0xfa, 0x7f,
        0x3e, 0x80, 0x32, 0xf8, 0x7f, 0x21, 0, 0x80, 0x01, 0, 2)
+# This 65535-iteration signal poll allows >5M cycles, exceeding the Type-II
+# bound of 30 ms + five revolutions (3686931.35 cycles), including MSX waits.
 r.label('byte'); r.emit(0x11, 0xff, 0xff)
 r.label('poll'); r.emit(0x3a, 0xff, 0x7f, 0xcb, 0x7f); r.jump(0xca, 'data')
 r.emit(0xcb, 0x77); r.jump(0xca, 'fail')
@@ -281,3 +283,55 @@ value(0xc040, 0xa5); paint(0xf2); q.jump(0xc3, 'halt')
 q.label('fail'); value(0xc040, 0xee); paint(0xf6)
 q.label('halt'); q.emit(0x76); q.jump(0xc3, 'halt')
 save('philips-readiness', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x400, q.done())])
+
+# Issue #57: CPU polls Type-II success and fifth-index failure with E=0/1.
+# Original AB ROM, shared by native and compiled-Wasm tests. No BIOS shortcuts.
+q = Z80(0x4400)
+value(0x7ffd, 0x80); value(0x7ffc, 0); value(0x7ff9, 0)
+for i, e in enumerate([0, 4]):
+    trace = 0x9000 + 8*i
+    value(0x7ffa, 3); value(0x7ff8, 0x80 | e)
+    record(trace, 0x7ff8, 1)
+    record(trace+1, 0x7fff, 0xff)
+    q.emit(0x01, 0, 0)
+    poll = 'first'+str(i)
+    q.label(poll); q.emit(0x03); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, poll)
+    # 42 cycles/poll (including ordinary MSX M1 waits). A match takes
+    # E*30 ms + at most one revolution + 114 cycles. Allow instruction
+    # alignment at each end, but E=1 must actually delay by >=30 ms.
+    low, high = (2540, 19620) if e else (0, 17060)
+    q.emit(0x60, 0x69, 0x11, low & 255, low >> 8, 0xb7, 0xed, 0x52); q.jump(0xda, 'fail')
+    q.emit(0x21, high & 255, high >> 8, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
+    record(trace+2, 0x7fff, 0x7f)
+    q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+    q.label('byte'+str(i)); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'byte'+str(i))
+    load(0x7ffb); check(0x62)
+    q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'byte'+str(i))
+    record(trace+3, 0x7ff8, 0)
+    value(0x7ffa, 10); value(0x7ff8, 0x80 | e)
+    record(trace+4, 0x7ff8, 1)
+    record(trace+5, 0x7fff, 0xff)
+    q.emit(0x01, 0, 0)
+    poll = 'missing'+str(i)
+    q.label(poll); q.emit(0x03, 0, 0, 0, 0); load(0x7fff)
+    q.emit(0xcb, 0x77); q.jump(0xc2, poll)
+    # 62 cycles/poll: E=0/1 failure lies within four revolutions ..
+    # 30 ms + five revolutions (2863636 .. 3686931.35 cycles).
+    # 46000..59500 includes alignment and fits a 16-bit counter.
+    q.emit(0x60, 0x69, 0x11, 0xb0, 0xb3, 0xb7, 0xed, 0x52); q.jump(0xda, 'fail')
+    q.emit(0x21, 0x6c, 0xe8, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
+    record(trace+6, 0x7fff, 0xbf)
+    record(trace+7, 0x7ff8, 0x10)
+# Replace the first sixteen known payload bytes with the fixed observation trace.
+q.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 16, 0, 0xed, 0xb0)
+load(0x43ff); store(0x7ffc) # test supplies side 0/1 for 360/720 KiB
+value(0x7ffa, 9); value(0x7ff8, 0xa4)
+q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+q.label('write'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'write')
+q.emit(0x7e); store(0x7ffb)
+q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write')
+load(0x7ff8); check(0)
+value(0xc050, 0xa5); paint(0xf2); q.jump(0xc3, 'halt')
+q.label('fail'); value(0xc050, 0xee); paint(0xf6)
+q.label('halt'); q.emit(0x76); q.jump(0xc3, 'halt')
+save('philips-search', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x3ff, [0]), (0x400, q.done())])

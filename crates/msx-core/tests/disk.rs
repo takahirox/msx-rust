@@ -9,6 +9,16 @@ fn drive(size: usize) -> Controller {
     f.write(5, 0x81);
     f
 }
+fn byte_ready(f: &mut Controller) {
+    // One revolution plus the synthetic handoff; stop on the first DRQ.
+    for _ in 0..6_300 {
+        f.tick(BYTE_CYCLES);
+        if f.drq {
+            return;
+        }
+    }
+    panic!("sector did not reach DRQ: {:02x}", f.read(0));
+}
 fn wait(f: &mut Controller) {
     // More than 79 intervals at the slowest (30 ms) rate.
     f.tick(8_500_000);
@@ -51,7 +61,7 @@ fn commands_status_signals_timeouts_and_private_writes() {
     f.write(2, 9);
     f.write(0, 0xa0);
     for i in 0..512 {
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert!(f.drq);
         f.write(3, i as u8);
     }
@@ -70,16 +80,16 @@ fn commands_status_signals_timeouts_and_private_writes() {
     f.write(0, 0x80);
     for i in 0..512 {
         assert!(!f.drq);
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert_eq!(f.read(3), i as u8);
     }
     f.write(0, 0x80);
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.tick(SERVICE_TIMEOUT);
     assert_eq!(f.read(0) & 5, 4);
     assert!(!f.irq);
     f.write(0, 0x80);
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.write(0, 0xd8);
     assert!(f.irq);
     assert!(!f.drq);
@@ -92,6 +102,8 @@ fn commands_status_signals_timeouts_and_private_writes() {
     assert_eq!(f.read(0) & 0x40, 0x40);
     f.write(2, 10);
     f.write(0, 0x80);
+    assert_eq!(f.read(0) & 0x11, 1);
+    wait(&mut f);
     assert_eq!(f.read(0) & 0x10, 0x10);
     f.write(5, 1);
     f.write(0, 0x80);
@@ -104,6 +116,8 @@ fn commands_status_signals_timeouts_and_private_writes() {
 }
 #[test]
 fn z80_disk_boot_and_write_on_both_models() {
+    // A sector is bounded by one revolution + 512*(114+4096) cycles.
+    // Twelve boot reads fit in 600 NTSC frames; a read/write in 120 frames.
     for model in [Model::Msx1, Model::Msx2] {
         let mut m = Machine::default();
         m.set_model(model);
@@ -113,7 +127,7 @@ fn z80_disk_boot_and_write_on_both_models() {
         m.mount_disk(disk.clone(), false).unwrap();
         assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
         m.boot_disk().unwrap();
-        for _ in 0..80 {
+        for _ in 0..600 {
             m.frame();
         }
         assert_eq!(
@@ -128,7 +142,7 @@ fn z80_disk_boot_and_write_on_both_models() {
         assert_eq!(&m.hardware.vdp.vram[0x1880..0x188f], b"WEAVE DISK BOOT");
         assert!(m.basic.console.transcript.is_empty());
         m.hardware.key(8, 0, true);
-        for _ in 0..30 {
+        for _ in 0..120 {
             m.frame();
         }
         assert_eq!(
@@ -142,7 +156,7 @@ fn z80_disk_boot_and_write_on_both_models() {
         expected[9216] = 1;
         assert_eq!(changed, expected);
         m.reset();
-        for _ in 0..80 {
+        for _ in 0..600 {
             m.frame();
         }
         assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
@@ -173,11 +187,11 @@ fn slots_failures_overrides_and_parked_sram() {
     m.hardware.fdc.irq = true;
     assert!(!m.hardware.irq()); // interface IRQ is polled, never wired to CPU IRQ
     m.reset();
-    for _ in 0..80 {
+    for _ in 0..600 {
         m.frame();
     }
     m.hardware.key(8, 0, true);
-    for _ in 0..30 {
+    for _ in 0..120 {
         m.frame();
     }
     assert_eq!(
@@ -221,6 +235,8 @@ fn step_multi_record_and_partial_write_lifecycle() {
     wait(&mut f);
     assert_eq!(f.track, 1); // physical 2, register unchanged
     f.write(0, 0x80);
+    assert_eq!(f.read(0) & 0x11, 1);
+    wait(&mut f);
     assert_eq!(f.read(0) & 0x10, 0x10);
     f.write(0, 0x30);
     wait(&mut f);
@@ -233,16 +249,20 @@ fn step_multi_record_and_partial_write_lifecycle() {
     assert_eq!(f.track, 0);
     f.write(4, 1);
     f.write(0, 0x80);
+    assert_eq!(f.read(0) & 0x11, 1);
+    wait(&mut f);
     assert_eq!(f.read(0) & 0x10, 0x10); // absent side
     f.write(4, 0);
     f.write(2, 8);
     f.write(0, 0xb0);
     for i in 0..1024 {
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert!(f.drq);
         f.write(3, if i < 512 { 0x5a } else { 0xa5 });
     }
     assert_eq!(f.sector, 10);
+    assert_eq!(f.read(0) & 0x11, 1);
+    wait(&mut f);
     assert_eq!(f.read(0) & 0x11, 0x10);
     assert_eq!(
         &f.disk.as_ref().unwrap().bytes()[7 * 512..8 * 512],
@@ -254,15 +274,15 @@ fn step_multi_record_and_partial_write_lifecycle() {
     );
     f.write(2, 1);
     f.write(0, 0xa0);
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.write(3, 42);
     f.write(0, 0xd0);
     assert!(!f.irq); // cancellation does not commit partial sector
     assert_eq!(&f.disk.as_ref().unwrap().bytes()[..512], vec![0; 512]);
     f.write(0, 0xa0);
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.write(3, 42);
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.tick(SERVICE_TIMEOUT);
     assert_eq!(f.read(0) & 4, 4);
     assert_eq!(&f.disk.as_ref().unwrap().bytes()[..512], vec![0; 512]);
@@ -323,7 +343,7 @@ fn updating_steps_preserve_track_mismatch_for_reads_and_writes() {
         // Matching the register to the actual head position permits a read.
         f.write(1, physical_track);
         f.write(0, 0x80);
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert!(f.drq);
         assert_eq!(f.read(0), 3); // busy + DRQ
     }
@@ -355,7 +375,7 @@ fn seek_preserves_head_offset_for_reads_and_writes() {
         // The head really moved by the register delta, independently of Track.
         f.write(1, physical_track);
         f.write(0, 0x80);
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert!(f.drq);
         assert_eq!(f.read(3), 0);
         f.write(0, 0xd0);
@@ -409,7 +429,7 @@ fn type_one_verify_checks_resulting_track_and_media_geometry() {
             // Verification failure still completes the movement and register update.
             f.write(1, physical_track);
             f.write(0, 0x80);
-            f.tick(BYTE_CYCLES);
+            byte_ready(&mut f);
             assert!(f.drq);
         }
         for (size, error) in [(368640, 0x10), (737280, 0)] {
@@ -425,6 +445,7 @@ fn type_one_verify_checks_resulting_track_and_media_geometry() {
 
 #[test]
 fn independent_360k_z80_boot_sector_reads_and_writes_through_diskio() {
+    // Three transfers plus a 79-track seek fit within 180 PAL frames.
     // This fixture is separate from the supplied demo generator. It is a hand-
     // authored program in sector zero, executed at C000h after firmware boot.
     // Read the last sector, write 6Bh at byte 7, write it back, leave a RAM marker.
@@ -443,8 +464,11 @@ fn independent_360k_z80_boot_sector_reads_and_writes_through_diskio() {
         m.set_model(model);
         m.mount_disk(bytes.clone(), false).unwrap();
         m.boot_disk().unwrap();
-        for _ in 0..60 {
+        for _ in 0..180 {
             m.frame();
+            if m.cpu.halted {
+                break;
+            }
         }
         assert_eq!(m.hardware.read(0xdf00), 0xa5, "pc={:04x}", m.cpu.pc);
         assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
@@ -476,11 +500,11 @@ fn seek_direction_and_late_write_protection() {
     wait(&mut f);
     f.write(0, 0xa0);
     for _ in 0..511 {
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         f.write(3, 42);
     }
     f.disk.as_mut().unwrap().write_protected = true;
-    f.tick(BYTE_CYCLES);
+    byte_ready(&mut f);
     f.write(3, 42);
     assert_eq!(f.read(0) & 0x40, 0x40);
     assert!(f.disk.as_ref().unwrap().bytes().iter().all(|b| *b == 0));

@@ -192,8 +192,8 @@ This hard upper stop/error is the bounded raw-image drive's policy, not a claim
 about physical drives' extra cylinders. Type I commands with V set settle and
 search matching-cylinder IDs as specified below; V clear skips verification.
 Sector side compare is honored when enabled. Multi-record transfers increment
-the sector register and terminate with record-not-found after sector 9 rather than
-silently crossing a track. Unsupported read-address/read-track/write-track/format
+the sector register and search again; sector 10 fails after its fifth observed
+index without crossing a track. Unsupported read-address/read-track/write-track/format
 commands return record-not-found. CRC/deleted marks and density controls are outside
 this raw-sector subset.
 
@@ -263,8 +263,8 @@ cycles). At the same deadline: finish movement, finish settling, inspect ID, the
 count rising index. Thus an ID at the search-start boundary is eligible, and a
 matching ID wins at the fifth-index boundary. Selection/motor/side writes apply
 after events already consumed at that clock and never replay an event at the
-write's timestamp. Matching cylinder plus good CRC succeeds independently of
-Sector or payload bytes; no CRC faults are invented from payload contents. A
+write's timestamp. For Type-I verification, matching cylinder plus good CRC
+succeeds independently of Sector or payload bytes; no CRC faults are invented from payload contents. A
 missing side supplies index but no IDs. A cylinder mismatch or missing side fails
 on the fifth rising index encountered during search, not after five nominal
 wall-clock periods. Only selected A with media and motor on supplies ID/index
@@ -276,15 +276,55 @@ completed movement; mount/eject/reset/interface removal remain cancellation
 boundaries. Reset/removal keep the existing reset-to-zero policy.
 
 Full HLD/status-bit-5 lifecycle, physical motor spin-up, flux/CRC anomalies,
-sector-transfer rotational timing, exact internal startup latency and additional
-commands remain separate gaps. CPU accesses and ticks remain instruction-boundary
-events (see [CPU timing](architecture.md#cpu-fetch-timing)).
+exact internal startup latency and additional commands remain separate gaps.
+CPU accesses and ticks remain instruction-boundary events (see [CPU timing](architecture.md#cpu-fetch-timing)).
 
-Sector-transfer timing is unchanged: DRQ is first raised after 114 CPU cycles,
-then 114 cycles after each serviced byte. An unserviced DRQ aborts with lost-data
-after 4,096 cycles. This generous deterministic service window is an approximation,
-not rotational/flux accuracy. Index repeats every 715,909 cycles (300 rpm), high
-for 7,000 cycles.
+Type-II reads/writes have separate settling, rotational search and transfer
+phases in both interfaces. READY is checked at command acceptance; absent media,
+absent B/no-drive and motor-off commands still fail immediately. A write-protected
+write fails immediately before settling; protected reads remain supported. E=1
+adds exactly 30 ms (107386.35 CPU cycles), with HLT assumed high; E=0 starts search
+without that delay. BUSY stays set and DRQ/IRQ inactive during settling/search.
+The fractional deadline is never rounded down onto an earlier ID.
+
+Search reuses the nine-ID/index schedule above. The requested Track must match
+the physical-cylinder ID, Sector must match the encountered sector number, and
+C=1 compares command S against the ID-side LSB. C=0 ignores S. A missing side has
+index but no IDs; payload bytes never invent bad CRCs or missing address marks.
+Unmatched cylinder/sector/side searches fail with record-not-found on the fifth
+observed rising index. Search-start inclusion and ID-before-index ordering are
+shared selected-model policies, not claims of WD2793 silicon confirmation. In
+particular an E=0 search at phase zero counts that index, while a search starting
+one cycle later must wait for the next index.
+
+The E delay, ID comparisons, index-limited failure and ascending multi-record
+searches follow the [TI second-source transcription](https://deramp.com/swtpc.com/DC_5/TMS279X_DataSheet.pdf),
+printed pages 10, 12–13, 17 and 20, applying its 1 MHz WD2793 profile. The
+[pinned openMSX scheduler](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/WD2793.cc)
+(`startType2Cmd`, `type2Loaded`, `type2Search`, `type2Rotated`) corroborates separate
+scheduled settling/search; its optional-side TODO and uncertain stopped-rotation
+handling are not behavior oracles. These references are not physical measurements.
+
+After a matching ID, the bounded synthetic handoff waits 114 CPU cycles for first
+DRQ, then 114 cycles after each serviced byte. An unserviced DRQ aborts with
+lost-data after 4096 cycles. All phase/DRQ/timeout deadlines use the same absolute
+clock and consume only residual elapsed time: a large tick can encounter an ID,
+raise DRQ and time out that pending byte, just as single-cycle ticks do. The
+service-relative byte cadence and generous service window remain approximations;
+ID-to-data gaps, physical byte cadence and lost-data fidelity are separate work.
+CPU bus accesses still occur at instruction boundaries.
+
+After each complete multi-record sector, Sector increments and a fresh search
+starts at the current rotation without repeating E settling. There is no automatic
+track crossing: after sector 9, sector 10 remains BUSY until its fifth-index
+failure. Earlier complete writes remain committed. FORCE INTERRUPT, reset,
+mount/eject and interface removal cancel all pending phases without resurrection.
+The existing Type-II policy also cancels on an effective side/control change,
+including during settling/search; ignored Philips latch bits and equivalent A
+selectors do not cancel. This cancellation is an emulator interface policy,
+separate from physical WD2793 drive-switch behavior. Type I retains its existing
+non-canceling control-write policy.
+
 Sector data is bounded to a fixed 512-byte transfer buffer. Writes commit only
 once all 512 bytes arrive, retaining all bytes outside that sector. A canceled,
 protected or timed-out partial write leaves the mounted image unchanged.
@@ -356,7 +396,24 @@ reads retained track 2 and writes `[84,02,80,81,81,BF,80,00]` (hex) to the first
 eight bytes of track 2/sector 9. Green VDP output requires success; the exact full
 exported image checks unchanged surrounding bytes. Native tests and compiled Wasm
 run this diskless-to-mounted sequence on both models at both browser roots.
-Earlier generated fixtures remain byte-for-byte unchanged.
+The original `philips-search.hex` AB ROM (#57) polls Type-II E=0 and E=1 reads
+of known sector-3 payloads and delayed sector-10 failure. It checks BUSY and
+active-low signals, bounds first-DRQ polls by 30 ms + one revolution + 114 cycles,
+and bounds RNF by four revolutions .. 30 ms + five revolutions. Poll loops include
+MSX M1 waits (42 cycles for success, 62 for failure). It writes the fixed trace
+`01 FF 7F 00 01 FF BF 10` twice, followed by 496 known 62h bytes, through an E=1
+sector-9 write on side 0/1 for 360/720 KiB. Native and compiled-Wasm tests execute
+this same ROM on both models/geometries at both browser roots and compare the
+entire exported image. Green requires all CPU checks to pass.
+
+Existing 65535-iteration signal polls allow over five million cycles, exceeding
+30 ms + five revolutions (3686931.35 cycles). Native Weave boot budgets now allow
+600 NTSC frames for twelve reads: each sector is bounded by one revolution plus
+512 × (114 + 4096) cycles, with additional positioning/setup time. The independent
+three-transfer/final-track fixture allows 180 frames including a 79-track seek;
+a read/write pair allows 120 frames. Browser output waits allow 15 seconds for
+these emulated bounds plus host scheduling. Earlier generated fixtures remain
+byte-for-byte unchanged.
 These fixtures establish the selected bus contract, not commercial compatibility.
 
 ## Provenance and reproducibility

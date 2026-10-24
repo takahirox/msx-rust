@@ -55,7 +55,7 @@ async function greenOutput(page, model) {
   await expect.poll(() => page.locator('#screen').evaluate(canvas => {
     const data = canvas.getContext('2d').getImageData(20, 20, 1, 1).data;
     return [...data];
-  })).toEqual(model === '1' ? [36, 218, 36, 255] : [33, 200, 66, 255]);
+  }), {timeout:15000}).toEqual(model === '1' ? [36, 218, 36, 255] : [33, 200, 66, 255]);
 }
 for (const site of sites) {
   for (const model of ['0', '1']) {
@@ -88,7 +88,9 @@ for (const site of sites) {
         await page.locator('#disk-protected').uncheck();
         await page.locator('#boot-disk').click();
         await greenOutput(page, model);
-        await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
+        // Green is painted before the original fixture's write. Wait for the
+        // commit: 'no unsaved modifications' also contains the shorter phrase.
+        await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
         await expect(page.locator('#status')).toContainText('user BIOS');
         await expect(page.locator('#status')).toContainText('Philips NMS1200-style');
         const expected = Buffer.from(disk), sector = size === 737280 ? 17 : 8;
@@ -181,6 +183,38 @@ for (const site of sites) {
       expect(errors).toEqual([]);
       expect(requests.every(request => request.method() === 'GET' && request.url().startsWith(site))).toBe(true);
     });
+  }
+  for (const model of ['0', '1']) {
+    for (const size of [368640, 737280]) {
+      test(`Philips CPU Type-II E settling, delayed RNF and exact trace export MSX${Number(model)+1} ${size} ${site}`, async ({page}) => {
+        const errors = [], requests = [];
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('request', request => requests.push(request));
+        await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+        if (model === '0') await page.locator('#model').selectOption('0');
+        await page.locator('#advanced-panel > summary').click();
+        await installSystem(page, model);
+        const disk = Buffer.alloc(size, 0x35); disk.fill(0x62, 2*512, 3*512);
+        await page.locator('#disk').setInputFiles(file('original-search.dsk', disk));
+        await expect(page.locator('#disk-status')).toContainText('original-search.dsk');
+        await page.locator('#disk-protected').uncheck();
+        const rom = await fixture('search', 16384, 255); rom[0x3ff] = Number(size === 737280);
+        await page.locator('#disk-rom').setInputFiles(file('original-search.rom', rom));
+        await expect(page.locator('#disk-profile-status')).toContainText('original-search.rom');
+        // CPU checks counts from emulated bounds: 30 ms + one revolution
+        // to first DRQ; four .. five index periods to RNF. Green requires
+        // both E values, two full known reads and a complete E=1 write.
+        await greenOutput(page, model);
+        const expected = Buffer.from(disk), sector = size === 737280 ? 17 : 8;
+        expected.fill(0x62, sector*512, (sector+1)*512);
+        Buffer.from([1,0xff,0x7f,0,1,0xff,0xbf,0x10,1,0xff,0x7f,0,1,0xff,0xbf,0x10]).copy(expected, sector*512);
+        await page.locator('#eject-disk').click();
+        await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
+        expect(await exportDisk(page)).toEqual(expected);
+        expect(errors).toEqual([]);
+        expect(requests.every(request => request.method() === 'GET' && request.url().startsWith(site))).toBe(true);
+      });
+    }
   }
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
