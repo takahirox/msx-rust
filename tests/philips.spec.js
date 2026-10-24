@@ -145,7 +145,7 @@ for (const site of sites) {
       // active-low IRQ/DRQ, cancellation, a full read and a full trace write.
       await greenOutput(page, model);
       const expected = Buffer.from(disk);
-      Buffer.from([2, 1, 0xff, 2, 0xbf, 0, 0xff, 2]).copy(expected, (2*9+8)*512);
+      Buffer.from([2, 1, 0xff, 2, 0xbf, 0, 0xbf, 2]).copy(expected, (2*9+8)*512);
       expect(await exportDisk(page)).toEqual(expected);
       expect(errors).toEqual([]);
     });
@@ -244,6 +244,43 @@ for (const site of sites) {
           // CPU checks all 512 read bytes, LOST DATA for unread read/initial
           // starvation/later zero-fill, clean new-command status, and waits for
           // the final serializer/CRC tail before painting success.
+          await greenOutput(page, model);
+          await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
+          expect(await exportDisk(page)).toEqual(expected);
+          expect(errors).toEqual([]);
+          expect(requests.every(request => request.method()==='GET' && request.url().startsWith(site))).toBe(true);
+        });
+      }
+    }
+  }
+  for (const model of ['0', '1']) {
+    for (const size of [368640, 737280]) {
+      for (const philips of [false, true]) {
+        test(`CPU FORCE INTERRUPT status, latches, recurring edges and exact export ${philips ? 'Philips' : 'Weave'} MSX${Number(model)+1} ${size} ${site}`, async ({page}) => {
+          const errors = [], requests = [];
+          page.on('pageerror', error => errors.push(error.message));
+          page.on('request', request => requests.push(request));
+          await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+          if (model === '0') await page.locator('#model').selectOption('0');
+          await page.locator('#advanced-panel > summary').click();
+          if (philips) await installSystem(page, model);
+          const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('force-weave', size, 0x35);
+          if (!philips) disk[2] = size === 737280 ? 0xf9 : 0xf8;
+          const [on, off] = philips ? [0xbf, 0xff] : [0x80, 0];
+          // Independent expected trace; Type-I samples mask the live index bit.
+          const trace = [7,4,on,4,on,1,on,0,on,4,off,on,4,off,off,0,
+            off,on,0x84,off,off,on,4,off,on,4,off,on,4,off,
+            4,off,off,off,off,0,off];
+          const expected = Buffer.from(disk);
+          expected.fill(0x35, 8*512, 9*512);
+          Buffer.from(trace).copy(expected, 8*512);
+          await page.locator('#disk').setInputFiles(file('original-force.dsk', disk));
+          await expect(page.locator('#disk-status')).toContainText('original-force.dsk');
+          await page.locator('#disk-protected').uncheck();
+          if (philips) {
+            await page.locator('#disk-rom').setInputFiles(file('original-force.rom', await fixture('force',16384,255)));
+            await expect(page.locator('#disk-profile-status')).toContainText('original-force.rom');
+          } else { await page.locator('#boot-disk').click(); }
           await greenOutput(page, model);
           await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
           expect(await exportDisk(page)).toEqual(expected);

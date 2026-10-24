@@ -95,6 +95,8 @@ pub struct Controller {
     pub control: u8,
     pub irq: bool,
     pub drq: bool,
+    pending_irq: bool,
+    immediate_irq: bool,
     side_latch: u8,
     drive_latch: u8,
     empty_changed: bool,
@@ -131,6 +133,8 @@ impl Default for Controller {
             control: 0,
             irq: false,
             drq: false,
+            pending_irq: false,
+            immediate_irq: false,
             side_latch: 0,
             drive_latch: 0,
             empty_changed: false,
@@ -173,17 +177,21 @@ impl Controller {
         if self.disk.as_ref().is_some_and(|d| d.dirty) {
             return Err("Export modified DSK before replacing this disk.".into());
         }
+        let was_ready = self.ready();
         self.disk = Some(disk);
         self.finish(0);
+        self.ready_transition(was_ready);
         Ok(())
     }
     pub fn eject(&mut self) -> Result<(), String> {
         if self.disk.as_ref().is_some_and(|d| d.dirty) {
             return Err("Export modified DSK before ejecting this disk.".into());
         }
+        let was_ready = self.ready();
         self.disk = None;
         self.empty_changed = true;
         self.finish(0x80);
+        self.ready_transition(was_ready);
         Ok(())
     }
     /// Philips NMS1200-style latches/readback, selected from the pinned openMSX
@@ -238,13 +246,26 @@ impl Controller {
     fn ready(&self) -> bool {
         self.disk.is_some() && self.control & 0x83 == 0x81
     }
+    fn set_pending_irq(&mut self, pending: bool) {
+        self.pending_irq = pending;
+        self.irq = self.pending_irq || self.immediate_irq;
+    }
+    fn ready_transition(&mut self, was_ready: bool) {
+        if (was_ready && !self.ready() && self.force_mask & 2 != 0)
+            || (!was_ready && self.ready() && self.force_mask & 1 != 0)
+        {
+            self.set_pending_irq(true);
+        }
+    }
     pub fn read(&mut self, register: u8) -> u8 {
         match register {
             0 => {
-                self.irq = false;
+                self.set_pending_irq(false);
+                // Stored command results survive busy FORCE INTERRUPT. READY,
+                // DRQ and Type-I drive signals are always recomputed live.
                 let mut s = (self.status & !0x80) | if self.ready() { 0 } else { 0x80 };
                 if self.type_one {
-                    s &= !6;
+                    s &= !0x46;
                     if self.track_zero() {
                         s |= 4;
                     }
@@ -254,8 +275,8 @@ impl Controller {
                     if self.selected_a() && self.disk.as_ref().is_some_and(|d| d.write_protected) {
                         s |= 0x40;
                     }
-                } else if self.drq {
-                    s |= 2;
+                } else {
+                    s = (s & !2) | if self.drq { 2 } else { 0 };
                 }
                 s
             }
@@ -326,11 +347,7 @@ impl Controller {
                 if changed && self.transfer == Transfer::Verify {
                     self.schedule_search(false);
                 }
-                if (was_ready && !self.ready() && self.force_mask & 2 != 0)
-                    || (!was_ready && self.ready() && self.force_mask & 1 != 0)
-                {
-                    self.irq = true;
-                }
+                self.ready_transition(was_ready);
             }
             _ => {}
         }
@@ -340,19 +357,38 @@ impl Controller {
         self.transfer = Transfer::Idle;
         self.movement = Movement::Complete;
         self.drq = false;
-        self.irq = true;
+        self.set_pending_irq(true);
     }
     fn command(&mut self, cmd: u8) {
         if cmd & 0xf0 == 0xd0 {
-            self.finish(0);
+            if self.transfer == Transfer::Idle {
+                self.type_one = true;
+                self.status = 0;
+            } else {
+                self.status &= !1;
+            }
+            // Cancel without normal completion, preserving issued steps and
+            // committed sectors but dropping every staged/pending operation.
+            self.transfer = Transfer::Idle;
+            self.movement = Movement::Complete;
+            self.next_event = u64::MAX;
+            self.drq = false;
+            self.write_serviced = false;
             self.force_mask = cmd & 7;
-            self.irq = cmd & 8 != 0;
+            // Adopt pinned openMSX's D0 command-boundary release policy. The
+            // precise electrical release edge has not been measured.
+            if cmd == 0xd0 {
+                self.immediate_irq = false;
+            } else if cmd & 8 != 0 {
+                self.immediate_irq = true;
+            }
+            self.set_pending_irq(false);
             return;
         }
         if self.transfer != Transfer::Idle {
             return;
         }
-        self.irq = false;
+        self.set_pending_irq(false);
         self.drq = false;
         self.force_mask = 0;
         self.type_one = cmd & 0x80 == 0;
@@ -617,7 +653,7 @@ impl Controller {
     pub fn tick(&mut self, cycles: u32) {
         let end = self.clock + u64::from(cycles) * CLOCK_SCALE;
         if self.force_mask & 4 != 0 && end / REVOLUTION > self.clock / REVOLUTION && self.ready() {
-            self.irq = true;
+            self.set_pending_irq(true);
         }
         // Visit absolute fractional deadlines in chronological order, including
         // phase transitions inside one large CPU tick.

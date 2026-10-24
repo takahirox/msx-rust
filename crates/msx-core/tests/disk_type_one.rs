@@ -22,12 +22,22 @@ fn seek(f: &mut Controller, track: u8) {
     f.tick(6_000_000);
 }
 fn signals(f: &mut Controller, track: u8, busy: bool, zero: bool, irq: bool) {
+    signals_with_latch(f, track, busy, zero, irq, false);
+}
+fn signals_with_latch(
+    f: &mut Controller,
+    track: u8,
+    busy: bool,
+    zero: bool,
+    irq: bool,
+    latched: bool,
+) {
     assert_eq!(f.read(1), track);
     assert!(!f.drq);
     assert_eq!(f.irq, irq);
     assert_eq!(f.read(7), if irq { 0x80 } else { 0 });
     assert_eq!(f.read(0) & 0x15, u8::from(busy) | if zero { 4 } else { 0 });
-    assert!(!f.irq); // Status acknowledges; the signal latch does not.
+    assert_eq!(f.irq, latched); // Status acknowledges only ordinary IRQ.
 }
 fn byte_ready(f: &mut Controller) {
     for _ in 0..45_100 {
@@ -175,9 +185,23 @@ fn force_interrupt_retains_issued_steps_and_never_resumes() {
             let track = if outward { 3 } else { 2 };
             assert_eq!(f.track, track);
             f.write(0, command);
-            signals(&mut f, track, false, false, command == 0xd8);
+            signals_with_latch(
+                &mut f,
+                track,
+                false,
+                false,
+                command == 0xd8,
+                command == 0xd8,
+            );
             f.tick(u32::MAX);
-            signals(&mut f, track, false, false, false);
+            signals_with_latch(
+                &mut f,
+                track,
+                false,
+                false,
+                command == 0xd8,
+                command == 0xd8,
+            );
             read_position(&mut f, track);
         }
     }

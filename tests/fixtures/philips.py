@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57/#59; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57/#59/#61; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -135,8 +135,9 @@ record(0x9002, 0x7fff, 0xff) # Active-low IRQ and DRQ both inactive.
 value(0x7ff8, 0xd8)
 record(0x9003, 0x7ff9, 2)
 record(0x9004, 0x7fff, 0xbf) # Immediate IRQ, no DRQ.
-record(0x9005, 0x7ff8, 0, 0x11) # Not BUSY; acknowledge IRQ.
-record(0x9006, 0x7fff, 0xff)
+record(0x9005, 0x7ff8, 0, 0x11) # Not BUSY; D8 remains latched.
+record(0x9006, 0x7fff, 0xbf)
+value(0x7ff8, 0xd0) # Explicitly release immediate IRQ.
 q.emit(0x11, 0xff, 0xff)
 q.label('delay'); q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'delay')
 record(0x9007, 0x7ff9, 2) # Future pulses must remain canceled.
@@ -256,6 +257,7 @@ masked_record(0x9004, 0x7ff8, 0x81, 0x91)
 value(0x7ff8, 0xd8)
 masked_record(0x9005, 0x7fff, 0xbf)
 masked_record(0x9006, 0x7ff8, 0x80, 0x91)
+value(0x7ff8, 0xd0) # Status cannot acknowledge D8.
 paint(0xff) # White checkpoint: browser/native host inserts media only now.
 value(0x7ffd, 0x80)
 q.label('insert'); load(0x7ff8); q.emit(0xcb, 0x7f); q.jump(0xc2, 'insert')
@@ -414,3 +416,77 @@ loader = [0xaf, 0x01, 0xf8, 2, 0x11, 1, 0, 0x21, 0, 0xc2, 0xb7,
 weave_clock = clock_probe(0xc200, False)
 assert len(weave_clock) <= 512
 save('philips-clock-weave', [(0, loader), (510, list(b'WV')), (512, weave_clock)])
+
+# Issue #61: original Type-IV register trace. No production helpers/oracles.
+# The CPU checks each byte before saving the trace to sector 9; all other bytes
+# must survive, including an explicitly canceled initial write to sector 6.
+def force_probe(base, philips):
+    c = Z80(base)
+    trace = 0
+    def ld(address): c.emit(0x3a, address & 255, address >> 8)
+    def st(address): c.emit(0x32, address & 255, address >> 8)
+    def val(address, byte): c.emit(0x3e, byte); st(address)
+    def cmd(byte): val(0x7ff8, byte)
+    def record(register, expected, mask=255):
+        nonlocal trace
+        ld(register)
+        if mask != 255: c.emit(0xe6, mask)
+        st(0x9000+trace); c.emit(0xfe, expected); c.jump(0xc2, 'fail')
+        trace += 1
+    def signal(active): record(0x7fff, (0xbf if active else 0xff) if philips else (0x80 if active else 0))
+    def status(byte, type_one=False): record(0x7ff8, byte, 0xfd if type_one else 255)
+    def poll(label, drq=False):
+        mask = (0x80 if drq else 0x40) if philips else (0x40 if drq else 0x80)
+        c.emit(0x11, 0xff, 0xff)
+        c.label(label); ld(0x7fff); c.emit(0xe6, mask)
+        c.jump(0xca if philips else 0xc2, label+'_done')
+        c.emit(0x1b, 0x7a, 0xb3); c.jump(0xc2, label); c.jump(0xc3, 'fail')
+        c.label(label+'_done')
+    val(0x7ffd, 0x80 if philips else 0x81); val(0x7ffc, 0); val(0x7ff9, 0)
+    # Fill the complete export sector before recording independently checked bytes.
+    val(0x9000, 0x35)
+    c.emit(0x21, 0, 0x90, 0x11, 1, 0x90, 0x01, 0xff, 1, 0xed, 0xb0)
+    val(0x7ffa, 3); cmd(0x80); poll('arrival', True)
+    c.emit(0x06, 0); c.label('overrun'); c.emit(0x10, 0xfe) # 256 DJNZ, >30 bytes
+    status(7)
+    cmd(0xd8); status(4); signal(True); status(4); signal(True)
+    cmd(0x80); status(1); signal(True) # accepted ordinary command keeps D8
+    cmd(0xd1); status(0); signal(True) # another nonzero Type IV keeps D8
+    cmd(0xd0); status(4, True); signal(False)
+    cmd(0xd8); signal(True); cmd(0xd0); status(4, True); signal(False)
+    cmd(0xd8); cmd(0xd0); cmd(0x80); signal(False); cmd(0xd0); status(0)
+    cmd(0xd7); signal(False)
+    val(0x7ffd, 0 if philips else 1); signal(True); status(0x84, True); signal(False)
+    val(0x7ffd, 0 if philips else 1); signal(False) # unchanged READY
+    val(0x7ffd, 0x80 if philips else 0x81); signal(True); status(4, True); signal(False)
+    poll('index1'); signal(True); status(4, True); signal(False)
+    poll('index2'); signal(True); status(4, True); signal(False)
+    cmd(0x00); status(4, True); signal(False) # ordinary completion, disarms D7
+    val(0x7ffd, 0 if philips else 1); signal(False)
+    val(0x7ffd, 0x80 if philips else 0x81); signal(False)
+    # >one revolution; disarmed index events cannot resurrect IRQ.
+    c.emit(0x11, 0xff, 0xff)
+    c.label('elapsed'); c.emit(0x1b, 0x7a, 0xb3); c.jump(0xc2, 'elapsed')
+    signal(False)
+    val(0x7ffa, 6); cmd(0xa0); poll('partial', True); val(0x7ffb, 0x61)
+    cmd(0xd0); status(0); signal(False)
+    val(0x7ffa, 9); cmd(0xa0)
+    c.emit(0x21, 0, 0x90, 0x01, 0, 2)
+    c.label('write'); ld(0x7fff); c.emit(0xe6, 0x80 if philips else 0x40)
+    c.jump(0xc2 if philips else 0xca, 'write')
+    c.emit(0x7e); st(0x7ffb)
+    c.emit(0x23, 0x0b, 0x78, 0xb1); c.jump(0xc2, 'write')
+    wait_complete(c, 'complete'); status(0)
+    val(0xc061, 0xa5); c.emit(0x3e, 0xf2); c.jump(0xc3, 'paint')
+    c.label('fail'); val(0xc061, 0xee); c.emit(0x3e, 0xf6)
+    c.label('paint'); c.emit(0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99,
+        0xaf, 0xd3, 0x99, 0x3e, 0x80, 0xd3, 0x99,
+        0x3e, 0x40, 0xd3, 0x99, 0x3e, 0x81, 0xd3, 0x99)
+    c.label('halt'); c.emit(0x76); c.jump(0xc3, 'halt')
+    return c.done()
+
+save('philips-force', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x400, force_probe(0x4400, True))])
+force_loader = loader.copy(); force_loader[3] = 3 # load three sectors of code
+weave_force = force_probe(0xc200, False)
+assert len(weave_force) <= 1536
+save('philips-force-weave', [(0, force_loader), (510, list(b'WV')), (512, weave_force)])
