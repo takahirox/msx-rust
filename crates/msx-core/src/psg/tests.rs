@@ -129,3 +129,70 @@ fn scc_pcm_matches_clock_and_dac_oracle_across_irregular_tick_partitions() {
         }
     }
 }
+
+#[test]
+fn fm_mixing_preserves_abi_disabled_pcm_and_long_irregular_partitions() {
+    use crate::ym2413::Ym2413;
+    fn chip() -> Ym2413 {
+        let mut fm = Ym2413::default();
+        for (r, v) in [0x21, 0x21, 0x3f, 0, 0, 0xf0, 0, 0x0f]
+            .into_iter()
+            .enumerate()
+            .map(|(r, v)| (r as u8, v))
+            .chain([(0x30, 0), (0x10, 0x22), (0x20, 0x19)])
+        {
+            fm.select(r);
+            fm.tick(72);
+            fm.write(v);
+            fm.tick(144);
+        }
+        fm
+    }
+    fn psg() -> Psg {
+        let mut p = Psg::default();
+        for (r, v) in [(0, 100), (7, 0x3e), (8, 15)] {
+            p.select(r);
+            p.write(v);
+        }
+        p
+    }
+    let mut one = psg();
+    let mut split = psg();
+    let mut f1 = chip();
+    let mut f2 = f1.clone();
+    let mut old = psg();
+    let mut absent = psg();
+    let mut zero = Ym2413::default();
+    let mut silent_fm = psg();
+    let total = 3_579_545 * 3 + 87;
+    one.tick_with_expansions(total, None, Some(&mut f1));
+    old.tick(total);
+    absent.tick_with_expansions(total, None, None);
+    silent_fm.tick_with_expansions(total, None, Some(&mut zero));
+    assert_eq!(old.samples, absent.samples);
+    assert_eq!(old.samples, silent_fm.samples);
+    let mut left = total;
+    let mut n = 1;
+    while left > 0 {
+        let part = left.min(n);
+        split.tick_with_expansions(part, None, Some(&mut f2));
+        left -= part;
+        n = n % 10007 + 1;
+    }
+    assert_eq!(one.samples, split.samples);
+    assert_eq!(
+        one.samples.len(),
+        (u64::from(total) * 44100 / 3_579_545) as usize
+    );
+    assert!(one.samples.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+    for (mixed, psg) in one.samples.iter().zip(&old.samples) {
+        assert!((mixed - psg).abs() <= 0.016);
+    }
+    assert!(one
+        .samples
+        .iter()
+        .zip(old.samples)
+        .any(|(a, b)| (a - b).abs() > 0.01));
+    assert_eq!(f1.clocks(), f2.clocks());
+    assert_eq!(f1.internal_samples(), f2.internal_samples());
+}

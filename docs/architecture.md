@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-`msx-core` owns the CPU, address bus, VDP, PSG, SCC, firmware, line editor and BASIC.
+`msx-core` owns the CPU, address bus, VDP, PSG, SCC, optional YM2413, firmware, line editor and BASIC.
 It is ordinary Rust using the standard library with zero crate dependencies.
 `msx-wasm` exports a small C-style ABI for frames, pixels, samples, keyboard events,
 ROM staging and errors. JavaScript owns browser APIs only. All ROM generators are
@@ -10,7 +10,7 @@ ordinary Rust functions, with no assembler, downloaded artifact, or external ROM
 needed to build or boot.
 
 `Machine::step` executes a Z80 instruction and advances VDP (including commands),
-PSG, SCC, FDC and, on MSX2, RTC by its elapsed T-states including fetch waits.
+PSG, SCC, optional YM2413, FDC and, on MSX2, RTC by its elapsed T-states including fetch waits.
 `Machine::frame` preserves instruction overshoot between calls and runs
 228 × 262 T-states per NTSC frame (MSX2 PAL uses 313 lines), generating roughly 736 audio samples. The VDP renders
 active scanlines and raises VBlank after 192 or 212 lines. Interrupt requests remain asserted
@@ -260,3 +260,11 @@ ROMless Snatcher/SD Snatcher SCC-I profiles explicitly replace slot 1 with banke
 system firmware and independently installed slot-2 disk interface. The fifth wave
 is independent in plus mode. See [SCC-I decoding, reset, provenance and independent
 CPU disk fixtures](scc.md#romless-snatcher-and-sd-snatcher-scc-i).
+
+## MSX-MUSIC
+
+The optional internal MSX2 profile has independent I/O and firmware visibility.
+The YM2413 advances at CPU clock/72 and joins the existing PSG-owned rational
+44.1 kHz sample clock; its current output is held between internal samples.
+No frame-boundary phase resets or secondary audio queues are introduced.
+See [profile, instruction timing and adaptation limits](msx-music.md).

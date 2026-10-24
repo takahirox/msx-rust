@@ -37,11 +37,12 @@ The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 original firmware, cartridge, disk and CAS fixtures from Rust source. It also
 copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
 It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **38 files**:
+The complete deployable inventory is **41 files**:
 
 - `index.html`, `style.css`, `app.js`, `saves.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
+- `music-diagnostic-firmware.rom`, `music-test-cartridge.rom`, `emu2413-LICENSE.txt` (original diagnostics and MIT synthesis adaptation; [provenance](msx-music.md#synthesis-and-adaptation-audit))
 - `cassette-test-cartridge.rom`, `cassette-test.cas` (original Z80 loader and synthetic CAS; [provenance](cassette.md#references-and-original-fixtures))
 - `weave-disk.rom`, `weave-disk-demo.dsk`
 - `scc-test-cartridge.rom`, `joystick-test-cartridge.rom`, `ram-mapper-test-cartridge.rom`
@@ -59,6 +60,8 @@ proprietary BIOS/BASIC or commercial games are shipped. The two third-party
 MSX1 demo games retain their own MIT licenses and z88dk runtime notice; see the
 [per-binary and asset redistribution audit](../demos/PROVENANCE.txt) and
 [pinned manifest](../demos/manifest.json). No npm packages are shipped.
+The YM2413 synthesis adaptation retains its upstream MIT notice in
+`emu2413-LICENSE.txt`; this must accompany redistributed native/Wasm binaries.
 The three unmodified official release binaries are also embedded in the core/Wasm, so automatic cartridge boot in either model needs no firmware network
 request or SourceForge access. All assets can be served locally without external
 network access; browser tests never download firmware at runtime.
@@ -71,7 +74,7 @@ License section from that release's `doc/cbios.txt`, with all copyright holders,
 redistribution conditions and disclaimer. Its binary redistribution condition requires
 these notices in accompanying materials; retain both records with the site and
 Wasm/ROM redistributions. C-BIOS remains separate from the repository's MIT license.
-No logo, BASIC, music or disk ROM is needed or distributed. The app links the notices
+No C-BIOS logo, BASIC, music or disk ROM is needed or distributed. The app links the notices
 and downloadable independent service-test cartridge under advanced options.
 `scripts/check-dist.mjs` rejects missing, empty or unexpected output files and checks
 Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes, unchanged

@@ -1,8 +1,8 @@
 # msx-rust
 
 An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
-keyboard and joystick input, Web Audio PSG, SCC and SCC-I sound, local ROM loading,
-local CAS playback, and a usable open-source BASIC environment. The core has no
+keyboard and joystick input, Web Audio PSG, SCC, SCC-I and optional MSX-MUSIC sound,
+local ROM loading, local CAS playback, and a usable open-source BASIC environment. The core has no
 third-party dependencies or browser APIs.
 
 **Demo target:** <https://takahirox.github.io/msx-rust/>. Publication and post-merge
@@ -163,6 +163,24 @@ firmware/OS software that is not bundled.
 See [exact geometry, slot/register wiring, boot/driver ABI, limitations, source,
 provenance and validation](docs/disks.md).
 
+## Optional MSX-MUSIC
+
+Under **ROMs & advanced system options → MSX-MUSIC**, explicitly install a
+separate local **16 KiB internal-profile firmware** image. It maps read-only in
+expanded slot **3-1**, 4000h–7FFFh. The clocked YM2413 uses write-only ports
+7Ch/7Dh and continues playing while the firmware is hidden. FM joins PSG/SCC in
+the existing 44.1 kHz mono stream; Enable audio is still required for playback.
+
+Installation/removal restarts the selected firmware while retaining cartridge/SRAM,
+disk interface, disk changes and cassette. Reset and firmware/cartridge changes
+retain installation and reset the chip. MSX1 retains it inactive; returning to
+MSX2 resets/reactivates it without changing the machine-generation definition.
+Local firmware stays private in this tab. No vendor FM BIOS is bundled or emulated
+through host shortcuts. The downloadable **diagnostic firmware fixture** and
+**FM test cartridge** are original MIT Z80 software, not vendor-compatible FM BIOS.
+FM-PAC banking/SRAM, MSX1 FM expansions and MSX-AUDIO are outside this profile.
+See [synthesis, timing, notices, fixture instructions and validation](docs/msx-music.md).
+
 ## MSX2
 
 Each fresh page load starts **MSX2** in original, independent **Weave BASIC**,
@@ -220,6 +238,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
 | Konami SCC-I sound cartridges | Explicit ROMless Snatcher/SD Snatcher profiles, 64 KiB banked volatile RAM, compatible/plus sound maps and five waveforms in slot 1; [details](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i) |
+| Optional MSX2 MSX-MUSIC | Internal-style YM2413, nine melodic or six melodic/five percussion voices, separate local 16 KiB firmware in 3-1; [profile and limits](docs/msx-music.md) |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, two standard digital PSG joysticks; connector 1: arrows + Z/X, connector 2: I/K/J/L + N/M |
 | Cassette | Read-only MSX CAS reconstruction at 1200/2400 baud, PSG R14.7 input, active-low PPI C4 motor, rewind/eject; [policies and limits](docs/cassette.md) |
@@ -234,7 +253,7 @@ VDP access contention, and undocumented CPU silicon quirks are not accurately
 modeled. Sprite status at raster/off-screen edges and unusual combined
 VDP modes are not compatibility guarantees. Raw disk images and the
 [Philips disk interface](docs/disks.md) are supported. Cassette recording and custom
-waveforms, expanded modern SCC cartridges and FM audio remain unsupported. MSX2 coverage and optional peripheral limits
+waveforms, expanded modern SCC cartridges and FM-PAC/MSX-AUDIO remain unsupported. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
 with classic SCC audio, ASCII8/ASCII16 2/8 KiB SRAM variants and the 384 KiB
 R-Type layout are supported. Other specialized mappers and Game Master 2
