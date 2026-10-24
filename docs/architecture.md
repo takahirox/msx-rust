@@ -101,8 +101,13 @@ and signed arithmetic independently of the decoder's bitwise overflow calculatio
 Other vectors exercise alternate registers, calls/stack, conditional timing, all
 prefix families, RRD/RLD, logic parity, INC/DEC, HALT refresh, NMI/RETN and IM 0/1/2.
 
-Not covered by this suite: every possible state for every opcode, undocumented WZ/Q
-behavior, silicon-specific flags, access-phase synchronization and contention.
+The shared CPU tracks WZ/MEMPTR using a fixed Zilog NMOS-compatible profile.
+`BIT b,(HL)` takes F3/F5 from WZ; register and indexed BIT retain their respective
+operand/address sources. See the [complete update/preservation table, initialization
+policy, evidence and original sequence tests](cpu-wz.md).
+
+Not covered by this suite: every possible state for every opcode, Q-dependent
+behavior, other silicon-specific flags, access-phase synchronization and contention.
 No third-party
 ZEX/Fuse corpus or physical-machine differential test has been run. The supplied-ROM
 integration example also boots an unmodified local C-BIOS and then checks our
