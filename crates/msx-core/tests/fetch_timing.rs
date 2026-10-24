@@ -152,23 +152,23 @@ fn psg_samples_and_scc_phase_follow_elapsed_fetch_time() {
 fn msx2_command_engine_receives_fetch_wait_time() {
     let mut m = machine(Model::Msx2);
     let v = &mut m.hardware.vdp;
-    for (r, value) in [(0, 6), (1, 0x40), (40, 3), (42, 1), (44, 3), (46, 0x80)] {
+    for (r, value) in [(0, 6), (1, 0), (40, 3), (42, 1), (44, 3), (46, 0x80)] {
         v.set_register(r, value);
     }
-    // LMMV writes one pixel per 8 T. Five NOPs take 25 T, enough for three.
-    // Advancing devices by bare 4-T NOP counts would miss the final pixel.
-    step(&mut m, 5);
-    assert_eq!(m.hardware.vdp.vram[0], 0);
-    step(&mut m, 5);
-    assert_eq!(m.hardware.vdp.vram[0], 0x30);
-    step(&mut m, 5);
-    assert_eq!(m.hardware.vdp.vram[0], 0x30);
-    step(&mut m, 5);
-    assert_eq!(m.hardware.vdp.vram[0], 0x33);
-    step(&mut m, 5);
-    assert_eq!(m.hardware.vdp.vram[1], 0x30);
-    m.hardware.vdp.set_register(15, 2);
-    assert_eq!(m.hardware.vdp.read_status() & 1, 0);
+    // Selected blank-display profile: writes at master clocks 114, 218, 314.
+    // Eleven NOPs take 55 T including fetch waits; bare 4-T counts give 44 T.
+    for i in 1..=11 {
+        step(&mut m, 5);
+        let expected = match i {
+            1..=3 => [0, 0],
+            4..=7 => [0x30, 0],
+            8..=10 => [0x33, 0],
+            _ => [0x33, 0x30],
+        };
+        assert_eq!(&m.hardware.vdp.vram[..2], &expected);
+        m.hardware.vdp.set_register(15, 2);
+        assert_eq!(m.hardware.vdp.read_status() & 1, u8::from(i < 11));
+    }
 }
 
 #[test]

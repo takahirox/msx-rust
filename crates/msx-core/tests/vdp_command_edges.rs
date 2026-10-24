@@ -186,7 +186,7 @@ fn rectangles(code: u8) {
                             put(&mut expected, mode, x(dx), y(dy), value);
                         }
                     }
-                    v.tick(8);
+                    v.tick(if matches!(code, 8 | 9) { 0 } else { 8 });
                     if code == 10 {
                         assert_eq!(status(&mut v, 2) & 0x81, 0x81);
                         // Leave the last read pending as well: neither CE nor
@@ -202,6 +202,9 @@ fn rectangles(code: u8) {
                         assert_eq!(status(&mut v, 2) & 0x81, 0x81);
                         same_vram(&v.vram, &saved);
                     }
+                }
+                if matches!(code, 8 | 9) {
+                    v.tick(total as u32 * 80);
                 }
                 assert_eq!(
                     status(&mut v, 2) & 0x81,
@@ -258,7 +261,7 @@ fn reverse_top_preserves_wrapped_sentinel() {
         reg(&mut v, 44, 3);
         reg(&mut v, 45, 8);
         reg(&mut v, 46, 0x80);
-        v.tick(24); // Enough for the defective engine to corrupt rows 1023/1022.
+        v.tick(80); // Enough for a defective engine to corrupt wrapped rows.
         same_vram(&v.vram, &expected);
         assert_eq!(&v.registers[38..40], &[255, 3]);
         assert_eq!(&v.registers[42..44], &[2, 0]);
@@ -453,7 +456,11 @@ fn live_drawing(code: u8) {
                     } else {
                         &[19][..]
                     } {
-                        v.tick(*cycles);
+                        v.tick(if code == 8 { cycles * 2 } else { *cycles });
+                    }
+                    if code == 8 {
+                        // T=45: two writes, independent of bitmap layout.
+                        v.tick(7);
                     }
                     color_write(&mut v, indirect, 0);
                     assert_eq!(status(&mut v, 2) & 0x81, 1);
@@ -463,9 +470,13 @@ fn live_drawing(code: u8) {
                     } else {
                         &[10][..]
                     } {
-                        v.tick(*cycles);
+                        v.tick(if code == 8 { cycles * 2 } else { *cycles });
                     }
-                    // The 5 accumulated T-states must survive both writes.
+                    if code == 8 {
+                        // T=67: third write used the zero color.
+                        v.tick(2);
+                    }
+                    // Pending work must survive both color writes.
                     color_write(&mut v, !indirect, 0xe3);
                     assert_eq!(status(&mut v, 2) & 0x81, 1);
                     assert_eq!(&v.registers[32..44], coordinates);
@@ -474,7 +485,7 @@ fn live_drawing(code: u8) {
                     } else {
                         &[35][..]
                     } {
-                        v.tick(*cycles);
+                        v.tick(if code == 8 { cycles * 8 } else { *cycles });
                     }
                     for i in 0..8 {
                         let (x, y) = if code == 7 {

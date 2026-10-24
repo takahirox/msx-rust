@@ -32,6 +32,7 @@ pub struct Vdp {
     statuses: [u8; 10],
     palette_latch: Option<u8>,
     command: Option<Command>,
+    /// CPU T-states accumulated by commands retaining eight-T-state work units.
     command_cycles: u32,
     pub pixels: Vec<u8>,
     pub status: u8,
@@ -281,6 +282,9 @@ impl Vdp {
             let step = remaining
                 .min(u64::from(1368 - self.cycles))
                 .min(u64::from(field_end - self.field_clocks)) as u32;
+            // Service phased bitmap accesses before rendering this interval.
+            // The next interval selects the new line/field service grid.
+            self.tick_bitmap_command(step);
             let next = self.cycles + step;
             // Compare only a future edge, never the level of the polling pulse.
             // No cached event survives an R0/R19/R23 retargeting write.

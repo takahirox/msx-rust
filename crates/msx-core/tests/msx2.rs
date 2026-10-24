@@ -275,11 +275,11 @@ fn commands_are_timed_fill_copy_logic_line_search_point_and_stop() {
     setup(&mut v, 0, 0, 4, 1, 3, 0x80);
     assert_eq!(status(&mut v, 2) & 1, 1);
     assert_eq!(v.vram[0], 0);
-    v.tick(7);
+    v.tick(23);
     assert_eq!(v.vram[0], 0);
     v.tick(1);
     assert_eq!(v.vram[0], 0x30);
-    v.tick(24);
+    finish(&mut v);
     assert_eq!(status(&mut v, 2) & 1, 0);
     assert_eq!(&v.vram[..2], &[0x33, 0x33]);
     word(&mut v, 32, 0);
@@ -1054,7 +1054,7 @@ fn live_color_stop_replacement_and_reset_discard_command_state() {
     let v = &mut m.hardware.vdp;
     reg(v, 0, 6);
     setup(v, 0, 0, 16, 2, 1, 0x80);
-    v.tick(19); // Two pixels completed and three T-states accumulated.
+    v.tick(37); // Two blank-display writes completed; next read is pending.
     reg(v, 17, 0x80 | 44);
     v.write_indirect(2);
     reg(v, 46, 0); // STOP, then another color write cannot resume work.

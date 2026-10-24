@@ -38,6 +38,11 @@ fn main() {
     )
     .unwrap();
     fs::write(
+        format!("{dir}/command-timing-test-cartridge.rom"),
+        msx_core::firmware::command_timing_cartridge(),
+    )
+    .unwrap();
+    fs::write(
         format!("{dir}/fh-test-cartridge.rom"),
         msx_core::firmware::fh_test_cartridge(),
     )
