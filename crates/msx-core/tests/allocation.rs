@@ -240,3 +240,29 @@ fn scci_allocation_failure_preserves_session_and_reset_remove_do_not_allocate() 
         }
     }
 }
+
+#[test]
+fn cassette_metadata_failure_and_transport_operations_are_transactional() {
+    let mut m = Machine::default();
+    m.hardware
+        .cassette
+        .mount(firmware::cassette_test_image(), 2400)
+        .unwrap();
+    m.hardware.cassette.tick(7_159_263, true);
+    let position = m.hardware.cassette.position_cycles();
+    m.cpu.pc = 0x4321;
+    let incoming = firmware::cassette_test_image();
+    // Vec<Block>'s initial four-entry reservation: two usize + three u64 fields.
+    FAIL_SIZE.with(|s| s.set(4 * (2 * std::mem::size_of::<usize>() + 3 * 8)));
+    let result = m.hardware.cassette.mount(incoming, 1200);
+    FAIL_SIZE.with(|s| s.set(0));
+    assert!(result.unwrap_err().contains("metadata"));
+    assert_eq!(m.hardware.cassette.position_cycles(), position);
+    assert_eq!(m.hardware.cassette.rate(), 2400);
+    assert_eq!(m.cpu.pc, 0x4321);
+    DENY.with(|s| s.set(true));
+    m.reset();
+    m.hardware.cassette.rewind();
+    m.hardware.cassette.eject();
+    DENY.with(|s| s.set(false));
+}

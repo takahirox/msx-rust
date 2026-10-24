@@ -22,6 +22,16 @@ fn main() {
         msx_core::firmware::joystick_test_cartridge(),
     )
     .unwrap();
+    fs::write(
+        format!("{dir}/cassette-test-cartridge.rom"),
+        msx_core::firmware::cassette_test_cartridge(),
+    )
+    .unwrap();
+    fs::write(
+        format!("{dir}/cassette-test.cas"),
+        msx_core::firmware::cassette_test_image(),
+    )
+    .unwrap();
     for mapper in [
         msx_core::Mapper::Ascii8Sram2,
         msx_core::Mapper::Ascii8Sram8,

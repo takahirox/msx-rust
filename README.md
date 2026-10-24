@@ -2,8 +2,8 @@
 
 An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
 keyboard and joystick input, Web Audio PSG, SCC and SCC-I sound, local ROM loading,
-and a usable open-source BASIC environment. The core has no third-party dependencies
-or browser APIs.
+local CAS playback, and a usable open-source BASIC environment. The core has no
+third-party dependencies or browser APIs.
 
 **Demo target:** <https://takahirox.github.io/msx-rust/>. Publication and post-merge
 verification are pending; this URL is a deployment target, not a claim of a live site.
@@ -105,6 +105,24 @@ gameplay assertions. They do not establish game completion, full audio accuracy,
 physical hardware behavior or MSX2 backward compatibility for these MSX1 games.
 Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
 
+## Cassette playback
+
+**Open CAS** mounts a local MSX CAS image (up to 16 MiB) at **1200 baud** by default;
+select **2400 baud** before importing for that rate. Software receives standard
+clocked bytes through PSG R14.7 and controls the active-low PPI motor. Status shows
+mounted media, rate, motor, playback/end state and position. **Rewind tape** resets
+tape position; **Eject tape** removes it. Neither restarts execution. Pause freezes
+playback. Reset and firmware/model changes retain the tape and position, applying
+the reset PPI motor latch (enabled); rewind explicitly to start again.
+
+Local bytes stay private in this tab and are never uploaded or stored. Standard
+read-only CAS only: recording, WAV/TSX, exotic loaders and audible monitoring are
+deferred. C-BIOS and Weave BASIC do not gain a complete BASIC tape environment;
+compatible firmware/software is still required. No load command or payload is
+injected. Original MIT cartridge/CAS diagnostics are linked below the display;
+they validate both models/rates and exact recovered bytes, not commercial-title
+compatibility. See [format, reconstruction policies, wiring, fixtures and limits](docs/cassette.md).
+
 ## Floppy disks
 
 **Open DSK → Boot disk** mounts a private raw 360/720 KiB image in drive A: and
@@ -204,6 +222,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | Konami SCC-I sound cartridges | Explicit ROMless Snatcher/SD Snatcher profiles, 64 KiB banked volatile RAM, compatible/plus sound maps and five waveforms in slot 1; [details](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i) |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, two standard digital PSG joysticks; connector 1: arrows + Z/X, connector 2: I/K/J/L + N/M |
+| Cassette | Read-only MSX CAS reconstruction at 1200/2400 baud, PSG R14.7 input, active-low PPI C4 motor, rewind/eject; [policies and limits](docs/cassette.md) |
 | Browser | Frame accumulator at approximately 59.92 Hz, bounded catch-up, key release on focus loss, Canvas, user-activated Web Audio, local file pickers |
 
 This is an initial implementation, not a claim of universal MSX software compatibility.
@@ -214,8 +233,8 @@ Instruction-level timing is used; individual bus phases, analog video/overscan,
 VDP access contention, and undocumented CPU silicon quirks are not accurately
 modeled. Sprite status at raster/off-screen edges and unusual combined
 VDP modes are not compatibility guarantees. Raw disk images and the
-[Philips disk interface](docs/disks.md) are supported. Tape drives, expanded
-modern SCC cartridges and FM audio remain unsupported. MSX2 coverage and optional peripheral limits
+[Philips disk interface](docs/disks.md) are supported. Cassette recording and custom
+waveforms, expanded modern SCC cartridges and FM audio remain unsupported. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
 with classic SCC audio, ASCII8/ASCII16 2/8 KiB SRAM variants and the 384 KiB
 R-Type layout are supported. Other specialized mappers and Game Master 2
@@ -395,8 +414,8 @@ connectors and keyboard keys.
 
 The core routes PSG R15 bit 6 to connector 1/2 and bits 4/5 to their respective
 pin-8 common lines. A high common returns six released inputs without erasing
-held state. R14 bits 6/7 remain 1/0. This emulator uses fixed R14-input/R15-output
-motherboard routing regardless of R7 direction bits; R7 readback and audio
+held state. R14 bit 6 remains high; bit 7 carries cassette input. This emulator uses fixed
+R14-input/R15-output motherboard routing regardless of R7 direction bits; R7 readback and audio
 controls are preserved. This compatibility policy is not a claim about universal
 discrete-AY electrical behavior. See [routing, references and limits](docs/architecture.md#standard-joysticks).
 

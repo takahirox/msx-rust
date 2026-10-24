@@ -30,14 +30,24 @@
       </div>
       <button id="fullscreen" aria-pressed="false" title="Expand the emulator; Escape exits">Fullscreen</button>
     </div>
-    <div class="disk-controls" role="group" aria-label="Drive A floppy disk">
-      <button id="open-dsk" disabled>Open DSK</button>
-      <input id="disk" type="file" accept=".dsk" aria-label="Open floppy DSK" hidden disabled>
-      <button id="boot-disk" disabled>Boot disk</button>
-      <button id="eject-disk" disabled>Eject disk</button>
-      <button id="export-disk" disabled>Export modified DSK</button>
-      <label><input id="disk-protected" type="checkbox" checked disabled> Read-only</label>
-      <span id="disk-status" role="status" aria-live="polite">Drive A: empty</span>
+    <div class="media-controls">
+      <div class="disk-controls" role="group" aria-label="Cassette playback">
+        <button id="open-cas" disabled>Open CAS</button>
+        <input id="tape" type="file" accept=".cas" aria-label="Open cassette CAS" hidden disabled>
+        <label>CAS rate <select id="tape-rate" disabled><option value="1200" selected>1200 baud</option><option value="2400">2400 baud</option></select></label>
+        <button id="rewind-tape" disabled>Rewind tape</button>
+        <button id="eject-tape" disabled>Eject tape</button>
+        <span id="tape-status" role="status" aria-live="polite">Cassette: empty</span>
+      </div>
+      <div class="disk-controls" role="group" aria-label="Drive A floppy disk">
+        <button id="open-dsk" disabled>Open DSK</button>
+        <input id="disk" type="file" accept=".dsk" aria-label="Open floppy DSK" hidden disabled>
+        <button id="boot-disk" disabled>Boot disk</button>
+        <button id="eject-disk" disabled>Eject disk</button>
+        <button id="export-disk" disabled>Export modified DSK</button>
+        <label><input id="disk-protected" type="checkbox" checked disabled> Read-only</label>
+        <span id="disk-status" role="status" aria-live="polite">Drive A: empty</span>
+      </div>
     </div>
     <div class="machine-state">
       <span id="status" role="status" aria-live="polite">Loading WebAssembly…</span>
@@ -50,6 +60,16 @@
       <button id="focus-screen" disabled>Click / tap to type</button>
       <span id="input-help">Physical keyboard required · Esc stops BASIC</span>
     </div>
+  </section>
+  <section class="disk-help" aria-label="Cassette help">
+    <p>Open a local MSX CAS (up to 16 MiB) at the selected rate. The software controls the motor;
+    Pause freezes playback. Mount, Rewind and Eject keep execution running. Reset keeps tape position.
+    Rate applies to the next import. Local tape bytes stay private in this tab.</p>
+    <p>Standard read-only playback only: no recording, WAV/TSX or exotic loaders. C-BIOS and Weave BASIC
+    do not provide a complete BASIC tape-loading environment. No load command is injected.
+    Original MIT diagnostics: <a href="cassette-test-cartridge.rom" download>loader cartridge</a> and
+    <a href="cassette-test.cas" download>matching CAS</a>. Open the cartridge, then the CAS; a green
+    display confirms execution of its recovered payload. Use Rewind and Reset to rerun.</p>
   </section>
   <section class="disk-help" aria-label="Disk help">
     <p><a href="weave-disk-demo.dsk" download>Download original bootable disk demo</a> (MIT).
