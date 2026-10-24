@@ -96,6 +96,32 @@ profile, not commercial-game compatibility. No checks are intentionally skipped;
 no required post-merge verification is specified. No push, PR, comment or merge
 was performed by this node.
 
+## Review correction: write holding-register sampling
+
+Validated on 2026-10-24 from checkpoint `5b7b97d`. DRQ acknowledgement now records
+service separately from the payload; the initial check and later scheduled
+consumption sample the current Data register. Repeated writes can replace that
+pending byte without advancing deadlines or supplying a future request. The two
+obsolete repeated-write expectations were corrected and the disk contract clarified.
+
+Before the fix, the new literal-timestamp regression reproduced `61h, 71h` in the
+completed image instead of `62h, 72h` after register overwrites at cycles 1947 and 5041.
+It now passes for both raw geometries and all three tick partitions, also checking
+that an overwrite after the initial latch cannot change byte 0, an unserviced next
+request still zero-fills, and media commits only at completion. All 16 Type-II
+tests and all 242 workspace Rust tests passed, with none failed or ignored.
+
+Passed: `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace --locked`, `./scripts/build.sh` with the documented ignored
+local linker wrapper, `node scripts/check-dist.mjs`, `npm ci`,
+`npx playwright install chromium`, `npm test` (146 passed in 12.6 minutes at both
+site roots, none failed or skipped), and `git diff --check`.
+The expected pre-fix regression failure was the only failed check in this revision.
+Reviewed the finding and complete revision diff against Issue #59; no blocking
+findings remain locally. Optional upstream runtime/hardware comparisons remain
+unperformed. No push or merge was performed.
+
 # Issue 57 WD2793 Type-II settling and rotational searches
 
 Source: [Correct WD2793 Type-II settling and rotational sector searches](https://github.com/takahirox/msx-rust/issues/57).

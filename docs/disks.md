@@ -353,11 +353,15 @@ a late read during the tail still returns it. Completion clears DRQ, clears BUSY
 and raises IRQ; Data retains its last value. Status reads acknowledge IRQ only.
 
 An initially unserviced write aborts at its separate check with LOST DATA and no
-media changes. Once the first byte is accepted, later unserviced positions become
+media changes. Once the first byte is latched, later unserviced positions become
 zero and LOST DATA latches while the sector continues. A late write supplies the
 currently asserted request; it cannot recover an earlier zero-filled position.
-Data accesses outside a pending write request update register readback but do not
-queue bytes. CPU service never shifts deadlines or completes/commits byte 512.
+Writing Data acknowledges DRQ but leaves the holding register writable: the initial
+check and each later consumption sample its current value. Repeated writes before
+that deadline replace the current byte without queuing future bytes. Writes after
+the initial check cannot replace the latched first byte; writes before the next
+DRQ do not service that future request. CPU service never shifts deadlines or
+completes/commits byte 512.
 LOST DATA survives normal completion, subsequent multi-record searches/transfers,
 and their RNF failure; a newly accepted ordinary command or reset clears it.
 Existing FORCE INTERRUPT status/latching behavior is unchanged and remains outside

@@ -540,7 +540,7 @@ fn initial_write_has_a_distinct_eight_byte_window_and_ignores_idle_data() {
             if late {
                 partition_at(&mut f, &mut now, 1_947, mode);
                 f.write(3, 0x61); // last integer cycle before initial check
-                f.write(3, 0x62); // a repeated access cannot overwrite accepted data
+                f.write(3, 0x62); // overwrite the holding register before the check
                 assert_eq!(f.read(3), 0x62); // read during write cannot acknowledge future requests
             }
             partition_at(&mut f, &mut now, 1_948, mode);
@@ -556,7 +556,7 @@ fn initial_write_has_a_distinct_eight_byte_window_and_ignores_idle_data() {
                 state(&mut f, 4, true, false);
                 let mut expected = original;
                 expected[..512].fill(0);
-                expected[0] = 0x61;
+                expected[0] = 0x62;
                 assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
                 assert!(f.disk.as_ref().unwrap().dirty);
             } else {
@@ -598,9 +598,9 @@ fn later_write_underruns_zero_fill_missed_positions_and_resume_without_moving_de
                             mode,
                         );
                         let data = (i * 37 + 11) as u8;
-                        expected[i as usize] = data;
+                        expected[i as usize] = !data;
                         f.write(3, data);
-                        f.write(3, !data); // no extra service / overwrite after acknowledgement
+                        f.write(3, !data); // overwrite current data without queuing another byte
                         assert!(!f.drq);
                     }
                     assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
@@ -623,6 +623,52 @@ fn later_write_underruns_zero_fill_missed_positions_and_resume_without_moving_de
         }
     }
 }
+#[test]
+fn write_consumption_samples_the_current_holding_register_without_queuing_bytes() {
+    for size in [368_640, 737_280] {
+        for mode in 0..3 {
+            let mut f = patterned(size);
+            let original = f.disk.as_ref().unwrap().bytes().to_vec();
+            let mut expected = original.clone();
+            let mut now = 0;
+            f.write(0, 0xa0);
+            partition_at(&mut f, &mut now, 1_031, mode);
+            f.write(3, 0x61);
+            assert!(!f.drq);
+            partition_at(&mut f, &mut now, 1_947, mode);
+            f.write(3, 0x62); // last cycle before the initial check at ceil(17B)
+            assert_eq!(f.read(3), 0x62);
+            partition_at(&mut f, &mut now, 1_948, mode);
+            state(&mut f, 1, false, false);
+            f.write(3, 0x63); // already latched: cannot replace byte 0 or supply byte 1
+            partition_at(&mut f, &mut now, 5_039, mode);
+            assert!(!f.drq);
+            partition_at(&mut f, &mut now, 5_040, mode);
+            assert!(f.drq);
+            f.write(3, 0x71);
+            partition_at(&mut f, &mut now, 5_041, mode);
+            f.write(3, 0x72);
+            assert!(!f.drq);
+            partition_at(&mut f, &mut now, 5_154, mode);
+            assert_eq!(f.read(3), 0x72);
+            state(&mut f, 1, false, false);
+            partition_at(&mut f, &mut now, 5_155, mode); // ceil(45B): consume byte 1
+            state(&mut f, 3, false, true); // next request still needs its own service
+            partition_at(&mut f, &mut now, 5_270, mode); // ceil(46B): byte 2 missed
+            state(&mut f, 7, false, true);
+            assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+            partition_at(&mut f, &mut now, 64_031, mode);
+            state(&mut f, 4, true, false);
+            expected[..512].fill(0);
+            expected[0] = 0x62;
+            expected[1] = 0x72;
+            assert_eq!(&f.disk.as_ref().unwrap().bytes()[..2], &[0x62, 0x72]);
+            assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
+            assert!(f.disk.as_ref().unwrap().dirty);
+        }
+    }
+}
+
 #[test]
 fn write_service_at_a_missed_deadline_belongs_to_the_new_request() {
     let mut f = patterned(368_640);

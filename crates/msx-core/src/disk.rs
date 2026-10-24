@@ -113,7 +113,7 @@ pub struct Controller {
     write_sector: bool,
     compare_side: Option<u8>,
     index: usize,
-    supplied: Option<u8>,
+    write_serviced: bool,
     offset: usize,
     buffer: [u8; SECTOR_SIZE],
     multi: bool,
@@ -149,7 +149,7 @@ impl Default for Controller {
             write_sector: false,
             compare_side: None,
             index: 0,
-            supplied: None,
+            write_serviced: false,
             offset: 0,
             buffer: [0; SECTOR_SIZE],
             multi: false,
@@ -291,7 +291,7 @@ impl Controller {
             3 => {
                 self.data = value;
                 if self.drq && self.write_sector {
-                    self.supplied = Some(value);
+                    self.write_serviced = true;
                     self.drq = false;
                 }
             }
@@ -533,7 +533,7 @@ impl Controller {
             self.buffer
                 .copy_from_slice(&self.disk.as_ref().unwrap().bytes[offset..offset + SECTOR_SIZE]);
             self.index = 0;
-            self.supplied = None;
+            self.write_serviced = false;
             self.transfer = if self.write_sector {
                 Transfer::WriteRequest
             } else {
@@ -595,10 +595,14 @@ impl Controller {
     fn write_event(&mut self) {
         // A missed position is gone forever. A late CPU write services only
         // the request currently visible, and cannot repair earlier zeroes.
-        self.buffer[self.index] = self.supplied.take().unwrap_or_else(|| {
+        // DRQ acknowledgement records service; Data remains the holding
+        // register and can be overwritten until this scheduled consumption.
+        self.buffer[self.index] = if std::mem::take(&mut self.write_serviced) {
+            self.data
+        } else {
             self.status |= 4;
             0
-        });
+        };
         self.index += 1;
         if self.index == SECTOR_SIZE {
             self.drq = false;
@@ -648,8 +652,8 @@ impl Controller {
                     self.next_event += 8 * BYTE_TIME;
                 }
                 Transfer::WriteCheck => {
-                    if let Some(first) = self.supplied.take() {
-                        self.buffer[0] = first;
+                    if std::mem::take(&mut self.write_serviced) {
+                        self.buffer[0] = self.data;
                         self.index = 1;
                         self.transfer = Transfer::WriteLeadIn;
                         self.next_event += 27 * BYTE_TIME;
