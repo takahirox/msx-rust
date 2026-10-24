@@ -12,7 +12,8 @@ needed to build or boot.
 `Machine::step` executes a Z80 instruction and advances VDP (including commands),
 PSG, SCC, optional YM2413, FDC and, on MSX2, RTC by its elapsed T-states including fetch waits.
 `Machine::frame` preserves instruction overshoot between calls and runs
-228 × 262 T-states per NTSC frame (MSX2 PAL uses 313 lines), generating roughly 736 audio samples. The VDP renders
+the active VDP field budget: 59,736/71,364 T-states for progressive NTSC/PAL,
+or 59,850/71,250 for MSX2 interlace. The VDP renders
 active scanlines and raises VBlank after 192 or 212 lines. Interrupt requests remain asserted
 until status is read or the interrupt-enable bit is cleared. The CPU acknowledges
 IRQ after EI's following instruction; NMI is independently latched. IM 0 uses the
@@ -176,8 +177,10 @@ oscillator phase, MSX2 command completion and RTC rollover. It checks lifecycle
 transitions and NTSC/PAL frame overshoot accumulation. CPU `tstates`, returned
 cycles, device advancement and frame budgets all use the same elapsed time.
 Clocks remain 3,579,545 Hz for the CPU and 44,100 Hz for audio sampling; frame
-budgets remain 228 × 262 (NTSC) and 228 × 313 (MSX2 PAL). The Wasm frame-budget
-export and browser frame accumulator retain these budgets and clock rates.
+budgets are 228 × 262 (NTSC) and 228 × 313 (MSX2 PAL) for progressive video,
+and 59,850/71,250 T-states per interlaced field. The Wasm frame-budget export,
+Machine instruction debt and browser accumulator use the same active timing;
+see [field phases and the selected R9 fixation policy](msx2.md#field-timing-and-r9-fixation).
 
 The shared WD2793 [Type-I scheduler](disks.md) uses absolute fractional-cycle
 deadlines for 6/12/20/30 ms steps, 30 ms verification settling and a synthetic

@@ -129,8 +129,9 @@ fn bitmap_modes_pages_scroll_and_212_lines() {
     assert_eq!(rgb(&v, 255, 211), [255, 0, 0]);
     reg(&mut v, 9, 0x8c);
     v.vram[0] = 0x1c;
-    v.tick(228 * 262);
-    v.tick(228 * 262);
+    v.tick(59_850);
+    v.tick(59_850);
+    assert_eq!(v.frames, 2);
     assert_eq!(v.height(), 424);
     assert_eq!(rgb(&v, 0, 0), [255, 0, 0]);
     assert_eq!(rgb(&v, 0, 1), [0, 255, 255]);
@@ -206,7 +207,7 @@ fn text80_blink_table_ignores_low_r3_bits() {
     }
 }
 #[test]
-fn pal_to_ntsc_switch_keeps_frame_rendering_and_vblank_running() {
+fn pal_to_ntsc_switch_is_fixed_at_next_field_boundary() {
     for switch_line in [100, 261, 262, 300, 312] {
         let mut v = bitmap(6);
         reg(&mut v, 1, 0x60);
@@ -214,11 +215,9 @@ fn pal_to_ntsc_switch_keeps_frame_rendering_and_vblank_running() {
         v.tick(228 * switch_line);
         assert_eq!(v.frames, 0);
         reg(&mut v, 9, 0x80);
-        let remaining = if switch_line >= 262 {
-            1
-        } else {
-            262 - switch_line
-        };
+        // Selected fixation policy: finish this PAL field before adopting NTSC.
+        assert_eq!(v.frame_cycles(), 71_364);
+        let remaining = 313 - switch_line;
         v.tick(228 * (remaining - 1));
         assert_eq!(v.frames, 0);
         v.tick(228);
@@ -635,6 +634,7 @@ fn alternate_pages_fixed_sprite_colors_and_border_adjust_are_not_stale() {
     assert_eq!(rgb(&v, 0, 0), [255, 0, 0]);
     // Blue DAC values in direct color mode use four of the eight levels.
     reg(&mut v, 9, 0);
+    v.tick(59_736); // R9 page selection becomes active at the next boundary.
     upload(&mut v, 0x10000, &[1]);
     upload(&mut v, 0x10001, &[2]);
     v.render();

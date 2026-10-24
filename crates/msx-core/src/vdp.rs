@@ -40,7 +40,12 @@ pub struct Vdp {
     buffer: u8,
     /// Horizontal phase in 21.48 MHz master clocks (six per CPU T-state).
     cycles: u32,
+    /// Display-relative line; u16::MAX during the carried pre-display half-line.
     pub line: u16,
+    /// Field clock is independent of the continuous horizontal clock.
+    field_clocks: u32,
+    timing_started: bool,
+    active_r9: u8,
     pub frames: u64,
 }
 impl Default for Vdp {
@@ -95,6 +100,9 @@ impl Vdp {
             buffer: 0,
             cycles: 0,
             line: 0,
+            field_clocks: 0,
+            timing_started: false,
+            active_r9: 0,
             frames: 0,
         }
     }
@@ -260,9 +268,19 @@ impl Vdp {
     }
     pub fn tick(&mut self, cycles: u32) {
         self.tick_command(cycles);
+        if cycles == 0 {
+            return;
+        }
+        if !self.timing_started {
+            self.active_r9 = self.registers[9];
+            self.timing_started = true;
+        }
         let mut remaining = u64::from(cycles) * 6;
         while remaining != 0 {
-            let step = remaining.min(u64::from(1368 - self.cycles)) as u32;
+            let field_end = self.frame_cycles() as u32 * 6;
+            let step = remaining
+                .min(u64::from(1368 - self.cycles))
+                .min(u64::from(field_end - self.field_clocks)) as u32;
             let next = self.cycles + step;
             // Compare only a future edge, never the level of the polling pulse.
             // No cached event survives an R0/R19/R23 retargeting write.
@@ -275,28 +293,33 @@ impl Vdp {
                 self.statuses[1] |= 1;
             }
             self.cycles = next;
+            self.field_clocks += step;
             remaining -= u64::from(step);
-            if self.cycles != 1368 {
-                continue;
-            }
-            self.cycles = 0;
-            if self.line < self.visible_lines() as u16 {
-                self.render_line(self.line as usize);
-            }
-            self.line += 1;
-            if self.line == self.visible_lines() as u16 {
-                self.status |= 0x80;
-            }
-            // R9 can shorten a PAL frame after the NTSC boundary has passed.
-            if self.line
-                >= if self.msx2 && self.registers[9] & 2 != 0 {
-                    313
-                } else {
-                    262
+            if self.cycles == 1368 {
+                self.cycles = 0;
+                if self.line < self.visible_lines() as u16 {
+                    self.render_line(self.line as usize);
                 }
-            {
-                self.line = 0;
+                self.line = if self.line == u16::MAX {
+                    0
+                } else {
+                    self.line + 1
+                };
+                if self.line == self.visible_lines() as u16 {
+                    self.status |= 0x80;
+                }
+            }
+            if self.field_clocks == field_end {
+                self.field_clocks = 0;
                 self.frames += 1;
+                // Selected fixation policy, not measured silicon behavior. R9
+                // writes do not change elapsed time or interrupt latches.
+                self.active_r9 = self.registers[9];
+                // Rotate the VSYNC epoch to first-field display origin. The
+                // second field's extra half-line of top erase then delays its
+                // display origin to the next complete horizontal line. Never
+                // truncate a display line or reset horizontal phase here.
+                self.line = if self.cycles == 0 { 0 } else { u16::MAX };
             }
         }
     }
@@ -483,26 +506,32 @@ impl Vdp {
             256
         }
     }
+    fn display_r9(&self) -> u8 {
+        if !self.msx2 {
+            0
+        } else if self.timing_started {
+            self.active_r9
+        } else {
+            self.registers[9]
+        }
+    }
     fn visible_lines(&self) -> usize {
-        if self.msx2 && self.registers[9] & 0x80 != 0 {
+        if self.display_r9() & 0x80 != 0 {
             212
         } else {
             192
         }
     }
     pub fn height(&self) -> usize {
-        self.visible_lines()
-            * if self.msx2 && self.registers[9] & 8 != 0 {
-                2
-            } else {
-                1
-            }
+        self.visible_lines() * if self.display_r9() & 8 != 0 { 2 } else { 1 }
     }
+    /// CPU T-states per active VSYNC field (not display-origin spacing).
     pub fn frame_cycles(&self) -> i32 {
-        228 * if self.msx2 && self.registers[9] & 2 != 0 {
-            313
-        } else {
-            262
+        match self.display_r9() & 10 {
+            0 => 59_736,
+            2 => 71_364,
+            8 => 59_850,
+            _ => 71_250,
         }
     }
     pub fn set_register(&mut self, r: usize, value: u8) {
@@ -592,7 +621,8 @@ impl Vdp {
         self.vram[a] = (self.vram[a] & !(mask << shift)) | (v << shift);
     }
     fn render_v9938_line(&mut self, y: usize) {
-        let r = self.registers;
+        let mut r = self.registers;
+        r[9] = self.display_r9();
         let mode = self.mode();
         let width = self.width();
         let mut colors = [r[7] & 15; 512];

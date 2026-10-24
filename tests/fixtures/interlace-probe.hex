@@ -1,0 +1,20 @@
+# Original MIT Z80 port/status probe for Issue #71. Enter at 0100h.
+# Maps RAM, sets SCREEN 5 / 212 / IL+EO, uploads green/blue page rows,
+# sounds PSG A, polls S#2.EO and stores parity/count at C200/C201.
+# Every eight edges: NTSC IL -> PAL IL -> PAL -> NTSC -> repeat.
+# No proprietary firmware, emulator service calls or production timing helpers.
+f3 3e f0 d3 a8 3e ff 32 ff ff 31 00 f0 3e 06 d3
+99 3e 80 d3 99 3e 40 d3 99 3e 81 d3 99 3e 3f d3
+99 3e 82 d3 99 3e 02 d3 99 3e 88 d3 99 3e 8c d3
+99 3e 89 d3 99 3e 00 d3 99 3e 8e d3 99 3e 00 d3
+99 3e 40 d3 99 06 80 3e 22 d3 98 10 fc 3e 02 d3
+99 3e 8e d3 99 3e 00 d3 99 3e 40 d3 99 06 80 3e
+44 d3 98 10 fc 3e 00 d3 a0 3e 20 d3 a1 3e 01 d3
+a0 3e 00 d3 a1 3e 07 d3 a0 3e 3e d3 a1 3e 08 d3
+a0 3e 0f d3 a1 3e 02 d3 99 3e 8f d3 99 db 99 e6
+02 5f 16 00 db 99 e6 02 bb ca 94 01 5f 32 00 c2
+14 7a 32 01 c2 e6 07 c2 94 01 7a fe 08 ca c7 01
+fe 10 ca d2 01 fe 18 ca dd 01 16 00 3e 8c d3 99
+3e 89 d3 99 c3 94 01 3e 8e d3 99 3e 89 d3 99 c3
+94 01 3e 82 d3 99 3e 89 d3 99 c3 94 01 3e 80 d3
+99 3e 89 d3 99 c3 94 01

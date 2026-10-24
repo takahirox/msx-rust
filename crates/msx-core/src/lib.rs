@@ -687,6 +687,8 @@ impl Machine {
     }
     pub fn frame(&mut self) {
         self.hardware.psg.samples.clear();
+        // Snapshot the active field budget before CPU writes can queue a new
+        // R9 timing. Carry instruction overshoot across timing changes as well.
         self.frame_debt += self.hardware.vdp.frame_cycles();
         while self.frame_debt > 0 {
             let c = self.step();

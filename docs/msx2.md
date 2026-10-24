@@ -272,7 +272,7 @@ is unwired. Test acceleration and external clock pulse outputs are not modeled.
   SCREEN 4 and bitmap SCREEN 5–8, packed pixels, palette/direct color, 192/212
   lines, display pages, vertical scroll, display adjust and backdrop/blanking.
   Interlace weaves two fields into 384/424 rows; EO alternates display pages.
-  PAL/NTSC selection changes emulated frame length and browser pacing.
+  PAL/NTSC and IL selection change the [field budget and browser pacing](#field-timing-and-r9-fixation).
 - Mode-2 sprites: 8/16-pixel patterns, magnification, early clock, per-line colors,
   priority/color combination, ninth-sprite overflow, collision coordinates,
   sprite disable, SCREEN 6 tiling and SCREEN 8 fixed sprite colors.
@@ -353,10 +353,10 @@ moves both edges by minus four master clocks per unit. A right-shifted pulse
 can extend into the next line. Master clocks retain fractional CPU phases;
 each tick processes crossed matching edges and line boundaries independently
 of its partition size. Ports and CPU IRQ sampling still occur at instruction
-boundaries. Existing 262/313-line frame budgets, 192/212 visible lines, S#2 timing,
-command timing and rendering remain their existing approximations. Full vertical
-counter reconstruction, interlace half-lines and VRAM arbitration remain outside
-this correction.
+boundaries. Field budgets and the alternating display phase are described below.
+The display-relative vertical counter, R18 vertical placement and command timing
+remain approximations; full vertical/overscan counter reconstruction and VRAM
+arbitration remain outside this correction.
 
 References: [Yamaha V9938 Technical Data Book](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
 printed pages 4, 9 and 146, describes the interface, acknowledgement and horizontal
@@ -799,3 +799,125 @@ page 1, independently of cartridge slot 1, disk slot 2, sub-ROM 3-0 and RAM 3-3.
 It adds clocked YM2413 synthesis and write-only 7Ch/7Dh on MSX2; it does not
 change the generation byte or imply a complete historical machine profile.
 MSX1 parks the image inactive. See [the selected profile](msx-music.md).
+
+
+## Field timing and R9 fixation
+
+Issue [#71](https://github.com/takahirox/msx-rust/issues/71) separates the field
+clock from horizontal phase. One horizontal line is 1368 master clocks / 228 CPU
+T-states. Every stable VSYNC field has the following duration, independently of
+192/212 visible lines and EO page alternation:
+
+| Timing | Progressive | IL enabled | Two IL fields | 100 IL fields |
+| --- | ---: | ---: | ---: | ---: |
+| NTSC | 59,736 | 59,850 (262.5 lines) | 119,700 | 5,985,000 |
+| PAL | 71,364 | 71,250 (312.5 lines) | 142,500 | 7,125,000 |
+
+All numeric durations in this table are CPU T-states. MSX1 retains 59,736.
+The [Yamaha V9938 Technical Data Book](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
+printed pp. 146–147, gives both interlaced fields the same fractional duration.
+Its second field has an extra half-line of top erase; this is not an extra
+half-line of active display. The tables apply at R18=0. IL/EO and field
+identification are described on printed pp. 5, 10 and 103.
+
+### Mapping to the existing display-relative raster
+
+The emulator starts at the first active line, rather than reconstructing physical
+VSYNC, borders and overscan. In the tables, the first active line follows VSYNC
+by `3 + 13 + top_border` lines: 42/32 for NTSC 192/212, or 69/59 for PAL. Call
+this first-field interval T0. Our field-clock epochs represent the VSYNC sequence
+translated by the same +T0 offset, with the first epoch and first active line at
+time zero. This retains the established progressive origin. The second active
+origin is another half-line after its translated epoch; the third realigns.
+Thus, for stable interlace entered at reset, the observable sequence is:
+
+| Event | NTSC T-states | PAL T-states | H phase | EO / woven rows |
+| --- | ---: | ---: | --- | --- |
+| First epoch / first active origin | 0 | 0 | 0 | 0 / even |
+| Second epoch | 59,850 | 71,250 | 114 | 1 / top half-line blank |
+| Second active origin | 59,964 | 71,364 | 0 | 1 / odd |
+| Third epoch / third active origin | 119,700 | 142,500 | 0 | 0 / even |
+
+Active-origin spacing therefore alternates 263/262 lines in NTSC and 313/312
+in PAL, while **each field's scheduling budget remains 262.5/312.5 lines**.
+The continuous horizontal clock is never reset at a field boundary. A carried
+half-line is blank (`Vdp::line == u16::MAX`); line zero begins at the next H
+wrap. Every active row then gets a complete horizontal interval. Rendering,
+S#2.VR, FH target comparison and VBlank all use this same display-relative line.
+S#2.HR retains its existing H=171 T convention; S#2.EO changes at the translated
+field epoch, and the same parity selects woven rows and EO pages. This is a
+mapping onto our existing raster, not a claim that its epoch is physical VSYNC
+or that all hardware status-counter phases have been reconstructed.
+
+### Selected register-transition behavior
+
+Exact V9938 NT/IL fixation edges are unresolved. We select the following explicit
+approximation, rather than claiming measured silicon behavior: before the first
+positive tick, R9 writes configure the initial field (tick(0) does not fix it).
+After timing starts, the latest R9 value becomes active at the next field-clock
+boundary. Direct and indirect writes share this rule. The readable register
+array contains pending values; timing, height, visible lines, weaving and page
+alternation consume the active R9 snapshot, including LN and EO. Other register
+writes retain their existing behavior.
+
+Writes neither restart elapsed clocks nor change interrupt latches. A PAL to
+NTSC write after the NTSC deadline still finishes the active PAL field; this
+replaces the former next-line truncation expectation. Across transitions the
+field count/parity continues, H phase stays continuous, and the new display starts
+at the first complete H interval at or after its epoch. Transition-dependent
+phase relative to physical VSYNC is part of this approximation. Reset/model
+changes clear active/pending timing, field count and both phases.
+
+`Machine::frame()` snapshots the active field duration on entry and carries
+instruction overshoot as debt. Every device still advances by executed CPU
+T-states, including VDP commands, FDC, cassette, RTC, PSG, SCC and FM. The Wasm
+`msx_frame_cycles()` export advertises that entry budget. The browser samples it
+before `msx_frame()`, charges that value to its accumulator, then uses the newly
+active budget for the next iteration. Charging the post-call budget to the
+previous call would add or discard time during transitions. CPU/audio clocks
+remain 3,579,545 / 44,100 Hz.
+
+### Original diagnostics and evidence
+
+`crates/msx-core/tests/interlace.rs` uses literal boundary expectations, complete
+384/424-row checks with IL enabled and EO off/on, independent IRQ acknowledgements, R9
+transitions, resets/model changes, and bulk/irregular partitions through 100
+fields. `tests/fetch_timing.rs` relates Machine field counts to actual CPU
+T-states, bounded instruction debt and exact cumulative PCM sample counts.
+
+`tests/fixtures/interlace-probe.hex` is original MIT-licensed Z80 firmware, loaded
+at 0100h in a generated test system ROM. It maps RAM, uploads two colored page
+rows, polls S#2.EO, records parity/count in C200h/C201h, sounds PSG A and switches
+NTSC IL → PAL IL → PAL → NTSC every eight observed edges. It uses ordinary CPU
+ports, without native service calls, proprietary firmware or ROMs. Run its
+native timestamp trace with:
+
+```sh
+cargo test -p msx-core --test interlace independent_z80 --locked -- --nocapture
+```
+
+An observed corrected trace begins `59835, 119693, 179515, 239373` CPU T-states.
+At the first NTSC IL → PAL IL transition it records edges 9–11 at
+`538630, 609900, 681134`; the transition write follows edge 8, so the next field
+still uses the old timing. The test allows at most 60 T of polling jitter per
+interval, independently of production timing helpers. These are emulator traces,
+not hardware recordings.
+
+`tests/interlace.spec.js` loads those bytes through the existing local firmware
+UI and compiled Wasm at both `/` and `/msx-rust/`. It observes green/blue woven
+Canvas rows, 424/212 height transitions, all four scheduling budgets and
+cumulative PCM totals for over 100 calls, plus one fresh Web Audio buffer per
+executed field through the real enqueue path. The existing latency cap can omit
+playback during accelerated catch-up. Deterministic irregular animation-frame
+timestamps drive the app's actual accumulator and rendering; an independent
+scheduler with literal expected budgets checks every callback. Native tests
+check exact PCM totals; browser totals permit only the final instruction's
+bounded overshoot, through the existing audio ABI.
+
+Before the implementation, the two new boundary/sequence tests failed against
+the unchanged baseline core: the advertised NTSC IL budget was 59,736 instead
+of 59,850, and 5,984,999 elapsed T-states had already crossed 100 fields instead
+of 99. Corrected boundary, sequence, transition, row, IRQ, lifecycle and CPU-probe
+results pass. See [the validation record](interlace-validation.md) for full checks.
+No hardware, pinned-emulator trace comparison or commercial-title playability
+validation was performed; those comparisons are optional.
