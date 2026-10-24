@@ -1,6 +1,6 @@
 //! Original movement traces calculated from milliseconds and the CPU clock.
 //! No production timing constants or physical-head access are used as an oracle.
-use msx_core::disk::{Controller, Disk, BYTE_CYCLES};
+use msx_core::disk::{Controller, Disk};
 
 fn drive() -> Controller {
     let mut image = vec![0; 368640];
@@ -30,8 +30,8 @@ fn signals(f: &mut Controller, track: u8, busy: bool, zero: bool, irq: bool) {
     assert!(!f.irq); // Status acknowledges; the signal latch does not.
 }
 fn byte_ready(f: &mut Controller) {
-    for _ in 0..6_300 {
-        f.tick(BYTE_CYCLES);
+    for _ in 0..45_100 {
+        f.tick(16);
         if f.drq {
             return;
         }

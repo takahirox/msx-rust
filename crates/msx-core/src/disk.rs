@@ -1,18 +1,19 @@
 //! Original raw DSK drive and deterministic WD2793 subset. See docs/disks.md.
 pub const SECTOR_SIZE: usize = 512;
-pub const BYTE_CYCLES: u32 = 114;
-pub const SERVICE_TIMEOUT: u32 = 4096;
+// Exact 32 us MFM bytes at 3,579,545 Hz, in 1/100000 CPU cycles.
+const CLOCK_SCALE: u64 = 100_000;
+const BYTE_TIME: u64 = 11_454_544;
 // 1 MHz WD2793 rate profile, measured against the 3,579,545 Hz CPU clock.
-// Deadlines stay in 1/1000 CPU-cycle units; tick observes ceil(n * interval),
+// Deadlines stay in 1/100000 CPU-cycle units; tick observes ceil(n * interval),
 // avoiding accumulated per-step rounding and tick-partition dependence.
 const STEP_MS: [u64; 4] = [6, 12, 20, 30];
-const REVOLUTION: u64 = 715_909_000; // 1/1000 CPU-cycle units, 300 rpm
-const SETTLE: u64 = 3_579_545 * 30; // 30 ms, HLT assumed high
+const REVOLUTION: u64 = 71_590_900_000; // 1/100000 CPU-cycle units, 300 rpm
+const SETTLE: u64 = 3_579_545 * 30 * 100; // 30 ms, HLT assumed high
 
 fn id_phase(id: u64) -> u64 {
     // Nine normal-track IDs, cylinder = physical head, side = selected side,
     // sector = id + 1, size = 512, good CRC. See docs/disks.md for ordering.
-    (id * 715_909).div_ceil(9) * 1000
+    (id * 715_909).div_ceil(9) * CLOCK_SCALE
 }
 
 #[derive(Debug)]
@@ -64,7 +65,12 @@ enum Transfer {
     SectorSettle,
     SectorSearch,
     Read,
+    WriteRequest,
+    WriteCheck,
+    WriteLeadIn,
     Write,
+    ReadTail,
+    SectorEnd,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -107,6 +113,7 @@ pub struct Controller {
     write_sector: bool,
     compare_side: Option<u8>,
     index: usize,
+    write_serviced: bool,
     offset: usize,
     buffer: [u8; SECTOR_SIZE],
     multi: bool,
@@ -142,6 +149,7 @@ impl Default for Controller {
             write_sector: false,
             compare_side: None,
             index: 0,
+            write_serviced: false,
             offset: 0,
             buffer: [0; SECTOR_SIZE],
             multi: false,
@@ -254,9 +262,12 @@ impl Controller {
             1 => self.track,
             2 => self.sector,
             3 => {
-                if self.transfer == Transfer::Read && self.drq {
-                    self.data = self.buffer[self.index];
-                    self.advance();
+                if matches!(
+                    self.transfer,
+                    Transfer::Read | Transfer::ReadTail | Transfer::SectorEnd
+                ) && !self.write_sector
+                {
+                    self.drq = false;
                 }
                 self.data
             }
@@ -279,9 +290,9 @@ impl Controller {
             2 if self.transfer == Transfer::Idle => self.sector = value,
             3 => {
                 self.data = value;
-                if self.transfer == Transfer::Write && self.drq {
-                    self.buffer[self.index] = value;
-                    self.advance();
+                if self.drq && self.write_sector {
+                    self.write_serviced = true;
+                    self.drq = false;
                 }
             }
             4 | 5 => {
@@ -302,7 +313,12 @@ impl Controller {
                         Transfer::SectorSettle
                             | Transfer::SectorSearch
                             | Transfer::Read
+                            | Transfer::ReadTail
+                            | Transfer::WriteRequest
+                            | Transfer::WriteCheck
+                            | Transfer::WriteLeadIn
                             | Transfer::Write
+                            | Transfer::SectorEnd
                     )
                 {
                     self.finish(0x80);
@@ -368,7 +384,7 @@ impl Controller {
             };
             self.transfer = Transfer::Seek;
             self.restore_pulses = 0;
-            self.step_interval = 3_579_545 * STEP_MS[(cmd & 3) as usize];
+            self.step_interval = 3_579_545 * STEP_MS[(cmd & 3) as usize] * 100;
             self.next_event = self.clock + self.step_interval;
             // Adopt the pinned openMSX scheduling convention: first eligible
             // pulse now, then one interval after every pulse, including the last.
@@ -517,74 +533,95 @@ impl Controller {
             self.buffer
                 .copy_from_slice(&self.disk.as_ref().unwrap().bytes[offset..offset + SECTOR_SIZE]);
             self.index = 0;
+            self.write_serviced = false;
             self.transfer = if self.write_sector {
-                Transfer::Write
+                Transfer::WriteRequest
             } else {
                 Transfer::Read
             };
-            // Bounded raw-sector handoff, not a measured ID-to-data gap.
-            self.next_event = self.clock + u64::from(BYTE_CYCLES) * 1000;
+            // ID phase is the start of FE. Fixed synthetic MFM header/gap
+            // offsets; see the timing table in docs/disks.md.
+            self.next_event = self.clock + BYTE_TIME * if self.write_sector { 9 } else { 46 };
             return;
         }
         if phase == 0 {
             self.search_indexes += 1;
             if self.search_indexes == 5 {
-                self.finish(0x10);
+                self.finish(self.status & 4 | 0x10);
                 return;
             }
         }
         self.schedule_search(false);
     }
-    fn advance(&mut self) {
+    fn sector_end(&mut self) {
+        if self.write_sector {
+            let Some(d) = &mut self.disk else {
+                self.finish(self.status & 4 | 0x80);
+                return;
+            };
+            if d.write_protected {
+                self.finish(self.status & 4 | 0x40);
+                return;
+            }
+            let Some(dest) = d.bytes.get_mut(self.offset..self.offset + SECTOR_SIZE) else {
+                self.finish(self.status & 4 | 0x10);
+                return;
+            };
+            if dest != self.buffer {
+                dest.copy_from_slice(&self.buffer);
+                d.dirty = true;
+            }
+        }
         self.drq = false;
+        if self.multi {
+            self.sector = self.sector.wrapping_add(1);
+            self.start_sector_search();
+        } else {
+            self.finish(self.status & 4);
+        }
+    }
+    fn read_event(&mut self) {
+        if self.drq {
+            self.status |= 4;
+        }
+        self.data = self.buffer[self.index];
+        self.drq = true;
+        self.index += 1;
+        self.next_event += BYTE_TIME;
+        if self.index == SECTOR_SIZE {
+            self.transfer = Transfer::ReadTail;
+        }
+    }
+    fn write_event(&mut self) {
+        // A missed position is gone forever. A late CPU write services only
+        // the request currently visible, and cannot repair earlier zeroes.
+        // DRQ acknowledgement records service; Data remains the holding
+        // register and can be overwritten until this scheduled consumption.
+        self.buffer[self.index] = if std::mem::take(&mut self.write_serviced) {
+            self.data
+        } else {
+            self.status |= 4;
+            0
+        };
         self.index += 1;
         if self.index == SECTOR_SIZE {
-            if self.transfer == Transfer::Write {
-                let Some(d) = &mut self.disk else {
-                    self.finish(0x80);
-                    return;
-                };
-                if d.write_protected {
-                    self.finish(0x40);
-                    return;
-                }
-                let Some(dest) = d.bytes.get_mut(self.offset..self.offset + SECTOR_SIZE) else {
-                    self.finish(0x10);
-                    return;
-                };
-                if dest != self.buffer {
-                    dest.copy_from_slice(&self.buffer);
-                    d.dirty = true;
-                }
-            }
-            if self.multi {
-                self.sector = self.sector.wrapping_add(1);
-                self.start_sector_search();
-            } else {
-                self.finish(0);
-            }
+            self.drq = false;
+            self.transfer = Transfer::SectorEnd;
+            // One byte still in the serializer, two CRC bytes, trailing FE.
+            self.next_event += 4 * BYTE_TIME;
         } else {
-            self.next_event = self.clock + u64::from(BYTE_CYCLES) * 1000;
+            self.drq = true;
+            self.next_event += BYTE_TIME;
         }
     }
     pub fn tick(&mut self, cycles: u32) {
-        let end = self.clock + u64::from(cycles) * 1000;
+        let end = self.clock + u64::from(cycles) * CLOCK_SCALE;
         if self.force_mask & 4 != 0 && end / REVOLUTION > self.clock / REVOLUTION && self.ready() {
             self.irq = true;
         }
         // Visit absolute fractional deadlines in chronological order, including
         // phase transitions inside one large CPU tick.
-        while matches!(
-            self.transfer,
-            Transfer::Seek
-                | Transfer::Settle
-                | Transfer::Verify
-                | Transfer::SectorSettle
-                | Transfer::SectorSearch
-                | Transfer::Read
-                | Transfer::Write
-        ) && self.next_event <= end
-        {
+        while self.transfer != Transfer::Idle && self.next_event <= end {
             self.clock = self.next_event;
             match self.transfer {
                 Transfer::Seek => {
@@ -599,18 +636,42 @@ impl Controller {
                 Transfer::Verify => self.verification_event(),
                 Transfer::SectorSettle => self.start_sector_search(),
                 Transfer::SectorSearch => self.sector_search_event(),
-                Transfer::Read | Transfer::Write => {
+                Transfer::Read => self.read_event(),
+                Transfer::ReadTail => {
+                    // The final byte has the same one-byte service budget.
+                    // Keep it available through the CRC tail, even if late.
                     if self.drq {
-                        self.finish(4);
+                        self.status |= 4;
+                    }
+                    self.transfer = Transfer::SectorEnd;
+                    self.next_event += BYTE_TIME;
+                }
+                Transfer::WriteRequest => {
+                    self.drq = true;
+                    self.transfer = Transfer::WriteCheck;
+                    self.next_event += 8 * BYTE_TIME;
+                }
+                Transfer::WriteCheck => {
+                    if std::mem::take(&mut self.write_serviced) {
+                        self.buffer[0] = self.data;
+                        self.index = 1;
+                        self.transfer = Transfer::WriteLeadIn;
+                        self.next_event += 27 * BYTE_TIME;
                     } else {
-                        self.drq = true;
-                        self.next_event = self.clock + u64::from(SERVICE_TIMEOUT) * 1000;
+                        self.finish(4);
                     }
                 }
+                Transfer::WriteLeadIn => {
+                    self.drq = true;
+                    self.transfer = Transfer::Write;
+                    self.next_event += BYTE_TIME;
+                }
+                Transfer::Write => self.write_event(),
+                Transfer::SectorEnd => self.sector_end(),
                 _ => unreachable!(),
             }
         }
         self.clock = end;
-        self.rotation = ((end % REVOLUTION) / 1000) as u32;
+        self.rotation = ((end % REVOLUTION) / CLOCK_SCALE) as u32;
     }
 }

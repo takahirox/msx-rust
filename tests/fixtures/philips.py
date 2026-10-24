@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57/#59; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -26,6 +26,12 @@ def save(name, spans):
         for i in range(0, len(data), 16):
             lines.append(f'{offset+i:04x}: ' + ' '.join(f'{x:02x}' for x in data[i:i+16]))
     Path(__file__).with_name(name+'.hex').write_text('\n'.join(lines)+'\n')
+
+def wait_complete(code, label, register=0x7ff8):
+    # Completion belongs to the serializer/CRC tail, not the final CPU service.
+    code.label(label)
+    code.emit(0x3a, register & 255, register >> 8, 0xe6, 1)
+    code.jump(0xc2, label)
 
 # System starts with page 0/1 BIOS and page 2/3 RAM. Initialize the expanded
 # slot and mapper on MSX2 (ordinary writes/unused ports are harmless on MSX1).
@@ -57,18 +63,20 @@ r.emit(0x3e, 0x80, 0x32, 0xfd, 0x7f, 0xaf, 0x32, 0xfc, 0x7f,
        0x3e, 0x80, 0x32, 0xf8, 0x7f, 0x21, 0, 0x80, 0x01, 0, 2)
 # This 65535-iteration signal poll allows >5M cycles, exceeding the Type-II
 # bound of 30 ms + five revolutions (3686931.35 cycles), including MSX waits.
-r.label('byte'); r.emit(0x11, 0xff, 0xff)
+r.emit(0x11, 0xff, 0xff)
 r.label('poll'); r.emit(0x3a, 0xff, 0x7f, 0xcb, 0x7f); r.jump(0xca, 'data')
 r.emit(0xcb, 0x77); r.jump(0xca, 'fail')
 r.emit(0x1b, 0x7a, 0xb3); r.jump(0xc2, 'poll'); r.jump(0xc3, 'fail')
+r.label('byte'); r.emit(0x3a, 0xff, 0x7f, 0xcb, 0x7f); r.jump(0xc2, 'byte')
 r.label('data'); r.emit(0x3a, 0xfb, 0x7f, 0x77, 0x23, 0x0b, 0x78, 0xb1); r.jump(0xc2, 'byte')
+wait_complete(r, 'complete')
 r.emit(0x3a, 0xf8, 0x7f, 0xe6, 0xfc); r.jump(0xc2, 'fail'); r.emit(0xc3, 0, 0x80)
 r.label('fail'); r.emit(0x3e, 0xee, 0x32, 0, 0xc0, 0x76); r.jump(0xc3, 'fail')
 save('philips-disk', [(0, [ord('A'), ord('B'), 0, 0x41]), (0x100, r.done())])
 
 # Sector code paints a green backdrop (real VDP output) and writes 512 A6 bytes
 # to sector 9 on the side in 81F1, polling active-low IRQ/DRQ. Mode byte 81F0 selects force interrupt
-# after the first byte (1) or service timeout (2); default is a complete write.
+# after the first byte (1) or later underrun (2); default is a complete write.
 p = Z80(0x8000)
 p.emit(0x3e, 0xa5, 0x32, 0, 0xc0,
        0x3e, 0, 0xd3, 0x99, 0x3e, 0x80, 0xd3, 0x99,
@@ -84,12 +92,15 @@ p.emit(0x1b, 0x7a, 0xb3); p.jump(0xc2, 'poll')
 p.emit(0x3e, 0xfe); p.jump(0xc3, 'record')
 p.label('data'); p.emit(0x3e, 0xa6, 0x32, 0xfb, 0x7f,
                         0x3a, 0xf0, 0x81, 0xfe, 1); p.jump(0xca, 'abort')
-p.emit(0xfe, 2); p.jump(0xca, 'timeout')
-p.emit(0x0b, 0x78, 0xb1); p.jump(0xc2, 'byte'); p.jump(0xc3, 'done')
+p.emit(0xfe, 2); p.jump(0xca, 'underrun')
+p.emit(0x0b)
+p.label('fast_byte'); p.emit(0x3a, 0xff, 0x7f, 0xcb, 0x7f); p.jump(0xc2, 'fast_byte')
+p.emit(0x3e, 0xa6, 0x32, 0xfb, 0x7f, 0x0b, 0x78, 0xb1); p.jump(0xc2, 'fast_byte')
+p.jump(0xc3, 'done')
 p.label('abort'); p.emit(0x3e, 0xd8, 0x32, 0xf8, 0x7f); p.jump(0xc3, 'done')
-p.label('timeout'); p.emit(0x11, 0xff, 0xff)
+p.label('underrun'); p.emit(0x11, 0xff, 0xff)
 p.label('delay'); p.emit(0x1b, 0x7a, 0xb3); p.jump(0xc2, 'delay')
-p.label('done'); p.emit(0x3a, 0xf8, 0x7f)
+p.label('done'); wait_complete(p, 'complete'); p.emit(0x3a, 0xf8, 0x7f)
 p.label('record'); p.emit(0x32, 1, 0xc0, 0x3e, 0x5a, 0x32, 2, 0xc0)
 p.label('halt'); p.emit(0x76); p.jump(0xc3, 'halt')
 save('philips-sector', [(0, p.done()), (0x1f0, [0, 0])])
@@ -131,23 +142,19 @@ q.label('delay'); q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'delay')
 record(0x9007, 0x7ff9, 2) # Future pulses must remain canceled.
 value(0x7ffa, 1); value(0x7ff8, 0x80)
 q.emit(0x21, 0x00, 0x92, 0x01, 0, 2)
-q.label('read_byte'); q.emit(0x11, 0xff, 0xff)
-q.label('read_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'read_data')
-q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
-q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'read_poll'); q.jump(0xc3, 'fail')
+q.label('read_byte'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'read_byte')
 q.label('read_data'); load(0x7ffb); check(0x62)
 q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'read_byte')
+wait_complete(q, 'complete'+str(len(q.code)))
 load(0x7ff8); check(0, 0xfd)
 # Copy eight observations over the first eight bytes of the read buffer.
 q.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 8, 0, 0xed, 0xb0)
 value(0x7ffa, 9); value(0x7ff8, 0xa0)
 q.emit(0x21, 0, 0x92, 0x01, 0, 2)
-q.label('write_byte'); q.emit(0x11, 0xff, 0xff)
-q.label('write_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'write_data')
-q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
-q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'write_poll'); q.jump(0xc3, 'fail')
+q.label('write_byte'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'write_byte')
 q.label('write_data'); q.emit(0x7e); store(0x7ffb)
 q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write_byte')
+wait_complete(q, 'complete'+str(len(q.code)))
 load(0x7ff8); check(0, 0xfd)
 q.emit(0x3e, 0xa5); store(0xc020)
 q.emit(0x3e, 0xf2); q.jump(0xc3, 'paint') # Green success, red failure.
@@ -202,6 +209,7 @@ b.emit(0x3e,0xf8,0xd3,0xa8,0x3e,9,0x32,0xfa,0x7f,
        0x3e,0xa0,0x32,0xf8,0x7f,0x01,0,2)
 b.label('write_poll'); b.emit(0x3a,0xff,0x7f,0xcb,0x7f); b.jump(0xc2,'write_poll')
 b.emit(0x3e,0x6c,0x32,0xfb,0x7f,0x0b,0x78,0xb1); b.jump(0xc2,'write_poll')
+wait_complete(b, 'complete')
 b.emit(0x3a,0xf8,0x7f,0xe6,0xfd); b.jump(0xc2,'fail')
 b.emit(0x3e,0xa5,0x32,0x33,0xc0,0x3e,0xf2); b.jump(0xc3,'paint')
 b.label('fail'); b.emit(0x3e,0xee,0x32,0x33,0xc0,0x3e,0xf6)
@@ -262,22 +270,18 @@ q.emit(0x21, 0x67, 0x11, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
 masked_record(0x9007, 0x7ff8, 0, 0x91)
 value(0x7ffa, 1); value(0x7ff8, 0x80)
 q.emit(0x21, 0, 0x92, 0x01, 0, 2)
-q.label('read_byte'); q.emit(0x11, 0xff, 0xff)
-q.label('read_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'read_data')
-q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
-q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'read_poll'); q.jump(0xc3, 'fail')
+q.label('read_byte'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'read_byte')
 q.label('read_data'); load(0x7ffb); check(0x62)
 q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'read_byte')
+wait_complete(q, 'complete'+str(len(q.code)))
 load(0x7ff8); check(0, 0xfd)
 q.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 8, 0, 0xed, 0xb0)
 value(0x7ffa, 9); value(0x7ff8, 0xa0)
 q.emit(0x21, 0, 0x92, 0x01, 0, 2)
-q.label('write_byte'); q.emit(0x11, 0xff, 0xff)
-q.label('write_poll'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xca, 'write_data')
-q.emit(0xcb, 0x77); q.jump(0xca, 'fail')
-q.emit(0x1b, 0x7a, 0xb3); q.jump(0xc2, 'write_poll'); q.jump(0xc3, 'fail')
+q.label('write_byte'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'write_byte')
 q.label('write_data'); q.emit(0x7e); store(0x7ffb)
 q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write_byte')
+wait_complete(q, 'complete'+str(len(q.code)))
 load(0x7ff8); check(0, 0xfd)
 value(0xc040, 0xa5); paint(0xf2); q.jump(0xc3, 'halt')
 q.label('fail'); value(0xc040, 0xee); paint(0xf6)
@@ -293,21 +297,27 @@ for i, e in enumerate([0, 4]):
     value(0x7ffa, 3); value(0x7ff8, 0x80 | e)
     record(trace, 0x7ff8, 1)
     record(trace+1, 0x7fff, 0xff)
-    q.emit(0x01, 0, 0)
+    q.emit(0x21, 0, 0x92, 0x01, 0, 0)
     poll = 'first'+str(i)
     q.label(poll); q.emit(0x03); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, poll)
-    # 42 cycles/poll (including ordinary MSX M1 waits). A match takes
-    # E*30 ms + at most one revolution + 114 cycles. Allow instruction
-    # alignment at each end, but E=1 must actually delay by >=30 ms.
-    low, high = (2540, 19620) if e else (0, 17060)
-    q.emit(0x60, 0x69, 0x11, low & 255, low >> 8, 0xb7, 0xed, 0x52); q.jump(0xda, 'fail')
-    q.emit(0x21, high & 255, high >> 8, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
-    record(trace+2, 0x7fff, 0x7f)
-    q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+    store(trace+2) # observed DRQ; preserve count and immediately consume byte 0
+    load(0x7ffb); q.emit(0x77, 0x23, 0xc5, 0x01, 0xff, 1)
     q.label('byte'+str(i)); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'byte'+str(i))
     load(0x7ffb); check(0x62)
     q.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'byte'+str(i))
+    wait_complete(q, 'complete_read'+str(i))
+    q.emit(0xc1)
+    # 42 cycles/first poll. E*30 ms + one revolution + 46 byte times;
+    # allow instruction alignment (and enforce E=1's >=30 ms delay).
+    low, high = (2540, 19750) if e else (0, 17190)
+    q.emit(0x60, 0x69, 0x11, low & 255, low >> 8, 0xb7, 0xed, 0x52); q.jump(0xda, 'fail')
+    q.emit(0x21, high & 255, high >> 8, 0xb7, 0xed, 0x42); q.jump(0xda, 'fail')
+    load(trace+2); check(0x7f)
     record(trace+3, 0x7ff8, 0)
+    # Verify every payload byte, including the first one, after the timed read.
+    q.emit(0x21, 0, 0x92, 0x01, 0, 2)
+    q.label('verify_read'+str(i)); q.emit(0x7e); check(0x62)
+    q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'verify_read'+str(i))
     value(0x7ffa, 10); value(0x7ff8, 0x80 | e)
     record(trace+4, 0x7ff8, 1)
     record(trace+5, 0x7fff, 0xff)
@@ -330,8 +340,77 @@ q.emit(0x21, 0, 0x92, 0x01, 0, 2)
 q.label('write'); load(0x7fff); q.emit(0xcb, 0x7f); q.jump(0xc2, 'write')
 q.emit(0x7e); store(0x7ffb)
 q.emit(0x23, 0x0b, 0x78, 0xb1); q.jump(0xc2, 'write')
+wait_complete(q, 'complete_write')
 load(0x7ff8); check(0)
 value(0xc050, 0xa5); paint(0xf2); q.jump(0xc3, 'halt')
 q.label('fail'); value(0xc050, 0xee); paint(0xf6)
 q.label('halt'); q.emit(0x76); q.jump(0xc3, 'halt')
 save('philips-search', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x3ff, [0]), (0x400, q.done())])
+
+# Issue #59: CPU-visible overrun, clean full read, initial write starvation,
+# later write zero-fill and a full trace/payload export through both buses.
+# Each wait allows 65535 polls (>2M cycles), above rev + 559 byte times
+# (779940 cycles). Inner serviced-byte paths are <114 cycles with MSX waits.
+def clock_probe(base, philips):
+    c = Z80(base)
+    def ld(address): c.emit(0x3a, address & 255, address >> 8)
+    def st(address): c.emit(0x32, address & 255, address >> 8)
+    def val(address, byte): c.emit(0x3e, byte); st(address)
+    def ck(byte): c.emit(0xfe, byte); c.jump(0xc2, 'fail')
+    def command(sector, byte): val(0x7ffa, sector); val(0x7ff8, byte)
+    def poll(label, drq=False):
+        mask = (0x80 if drq else 0x40) if philips else (0x40 if drq else 0x80)
+        c.emit(0x11, 0xff, 0xff)
+        c.label(label); ld(0x7fff); c.emit(0xe6, mask)
+        c.jump(0xca if philips else 0xc2, label+'_done')
+        c.emit(0x1b, 0x7a, 0xb3); c.jump(0xc2, label); c.jump(0xc3, 'fail')
+        c.label(label+'_done')
+    def status(trace, byte): ld(0x7ff8); st(0x9000+trace); ck(byte)
+    val(0x7ffd, 0x80 if philips else 0x81); val(0x7ffc, 0); val(0x7ff9, 0)
+    command(3, 0x80)
+    poll('overrun') # Deliberately read none of the 512 arrivals.
+    ld(0x7fff); st(0x9000); ck(0xbf if philips else 0x80)
+    status(1, 4)
+    ld(0x7ffb); st(0x9002); ck(0xb8) # last independent pattern byte
+    ld(0x7ffb); ck(0xb8) # repeated/idle accesses retain the last register
+    command(3, 0x80)
+    c.emit(0x21, 0, 0x92, 0x01, 0, 2)
+    c.label('read'); ld(0x7fff); c.emit(0xe6, 0x80 if philips else 0x40)
+    c.jump(0xc2 if philips else 0xca, 'read')
+    ld(0x7ffb); c.emit(0x77, 0x23, 0x0b, 0x78, 0xb1); c.jump(0xc2, 'read')
+    wait_complete(c, 'read_complete'); status(3, 0)
+    # Independently verify both 256-byte halves, not just a checksum or marker.
+    c.emit(0x21, 0, 0x92)
+    for half in range(2):
+        c.emit(0x06, 0, 0x16, half)
+        c.label('verify'+str(half)); c.emit(0x7e, 0xba); c.jump(0xc2, 'fail')
+        c.emit(0x23, 0x7a, 0xc6, 73, 0x57, 0x05); c.jump(0xc2, 'verify'+str(half))
+    command(5, 0xa0)
+    poll('starve'); status(4, 4) # No first byte: no media change.
+    command(6, 0xa0)
+    poll('first_write', True); val(0x7ffb, 0x61)
+    poll('underrun'); status(5, 4) # Starts writing: all later positions become zero.
+    c.emit(0x21, 0, 0x90, 0x11, 0, 0x92, 0x01, 6, 0, 0xed, 0xb0)
+    command(9, 0xa0)
+    c.emit(0x21, 0, 0x92, 0x01, 0, 2)
+    c.label('write'); ld(0x7fff); c.emit(0xe6, 0x80 if philips else 0x40)
+    c.jump(0xc2 if philips else 0xca, 'write')
+    c.emit(0x7e); st(0x7ffb)
+    c.emit(0x23, 0x0b, 0x78, 0xb1); c.jump(0xc2, 'write')
+    wait_complete(c, 'write_complete'); ld(0x7ff8); ck(0)
+    val(0xc060, 0xa5); c.emit(0x3e, 0xf2); c.jump(0xc3, 'paint')
+    c.label('fail'); val(0xc060, 0xee); c.emit(0x3e, 0xf6)
+    c.label('paint'); c.emit(0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99,
+        0xaf, 0xd3, 0x99, 0x3e, 0x80, 0xd3, 0x99,
+        0x3e, 0x40, 0xd3, 0x99, 0x3e, 0x81, 0xd3, 0x99)
+    c.label('halt'); c.emit(0x76); c.jump(0xc3, 'halt')
+    return c.done()
+
+save('philips-clock', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x400, clock_probe(0x4400, True))])
+# A real Weave boot sector loads two sectors via DISKIO then executes the same
+# diagnostic through its opposite-polarity interface. F8/F9 is patched by tests.
+loader = [0xaf, 0x01, 0xf8, 2, 0x11, 1, 0, 0x21, 0, 0xc2, 0xb7,
+          0xcd, 0x10, 0x40, 0xc3, 0, 0xc2]
+weave_clock = clock_probe(0xc200, False)
+assert len(weave_clock) <= 512
+save('philips-clock-weave', [(0, loader), (510, list(b'WV')), (512, weave_clock)])

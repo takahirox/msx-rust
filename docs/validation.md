@@ -1,3 +1,127 @@
+# Issue 59 WD2793 device-clocked Type-II byte transfers
+
+Source: [Clock WD2793 Type-II byte transfers independently and correct lost-data handling](https://github.com/takahirox/msx-rust/issues/59).
+Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium. The assigned checkpoint was
+`5cf912c`; implementation baseline is `114f031`. The live source Issue was read
+through the GitHub connector before implementation.
+
+The shared controller now schedules MFM bytes at exact 32 us periods with an
+absolute fractional clock. Reads replace Data on arrival and continue after
+overrun. Writes have a separate eight-byte initial-service check; once started,
+missed positions become zero while later service can resume. Completion and
+multi-record search begin at device time, after the serializer/CRC tail, retaining
+LOST DATA until a new command/reset. Final read data remains available through
+the tail; the documented service expiry latches LOST DATA and completion clears
+DRQ/raises IRQ. Whole-sector staging still discards explicitly canceled incomplete
+writes, retains earlier completed sectors, enforces dirty-media guards and commits
+completed zero-filled sectors. Physical partial-write/CRC damage is not modeled.
+
+[The timing table and provenance](disks.md) distinguish manufacturer behavior
+from the selected synthetic offsets and final-read policy. Nine existing ID
+positions and settling/search rules are retained. The pinned upstream scheduling
+and layout sources were inspected as behavioral evidence; implementation and
+fixtures were authored independently. The TI transcription was accessible. No
+physical phase measurements were made; earlier WD scan/handbook access failures
+remain research limitations. FORCE INTERRUPT corrections and other commands stay
+outside scope.
+
+Fifteen native Type-II tests use independent literal IDs and rational deadlines,
+not production timing helpers. They cover all ID positions, both E values,
+sides/geometries, exact fractional byte cadence, revolution wrap, data-register
+replacement, early/late/repeated/idle service, one/several missed positions,
+initial starvation, resumed writes, final-byte starvation, sticky status,
+serializer/CRC completion, multi-record/RNF progression and all cancellation
+phases. Large, irregular and single-cycle ticks agree at before/at/after arrival
+and completion boundaries. Philips bus tests cancel reset/interface removal in
+all new phases on both models. Type-I and CPU-fetch timing regressions retain
+independent expected deadlines.
+
+Original CPU fixtures now fit their serviced-byte paths into a byte period and
+wait for BUSY to clear after byte 512; first-DRQ poll-bound checks run after the
+read. The Weave DISKIO driver selects direction once per sector so its polling
+path also fits. The two new original clock probes execute through real Weave
+boot/DISKIO or Philips AB discovery. They observe unread overrun, compare every
+one of 512 patterned read bytes, reject initial write starvation, continue a
+started write with 511 zeroes, then export the six-byte trace and full payload.
+Native and sixteen compiled-Wasm cases cover both buses/models/geometries at
+`/` and `/msx-rust/`, checking the entire image including unchanged sectors.
+The existing search, movement, readiness and SCC-I fixtures were regenerated for
+proper cadence/completion; the system fixture is unchanged. No BIOS bypasses,
+proprietary assets or extra dependencies were introduced.
+
+Baseline sensitivity was checked by temporarily substituting only baseline
+`disk.rs` and restoring the corrected bytes in a Python `finally` block. With
+pinned Rust, 13 of 15 final register tests fail; the two retained safety/search
+cases pass. Examples: unread Data remains A7h instead of the arriving payload,
+first DRQ is premature, the initial window is wrong, and later requests/zero-fill
+and multi-record status disagree. The new CPU probe also fails its exact image
+comparison: baseline later starvation discards the sector instead of committing
+zero-fill. It can reach A5h under baseline, so the full export comparison is
+necessary evidence. Corrected focused suites pass all cases.
+
+| Check | Actual result |
+| --- | --- |
+| Baseline Type-II suite / new CPU probe | Expected failures: 13/15 register tests and exact CPU export |
+| `cargo fmt --all -- --check` | Passed with pinned Rust 1.99.0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed with pinned Rust 1.99.0 |
+| `cargo test --workspace --locked` | Passed: all 241 tests, none failed or ignored; expanded cancellation suite also passed 15/15 |
+| `./scripts/build.sh` | Passed with pinned Rust and existing local linker workaround |
+| `node scripts/check-dist.mjs` | Passed: inventory, hashes, provenance, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm device-clock probes | Passed: all 16 cases in 21.2 seconds |
+| `npm test` | Passed: all 146 cases in 12.7 minutes, none failed or skipped |
+| Fixture regeneration, JS syntax, local Markdown links, `git diff --check` | Passed: nine fixtures reproduce, JS parses, 24 local links/anchors valid, no whitespace errors |
+
+Preliminary checks used the shadowing Homebrew Rust 1.94. Final checks select
+README's pinned sysroot-first PATH. The first build attempts failed because that
+host compiler lacked its own Wasm target; the pinned target was already installed.
+The pinned linker then hit the existing macOS `libLLVM.dylib` lookup failure.
+The documented ignored `target/local-linker/rust-lld` wrapper sets that same
+sysroot's library path and invokes its unchanged linker, selected per command
+with `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. No tracked build configuration
+or host toolchain files changed. Early focused CPU checks also caught slow polling
+and immediate-completion assumptions; those failures were corrected in the driver
+and original fixtures before final validation.
+
+Source-Issue/full-diff self-review completed: all acceptance criteria were checked
+against code, native/CPU/browser evidence and documentation. No blocking findings
+remain. The existing bounded media-slice lookup was retained at commit; cancellation
+coverage includes initial-check, lead-in, transfer and CRC-tail phases. The final
+rebuild refreshed the provenance notice and reproduced the exact Wasm SHA-256
+tested in the full browser suite; the final distribution inventory check passed.
+Optional timestamped comparison against upstream, physical hardware and commercial
+software checks were not performed. These diagnostics establish the selected
+profile, not commercial-game compatibility. No checks are intentionally skipped;
+no required post-merge verification is specified. No push, PR, comment or merge
+was performed by this node.
+
+## Review correction: write holding-register sampling
+
+Validated on 2026-10-24 from checkpoint `5b7b97d`. DRQ acknowledgement now records
+service separately from the payload; the initial check and later scheduled
+consumption sample the current Data register. Repeated writes can replace that
+pending byte without advancing deadlines or supplying a future request. The two
+obsolete repeated-write expectations were corrected and the disk contract clarified.
+
+Before the fix, the new literal-timestamp regression reproduced `61h, 71h` in the
+completed image instead of `62h, 72h` after register overwrites at cycles 1947 and 5041.
+It now passes for both raw geometries and all three tick partitions, also checking
+that an overwrite after the initial latch cannot change byte 0, an unserviced next
+request still zero-fills, and media commits only at completion. All 16 Type-II
+tests and all 242 workspace Rust tests passed, with none failed or ignored.
+
+Passed: `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace --locked`, `./scripts/build.sh` with the documented ignored
+local linker wrapper, `node scripts/check-dist.mjs`, `npm ci`,
+`npx playwright install chromium`, `npm test` (146 passed in 12.6 minutes at both
+site roots, none failed or skipped), and `git diff --check`.
+The expected pre-fix regression failure was the only failed check in this revision.
+Reviewed the finding and complete revision diff against Issue #59; no blocking
+findings remain locally. Optional upstream runtime/hardware comparisons remain
+unperformed. No push or merge was performed.
+
 # Issue 57 WD2793 Type-II settling and rotational searches
 
 Source: [Correct WD2793 Type-II settling and rotational sector searches](https://github.com/takahirox/msx-rust/issues/57).

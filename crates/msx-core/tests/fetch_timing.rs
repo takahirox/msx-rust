@@ -1,7 +1,7 @@
 //! Original synthetic programs: elapsed MSX time must reach every clocked device.
 use msx_core::{
     cpu::Bus,
-    disk::{Disk, BYTE_CYCLES},
+    disk::Disk,
     firmware,
     psg::{Psg, CPU_HZ, SAMPLE_RATE},
     Machine, Mapper, Model,
@@ -76,8 +76,9 @@ fn elapsed_fetch_time_crosses_vdp_irq_fdc_and_rtc_boundaries() {
             .unwrap();
         m.hardware.fdc.write(5, 0x81); // Drive A, motor on.
         m.hardware.fdc.write(2, 1);
-        m.hardware.fdc.write(0, 0x80); // Read sector, first byte after 114 T.
-        assert_eq!(BYTE_CYCLES, 114);
+        m.hardware.fdc.write(0, 0x80);
+        // First arrival: ceil(46 * 32 us * 3579545 Hz) = 5270.
+        m.hardware.fdc.tick(5155); // 115 CPU cycles remain, independently phased.
         for _ in 0..22 {
             step(&mut m, 5);
         }
@@ -95,7 +96,7 @@ fn elapsed_fetch_time_crosses_vdp_irq_fdc_and_rtc_boundaries() {
         m.cpu.im = 1;
         step(&mut m, 13); // IRQ recognized on the next instruction boundary.
         assert_eq!(m.cpu.pc, 0x38);
-        // A subsequent byte has its own 114-T delay, including IRQ elapsed time.
+        // Next arrival: ceil(47 * 114.54544) = 5384, including IRQ time.
         for _ in 0..20 {
             nop(&mut m);
         }
