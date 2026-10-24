@@ -315,7 +315,7 @@ fn step_multi_record_and_partial_write_lifecycle() {
     }
     assert!(f.irq);
     f.read(0);
-    f.write(0, 0xc0);
+    f.write(0, 0xe0); // Read Track remains outside the normal raw-sector profile.
     assert_eq!(f.read(0) & 0x10, 0x10);
 }
 
