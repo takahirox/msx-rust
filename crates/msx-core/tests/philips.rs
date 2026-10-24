@@ -550,9 +550,11 @@ fn profile_removal_and_reset_cancel_every_type_two_phase() {
     for model in [Model::Msx1, Model::Msx2] {
         for remove in [false, true] {
             for write in [false, true] {
+                // Sector 3 ReadTail spans ceil(159091 + 557 * 114.54544)
+                // through ceil(159091 + 558 * 114.54544) - 1: 222893..=223007.
                 for elapsed in [
                     107_386, 107_387, 159_091, 160_122, 161_038, 161_039, 164_131, 164_361,
-                    222_777, 223_008, 223_121,
+                    222_777, 222_893, 223_007, 223_008, 223_121,
                 ] {
                     let mut m = machine(model);
                     m.mount_disk(vec![0x35; 368640], false).unwrap();

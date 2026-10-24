@@ -263,13 +263,15 @@ fn multi_record_searches_again_without_settling_and_sector_ten_cannot_cross_trac
 }
 
 #[test]
-fn cancellation_in_settle_search_handoff_and_partial_transfer_never_resurrects_or_commits() {
+fn cancellation_in_settle_search_handoff_transfer_and_tail_never_resurrects_or_commits() {
     for write in [false, true] {
         // Sector 3 with E: settling, search, matched ID handoff, pending byte,
-        // and a partially serviced sector.
+        // a partially serviced sector, and the final read byte's service window.
+        // ReadTail: ceil(159091 + 557 * 114.54544) = 222893 through
+        // ceil(159091 + 558 * 114.54544) - 1 = 223007 (independent timestamps).
         for elapsed in [
             107_386, 107_387, 159_091, 160_121, 160_122, 161_038, 161_039, 164_131, 164_360,
-            164_361, 222_777, 223_008, 223_121,
+            164_361, 222_777, 222_893, 223_007, 223_008, 223_121,
         ] {
             for cancel in 0..7 {
                 let mut f = drive(737_280);
