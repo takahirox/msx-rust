@@ -12,6 +12,7 @@ pub mod psg;
 pub mod rtc;
 pub mod scc;
 mod sound_cartridge;
+pub mod ym2413;
 use sound_cartridge::SoundCartridge;
 pub use sound_cartridge::SoundCartridgeProfile;
 pub mod vdp;
@@ -53,6 +54,8 @@ pub struct Hardware {
     pub cassette: cassette::Cassette,
     pub disk_rom: Vec<u8>,
     philips_rom: Option<Vec<u8>>,
+    music_rom: Option<Vec<u8>>,
+    fm: ym2413::Ym2413,
     /// Physical RAM storage. CPU-address observations must use the Bus mapping.
     pub ram: Vec<u8>,
     ram_segments: [u8; 4],
@@ -87,6 +90,8 @@ impl Default for Hardware {
             cassette: cassette::Cassette::default(),
             disk_rom: firmware::disk_rom(),
             philips_rom: None,
+            music_rom: None,
+            fm: ym2413::Ym2413::default(),
             // Reserve the largest profile up front; model changes and reset
             // must not allocate during a transactional cartridge commit.
             ram: vec![0; 256 * 1024],
@@ -134,6 +139,7 @@ impl Hardware {
         self.release_keys();
         self.vdp.reset();
         self.psg.reset();
+        self.fm = ym2413::Ym2413::default();
         if let Some(cart) = &mut self.sound_cartridge {
             cart.reset();
             self.scc.reset_scci();
@@ -223,6 +229,9 @@ impl Bus for Hardware {
                 .read(address, &mut self.scc),
             (1, 0) if self.mapping.scc_access(address) => self.scc.read(address),
             (1, 0) => self.mapping.read(&self.cartridge, address),
+            (3, 1) if self.model == Model::Msx2 && (0x4000..0x8000).contains(&address) => {
+                self.music_rom.as_ref().map_or(255, |rom| rom[a - 0x4000])
+            }
             (3, 0) if self.model == Model::Msx2 => self.subrom.get(a).copied().unwrap_or(255),
             (3, sub) if self.model == Model::Msx1 || sub == 3 => {
                 self.ram[self.ram_address(address)]
@@ -304,6 +313,8 @@ impl Bus for Hardware {
     }
     fn output(&mut self, port: u16, value: u8) {
         match port as u8 {
+            0x7c if self.model == Model::Msx2 && self.music_rom.is_some() => self.fm.select(value),
+            0x7d if self.model == Model::Msx2 && self.music_rom.is_some() => self.fm.write(value),
             0x98 => self.vdp.write(value),
             0x99 => self.vdp.control(value),
             0x9a => self.vdp.write_palette(value),
@@ -591,6 +602,25 @@ impl Machine {
             self.reset();
         }
     }
+    /// Explicit internal-style MSX-MUSIC. Exact bytes are mapped independently
+    /// of the system firmware. MSX1 retains the installation inactive.
+    pub fn install_msx_music(&mut self, rom: Vec<u8>) -> Result<(), String> {
+        if rom.len() != 16384 {
+            return Err(
+                "MSX-MUSIC internal profile requires a separate 16 KiB firmware image.".into(),
+            );
+        }
+        self.hardware.music_rom = Some(rom);
+        self.reset();
+        Ok(())
+    }
+    pub fn has_msx_music(&self) -> bool {
+        self.hardware.music_rom.is_some()
+    }
+    pub fn remove_msx_music(&mut self) {
+        self.hardware.music_rom = None;
+        self.reset();
+    }
     /// Mount a private staged image without changing execution, slots or firmware.
     pub fn mount_disk(&mut self, bytes: Vec<u8>, protected: bool) -> Result<(), String> {
         let disk = disk::Disk::new(bytes, protected)?;
@@ -640,7 +670,8 @@ impl Machine {
         // Register visibility controls CPU access, not the installed chip's audio.
         let scc = (h.mapping.kind == Mapper::KonamiScc || h.sound_cartridge.is_some())
             .then_some(&mut h.scc);
-        h.psg.tick_with_scc(cycles, scc);
+        let fm = (h.model == Model::Msx2 && h.music_rom.is_some()).then_some(&mut h.fm);
+        h.psg.tick_with_expansions(cycles, scc, fm);
         if self.hardware.model == Model::Msx2 {
             self.hardware.rtc.tick(cycles);
         }

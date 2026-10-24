@@ -721,3 +721,72 @@ mod cassette_tests {
         }
     }
 }
+
+/// Profile 1: internal-style MSX2 MSX-MUSIC. No firmware sniffing or patching.
+#[no_mangle]
+pub extern "C" fn msx_install_music_rom(length: u32, profile: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let rom = std::mem::take(&mut a.upload);
+        let result = if profile != 1 {
+            Err("Select the MSX2 internal MSX-MUSIC profile.".into())
+        } else if length as usize != rom.len() {
+            Err("Invalid MSX-MUSIC firmware transfer length.".into())
+        } else {
+            a.machine.install_msx_music(rom)
+        };
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_music_profile() -> u32 {
+    APP.with(|a| u32::from(a.borrow().machine.has_msx_music()))
+}
+#[no_mangle]
+pub extern "C" fn msx_remove_music_rom() {
+    APP.with(|a| a.borrow_mut().machine.remove_msx_music());
+}
+
+#[cfg(test)]
+mod music_tests {
+    use super::*;
+    #[test]
+    fn explicit_profile_staging_cancellation_lengths_and_lifecycle() {
+        msx_model(1);
+        msx_remove_music_rom();
+        assert_eq!(msx_cbios(), 1);
+        APP.with(|a| a.borrow_mut().machine.cpu.pc = 0x1234);
+        for (length, profile) in [(16383, 1), (16384, 0), (16384, 2), (16384, u32::MAX)] {
+            msx_upload(16384);
+            assert_eq!(msx_install_music_rom(length, profile), 0);
+            APP.with(|a| assert_eq!(a.borrow().machine.cpu.pc, 0x1234));
+            assert_eq!(msx_music_profile(), 0);
+        }
+        msx_upload(16384);
+        msx_cancel_upload();
+        assert_eq!(msx_install_music_rom(16384, 1), 0);
+        for n in [0, 16383, 16385] {
+            msx_upload(n);
+            assert_eq!(msx_install_music_rom(n, 1), 0);
+        }
+        let p = msx_upload(16384);
+        let fixture = msx_core::firmware::music_diagnostic_firmware();
+        unsafe {
+            std::ptr::copy_nonoverlapping(fixture.as_ptr(), p, fixture.len());
+        }
+        assert_eq!(msx_install_music_rom(16384, 1), 1);
+        assert_eq!(msx_music_profile(), 1);
+        assert_eq!(msx_firmware(), 1);
+        assert_eq!(msx_boot_policy(), 1);
+        msx_reset();
+        assert_eq!(msx_music_profile(), 1);
+        msx_model(0);
+        assert_eq!(msx_music_profile(), 1);
+        msx_model(1);
+        assert_eq!(msx_music_profile(), 1);
+        msx_cbios();
+        msx_remove_music_rom();
+        assert_eq!(msx_music_profile(), 0);
+        assert_eq!(msx_firmware(), 1);
+    }
+}

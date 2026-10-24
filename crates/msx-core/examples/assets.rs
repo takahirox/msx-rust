@@ -3,6 +3,16 @@ fn main() {
     let dir = env::args().nth(1).expect("output directory");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
+        format!("{dir}/music-diagnostic-firmware.rom"),
+        msx_core::firmware::music_diagnostic_firmware(),
+    )
+    .unwrap();
+    fs::write(
+        format!("{dir}/music-test-cartridge.rom"),
+        msx_core::firmware::music_test_cartridge(),
+    )
+    .unwrap();
+    fs::write(
         format!("{dir}/weave-disk-demo.dsk"),
         msx_core::firmware::demo_disk(),
     )

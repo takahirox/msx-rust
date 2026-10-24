@@ -266,3 +266,16 @@ fn cassette_metadata_failure_and_transport_operations_are_transactional() {
     m.hardware.cassette.eject();
     DENY.with(|s| s.set(false));
 }
+
+#[test]
+fn staged_music_install_reset_and_removal_do_not_allocate() {
+    let mut m = Machine::default();
+    m.set_model(Model::Msx2);
+    let rom = firmware::music_diagnostic_firmware();
+    DENY.with(|s| s.set(true));
+    m.install_msx_music(rom).unwrap();
+    m.reset();
+    m.remove_msx_music();
+    DENY.with(|s| s.set(false));
+    assert!(!m.has_msx_music());
+}

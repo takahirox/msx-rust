@@ -6,6 +6,8 @@ pub use cassette_fixture::{cassette_test_cartridge, cassette_test_image};
 mod disk;
 pub(crate) use disk::write_disk_boot;
 pub use disk::{demo_disk, disk_rom};
+mod music_fixture;
+pub use music_fixture::{music_diagnostic_firmware, music_test_cartridge};
 mod joystick_fixture;
 pub use joystick_fixture::joystick_test_cartridge;
 mod ram_mapper_fixture;

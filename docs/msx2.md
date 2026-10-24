@@ -5,8 +5,9 @@ interpreter as MSX1. Issue [#19](https://github.com/takahirox/msx-rust/issues/19
 makes both models start in automatic Weave BASIC with no cartridge. Opening a
 supported cartridge switches to the model's C-BIOS before Z80 initialization;
 Eject returns to fresh BASIC in the same model. Reset retains the cartridge,
-mapper and active firmware policy. Selecting a machine manually clears all ROM
-selections and restores automatic BASIC. Switching firmware discards the in-memory program.
+mapper and active firmware policy. Selecting a machine manually clears system
+and cartridge ROM selections and restores automatic BASIC; separately installed
+disk/MSX-MUSIC interfaces retain their documented transition behavior. Switching firmware discards the in-memory program.
 C-BIOS is a separate cartridge BIOS, with no original Microsoft MSX BASIC.
 
 ## Built-in firmware and provenance
@@ -296,7 +297,7 @@ Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
 ports read FFh. Raster effects depending on exact hardware timing, changing bitmap
 layouts during an active command, undocumented mixed modes and edge-case sprite
 priority are not compatibility guarantees. MSX2+, turbo R, cassette recording/custom
-waveforms, expanded modern SCC cartridges, FM audio and
+waveforms, expanded modern SCC cartridges, FM-PAC/MSX-AUDIO and
 game-specific patches remain unsupported. Standard read-only MSX CAS playback is
 available on both models; see [cassette wiring, reconstruction policies and diagnostic limits](cassette.md). Raw disk images, the optional Philips
 interface, supported ASCII SRAM cartridges and ROMless Snatcher/SD Snatcher
@@ -682,3 +683,11 @@ service-test cartridge through Open ROM, verify C-BIOS execution, then Eject to
 a usable BASIC prompt. Confirm deployed Wasm/assets and notices load without
 errors. Local checks cannot prove publication. This remains pending; this node
 does not push, open PRs, merge, comment or perform post-merge verification.
+
+## Optional internal MSX-MUSIC
+
+An explicitly installed 16 KiB local FM firmware occupies expanded slot 3-1,
+page 1, independently of cartridge slot 1, disk slot 2, sub-ROM 3-0 and RAM 3-3.
+It adds clocked YM2413 synthesis and write-only 7Ch/7Dh on MSX2; it does not
+change the generation byte or imply a complete historical machine profile.
+MSX1 parks the image inactive. See [the selected profile](msx-music.md).

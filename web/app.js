@@ -25,6 +25,7 @@ let cartridge = '';
 let diskName = '';
 let tapeName = '';
 let diskRomName = '';
+let musicRomName = '';
 let activeSave;
 let importGeneration = 0;
 let demos;
@@ -47,6 +48,7 @@ function updateControls() {
   $('play-demo').disabled = !ready || loading || catalogLoading;
   $('eject').disabled = !ready || (!cartridge && !wasm.msx_sound_cartridge_profile());
   updateSoundCartridge();
+  updateMusic();
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
   updateDisk();
   updateTape();
@@ -314,6 +316,52 @@ $('eject-tape').addEventListener('click', () => {
   cancelMediaImport();
   if (!canceled) { wasm.msx_eject_tape(); tapeName = ''; }
   updateControls(); status(canceled ? 'Import canceled. Session and tape unchanged.' : 'Tape ejected. Execution unchanged.');
+});
+
+// Internal FM firmware shares the transactional local-media staging boundary.
+function updateMusic() {
+  const installed = ready && wasm.msx_music_profile() === 1;
+  for (const id of ['music-profile', 'open-music-rom', 'music-rom']) $(id).disabled = !ready || loading;
+  $('remove-music-rom').disabled = !ready || (!installed && !loading);
+  $('remove-music-rom').textContent = loading ? 'Cancel import' : 'Remove MSX-MUSIC';
+  $('music-status').textContent = installed ? `MSX-MUSIC · ${musicRomName} · slot 3-1 · ${model ? 'active' : 'inactive on MSX1'}` : 'MSX-MUSIC not installed';
+}
+$('open-music-rom').addEventListener('click', () => $('music-rom').click());
+$('music-rom').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const generation = ++importGeneration;
+  const profile = Number($('music-profile').value);
+  loading = true; updateControls();
+  status(`Loading MSX-MUSIC firmware ${file.name}…`);
+  try {
+    if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a separate 16 KiB internal-profile .rom or .bin firmware image.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    persistSave();
+    if (!wasm.msx_install_music_rom(bytes.length, profile)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    musicRomName = file.name;
+    restart(() => {});
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`MSX-MUSIC import failed: ${error.message} Session and installation unchanged.`, 'error');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    event.target.value = '';
+  }
+});
+$('remove-music-rom').addEventListener('click', () => {
+  if (loading) {
+    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
+    status('Import canceled. Session and installation unchanged.');
+    return;
+  }
+  persistSave();
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; });
 });
 
 // Disk media and interface imports share the ROM generation token and staging allocation.
