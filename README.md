@@ -1,7 +1,7 @@
 # msx-rust
 
 An original Rust MSX1 / MSX2 emulator with a browser/WebAssembly frontend, Canvas video,
-keyboard and joystick input, Web Audio PSG, SCC, SCC-I and optional MSX-MUSIC sound,
+keyboard and joystick input, Web Audio PSG, SCC, SCC-I and optional MSX-MUSIC / external FM-PAC sound,
 local ROM loading, local CAS playback, and a usable open-source BASIC environment. The core has no
 third-party dependencies or browser APIs.
 
@@ -178,8 +178,27 @@ MSX2 resets/reactivates it without changing the machine-generation definition.
 Local firmware stays private in this tab. No vendor FM BIOS is bundled or emulated
 through host shortcuts. The downloadable **diagnostic firmware fixture** and
 **FM test cartridge** are original MIT Z80 software, not vendor-compatible FM BIOS.
-FM-PAC banking/SRAM, MSX1 FM expansions and MSX-AUDIO are outside this profile.
+The separate external FM-PAC below supports MSX1/MSX2; MSX-AUDIO remains unsupported.
 See [synthesis, timing, notices, fixture instructions and validation](docs/msx-music.md).
+
+## Optional external FM-PAC
+
+Under **ROMs & advanced system options → External FM-PAC**, supply a separate
+**64 KiB original-profile firmware**. Both MSX1 and MSX2 support this explicitly
+optional accessory in **2-1/page 1**, alongside the game or SCC-I in slot 1 and
+disk in 2-0. Slot 2 is expanded only while installed. Four ROM banks, memory
+programming, software-enabled 7Ch/7Dh I/O and 8190-byte battery SRAM are supported.
+The internal MSX-MUSIC chip can coexist independently.
+
+Reset, firmware, game and model changes retain FM-PAC installation/SRAM.
+Installation/removal restarts selected firmware while preserving other media and
+tape position. The accessory save is **shared across games**, keyed separately by
+firmware SHA-256/profile, with independent backup/restore and the existing
+corruption, storage-error and cross-tab safeguards. Firmware is never persisted.
+After reload, reinstall identical firmware to recover the save. No vendor firmware,
+automatic device discovery or commercial playability is claimed. Original MIT
+firmware/cartridge diagnostics are downloadable in the controls. See [mapping,
+saves, timing, provenance and validation](docs/fm-pac.md).
 
 ## MSX2
 
@@ -238,6 +257,7 @@ See the [MSX2 profile, provenance, limitations and verification](docs/msx2.md).
 | TMS9918A (MSX1) | 16 KiB VRAM, two-write control latch, read-ahead, text/Graphics I/Graphics II/multicolor, 8/16 pixel sprites and magnification, priority, collision/fifth-sprite flags, VBlank IRQ, 256×192 RGBA output |
 | Konami K051649 SCC | Five wavetable voices, four signed 32-byte waves (channels 4/5 share), 12-bit periods, linear volumes, classic test modes; mixed with PSG at 44.1 kHz |
 | Konami SCC-I sound cartridges | Explicit ROMless Snatcher/SD Snatcher profiles, 64 KiB banked volatile RAM, compatible/plus sound maps and five waveforms in slot 1; [details](docs/scc.md#romless-snatcher-and-sd-snatcher-scc-i) |
+| Optional external FM-PAC | MSX1/MSX2, separate 64 KiB firmware, four banks and 8190 battery bytes in 2-1; [profile and limits](docs/fm-pac.md) |
 | Optional MSX2 MSX-MUSIC | Internal-style YM2413, nine melodic or six melodic/five percussion voices, separate local 16 KiB firmware in 3-1; [profile and limits](docs/msx-music.md) |
 | AY-3-8910 | Three tone channels, noise LFSR, mixer, amplitude/envelope registers, logarithmic levels, 44.1 kHz mono samples |
 | Input/I/O | PPI primary-slot register, keyboard row selection and bit set/reset, international keyboard matrix, two standard digital PSG joysticks; connector 1: arrows + Z/X, connector 2: I/K/J/L + N/M |
@@ -255,7 +275,7 @@ VDP access contention, and remaining CPU silicon quirks such as Q-dependent flag
 are not accurately modeled. Sprite status at raster/off-screen edges and unusual
 combined VDP modes are not compatibility guarantees. Raw disk images and the
 [Philips disk interface](docs/disks.md) are supported. Cassette recording and custom
-waveforms, expanded modern SCC cartridges and FM-PAC/MSX-AUDIO remain unsupported. MSX2 coverage and optional peripheral limits
+waveforms, expanded modern SCC cartridges and MSX-AUDIO remain unsupported. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking
 with classic SCC audio, ASCII8/ASCII16 2/8 KiB SRAM variants and the 384 KiB
 R-Type layout are supported. Other specialized mappers and Game Master 2
@@ -532,8 +552,7 @@ SRAM mode. The 2/8 KiB memory repeats within those windows. Reset retains it.
 Auto cannot establish SRAM hardware or its size; choose these five new mappers
 manually. See [exact wiring, limits, original sources and fixtures](docs/cartridge-sram.md).
 Expanded modern SCC cartridges, reversed ASCII registers, 32 KiB SRAM, other select
-wiring and
-Game Master 2 / additional cartridge slots remain unsupported.
+wiring, Game Master 2 and additional game cartridge slots remain unsupported.
 
 The separate **ROMless sound cartridge** controls explicitly install Snatcher or
 SD Snatcher 64 KiB RAM + SCC-I hardware in slot 1 on either model. No cartridge

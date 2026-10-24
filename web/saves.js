@@ -13,11 +13,24 @@ export function encodeSave(bytes, rom, mapper) {
   return JSON.stringify({ version: 1, rom, mapper, size: bytes.length, checksum: checksum(bytes), data: btoa(String.fromCharCode(...bytes)) });
 }
 export function decodeSave(text, rom, mapper, size) {
+  return decodeContainer(text, rom, mapper, size, [2048, 8192]);
+}
+function decodeContainer(text, rom, mapper, size, sizes) {
   if (typeof text !== 'string' || text.length > 16384) throw new Error('Save is too large.');
   const save = JSON.parse(text);
   if (save?.version !== 1 || save.rom !== rom || save.mapper !== mapper || save.size !== size
-      || ![2048, 8192].includes(size) || typeof save.data !== 'string' || save.data.length !== 4 * Math.ceil(size / 3)) throw new Error('Save version, ROM identity, mapper or size does not match.');
+      || !sizes.includes(size) || typeof save.data !== 'string' || save.data.length !== 4 * Math.ceil(size / 3)) throw new Error('Save version, ROM identity, mapper or size does not match.');
   const bytes = Uint8Array.from(atob(save.data), c => c.charCodeAt(0));
   if (bytes.length !== size || btoa(String.fromCharCode(...bytes)) !== save.data || checksum(bytes) !== save.checksum) throw new Error('Save data is corrupted (size/checksum).');
   return bytes;
+}
+
+// A separate namespace/profile binds accessory saves to firmware, never to a game.
+export const fmPacSavePrefix = 'msx-rust:fm-pac:v1:';
+export function encodeFmPacSave(bytes, firmware) {
+  if (bytes.length !== 8190) throw new Error('FM-PAC SRAM must be exactly 8190 bytes.');
+  return encodeSave(bytes, firmware, 'original-fm-pac');
+}
+export function decodeFmPacSave(text, firmware) {
+  return decodeContainer(text, firmware, 'original-fm-pac', 8190, [8190]);
 }

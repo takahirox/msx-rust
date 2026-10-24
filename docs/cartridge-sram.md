@@ -199,3 +199,11 @@ Implementation and this local validation are complete. This node does not push,
 open a PR, comment, merge or deploy. PR/AI review and Issue #27's post-merge live
 Pages verification remain for the subsequent workflow; the local results do not
 claim that those steps happened.
+
+## Independent FM-PAC accessory storage
+
+[External FM-PAC](fm-pac.md#shared-accessory-saves) adds a separate firmware/profile
+identity and namespace with exactly 8190 usable bytes. Its save is shared across
+games; cartridge replacement never changes it. The same conflict, corruption,
+storage-error and explicit backup/recovery rules apply independently. Cartridge
+save validation still accepts only 2048/8192-byte payloads for its active mapper.

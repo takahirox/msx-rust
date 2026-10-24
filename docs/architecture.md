@@ -276,3 +276,14 @@ The YM2413 advances at CPU clock/72 and joins the existing PSG-owned rational
 44.1 kHz sample clock; its current output is held between internal samples.
 No frame-boundary phase resets or secondary audio queues are introduced.
 See [profile, instruction timing and adaptation limits](msx-music.md).
+
+## External FM-PAC
+
+The independently owned external device holds a separate YM2413, four-bank
+firmware and fallibly reserved 8190-byte SRAM. Presence expands slot 2 on both
+models; per-page secondary selection keeps disk in 2-0 and FM-PAC in 2-1/page 1.
+FFFFh latch precedence depends on the page-3 primary expansion, before subslot
+mapping. Internal MSX2 slot 3 and MSX1 fixed RAM remain independent.
+Memory registers and enabled port writes reach their own chip; I/O broadcasts to
+each enabled chip. Both advance/mix at the existing rational sample boundary,
+including when hidden/disabled. See [decoding, transitions and evidence](fm-pac.md).

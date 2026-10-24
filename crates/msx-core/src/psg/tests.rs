@@ -196,3 +196,68 @@ fn fm_mixing_preserves_abi_disabled_pcm_and_long_irregular_partitions() {
     assert_eq!(f1.clocks(), f2.clocks());
     assert_eq!(f1.internal_samples(), f2.internal_samples());
 }
+
+#[test]
+fn two_fm_chips_preserve_partition_counts_independence_and_absent_pcm() {
+    use crate::ym2413::Ym2413;
+    let mut f = Ym2413::default();
+    let mut g = Ym2413::default();
+    for (chip, pitch) in [(&mut f, 0x22), (&mut g, 0x54)] {
+        for (r, v) in [(0x30, 0x10), (0x10, pitch), (0x20, 0x19)] {
+            chip.select(r);
+            chip.write(v);
+        }
+    }
+    let (mut f2, mut g2) = (f.clone(), g.clone());
+    let mut one = Psg::default();
+    configure(&mut one);
+    let mut split = Psg::default();
+    configure(&mut split);
+    let mut old = Psg::default();
+    configure(&mut old);
+    let mut absent = Psg::default();
+    configure(&mut absent);
+    let total = 3_579_545 + 31;
+    one.tick_with_fm_pac(total, None, Some(&mut f), Some(&mut g));
+    let mut remaining = total;
+    for n in [1, 7, 79, 3001, 53].into_iter().cycle() {
+        let n = n.min(remaining);
+        split.tick_with_fm_pac(n, None, Some(&mut f2), Some(&mut g2));
+        remaining -= n;
+        if remaining == 0 {
+            break;
+        }
+    }
+    old.tick(total);
+    absent.tick_with_fm_pac(total, None, None, None);
+    same_state(&one, &split);
+    same_state(&old, &absent);
+    assert_eq!(
+        one.samples.len(),
+        (u64::from(total) * 44100 / 3_579_545) as usize
+    );
+    assert!(one.samples.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+    assert_eq!(f.clocks(), f2.clocks());
+    assert_eq!(g.clocks(), g2.clocks());
+    let mut different = false;
+    // Restart sustained custom carriers to avoid comparing a coincidental zero
+    // crossing or the final silence of a decaying preset.
+    for (chip, pitch) in [(&mut f, 0x22), (&mut g, 0x54)] {
+        *chip = Ym2413::default();
+        for (r, v) in [0x21, 0x21, 0x3f, 0, 0, 0xf0, 0, 0x0f]
+            .into_iter()
+            .enumerate()
+            .map(|(r, v)| (r as u8, v))
+            .chain([(0x30, 0), (0x10, pitch), (0x20, 0x19)])
+        {
+            chip.select(r);
+            chip.write(v);
+        }
+    }
+    for _ in 0..1000 {
+        f.tick(72);
+        g.tick(72);
+        different |= f.output() != g.output();
+    }
+    assert!(different);
+}

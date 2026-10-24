@@ -105,6 +105,11 @@ acknowledge IRQ, DRQ or media change. MSX2 FFFFh expanded-slot precedence, slot
 3-0 sub-ROM, and slot 3-3 mapper RAM continue to work normally. Interface IRQ is
 polled and remains disconnected from CPU IRQ.
 
+With the optional [external FM-PAC](fm-pac.md), primary slot 2 is expanded on both
+models. The disk still occupies 2-0/page 1; FM-PAC occupies 2-1/page 1. Software
+must select the appropriate per-page secondary slot. Hidden disk register accesses
+cannot acknowledge/change the controller. Without FM-PAC, topology is unchanged.
+
 | Address | Read | Write |
 | --- | --- | --- |
 | 7FF8h | WD status, acknowledges ordinary IRQ | WD command |

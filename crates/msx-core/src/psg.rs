@@ -134,8 +134,17 @@ impl Psg {
     pub(crate) fn tick_with_expansions(
         &mut self,
         cycles: u32,
+        scc: Option<&mut crate::scc::Scc>,
+        fm: Option<&mut crate::ym2413::Ym2413>,
+    ) {
+        self.tick_with_fm_pac(cycles, scc, fm, None);
+    }
+    pub(crate) fn tick_with_fm_pac(
+        &mut self,
+        cycles: u32,
         mut scc: Option<&mut crate::scc::Scc>,
         mut fm: Option<&mut crate::ym2413::Ym2413>,
+        mut pac: Option<&mut crate::ym2413::Ym2413>,
     ) {
         let mut scc_cycles = 0;
         for _ in 0..cycles {
@@ -172,11 +181,21 @@ impl Psg {
                 }
                 if let Some(chip) = fm.as_mut() {
                     chip.tick(scc_cycles);
-                    mixed = (mixed + chip.output()).clamp(-1.0, 1.0);
+                    mixed += chip.output();
+                }
+                if let Some(chip) = pac.as_mut() {
+                    chip.tick(scc_cycles);
+                    mixed += chip.output();
+                }
+                if fm.is_some() || pac.is_some() {
+                    mixed = mixed.clamp(-1.0, 1.0);
                 }
                 scc_cycles = 0;
                 self.samples.push(mixed);
             }
+        }
+        if let Some(chip) = pac {
+            chip.tick(scc_cycles);
         }
         if let Some(chip) = fm {
             chip.tick(scc_cycles);

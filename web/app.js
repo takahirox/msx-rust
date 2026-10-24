@@ -1,5 +1,5 @@
 // Browser transport only: Canvas, files, keyboard, pacing, and Web Audio.
-import { savePrefix, romIdentity, encodeSave, decodeSave } from './saves.js';
+import { savePrefix, romIdentity, encodeSave, decodeSave, fmPacSavePrefix, encodeFmPacSave, decodeFmPacSave } from './saves.js';
 const $ = id => document.getElementById(id);
 const screen = $('screen');
 const context = screen.getContext('2d', { alpha: false });
@@ -26,7 +26,9 @@ let diskName = '';
 let tapeName = '';
 let diskRomName = '';
 let musicRomName = '';
-let activeSave;
+let pacRomName = '';
+const gameSaves = { status: 'save-status', prefix: savePrefix, pointer: () => wasm.msx_sram(), size: () => wasm.msx_sram_len(), sizes: [2048, 8192], encode: encodeSave, decode: decodeSave };
+const pacSaves = { status: 'pac-save-status', prefix: fmPacSavePrefix, pointer: () => wasm.msx_fm_pac_sram(), size: () => wasm.msx_fm_pac_sram_len(), sizes: [8190], encode: encodeFmPacSave, decode: decodeFmPacSave };
 let importGeneration = 0;
 let demos;
 let catalogLoading = false;
@@ -49,7 +51,8 @@ function updateControls() {
   $('eject').disabled = !ready || (!cartridge && !wasm.msx_sound_cartridge_profile());
   updateSoundCartridge();
   updateMusic();
-  for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
+  updatePac();
+  for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !gameSaves.active;
   updateDisk();
   updateTape();
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
@@ -366,6 +369,52 @@ $('remove-music-rom').addEventListener('click', () => {
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; });
 });
 
+// The external accessory has its own firmware identity and shared battery save.
+function updatePac() {
+  const installed = ready && wasm.msx_fm_pac_profile() === 1;
+  for (const id of ['open-pac-rom', 'pac-rom']) $(id).disabled = !ready || loading;
+  $('remove-pac-rom').disabled = !ready || (!installed && !loading);
+  $('remove-pac-rom').textContent = loading ? 'Cancel import' : 'Remove FM-PAC';
+  $('pac-status').textContent = installed ? `FM-PAC · ${pacRomName} · slot 2-1 · active` : 'FM-PAC not installed';
+  for (const id of ['export-pac-save', 'import-pac-save']) $(id).disabled = !ready || loading || !pacSaves.active;
+}
+$('open-pac-rom').addEventListener('click', () => $('pac-rom').click());
+$('pac-rom').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const generation = ++importGeneration;
+  loading = true; updateControls(); status(`Loading FM-PAC firmware ${file.name}…`);
+  try {
+    if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 65536) throw new Error('Select a separate 64 KiB original FM-PAC .rom or .bin firmware image.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const identity = await romIdentity(bytes);
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    persistSave();
+    if (!wasm.msx_install_fm_pac(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    pacRomName = file.name;
+    attachSave(identity, 'original-fm-pac', pacSaves);
+    restart(() => {});
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`FM-PAC import failed: ${error.message} Session and installation unchanged.`, 'error');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    event.target.value = '';
+  }
+});
+$('remove-pac-rom').addEventListener('click', () => {
+  if (loading) {
+    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
+    status('Import canceled. Session and installation unchanged.'); return;
+  }
+  persistSave(); detachSave(pacSaves);
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; });
+});
+
 // Disk media and interface imports share the ROM generation token and staging allocation.
 function updateDisk() {
   const philips = ready && wasm.msx_disk_profile() === 1;
@@ -470,44 +519,44 @@ window.addEventListener('beforeunload', event => {
 });
 
 // Save failures have their own persistent status, independent of emulator messages.
-function saveStatus(message) { $('save-status').textContent = message; }
-function sramBytes() { return new Uint8Array(wasm.memory.buffer, wasm.msx_sram() >>> 0, wasm.msx_sram_len()).slice(); }
-function restoreSave(bytes) {
-  if (bytes.length !== wasm.msx_sram_len() || ![2048, 8192].includes(bytes.length)) throw new Error('Save size does not match cartridge SRAM.');
+function saveStatus(message, target = gameSaves) { $(target.status).textContent = message; }
+function sramBytes(target = gameSaves) { return new Uint8Array(wasm.memory.buffer, target.pointer() >>> 0, target.size()).slice(); }
+function restoreSave(bytes, target = gameSaves) {
+  if (bytes.length !== target.size() || !target.sizes.includes(bytes.length)) throw new Error('Save size does not match cartridge SRAM.');
   // Validation is complete and JS runs synchronously between CPU frames. Copy
   // into the reserved SRAM view without a second fallible Wasm allocation after
   // a cartridge has committed. The staged ABI is available to other callers.
-  new Uint8Array(wasm.memory.buffer, wasm.msx_sram() >>> 0, bytes.length).set(bytes);
+  new Uint8Array(wasm.memory.buffer, target.pointer() >>> 0, bytes.length).set(bytes);
 }
-function detachSave() {
-  activeSave = undefined;
-  saveStatus('No SRAM cartridge loaded.');
+function detachSave(target = gameSaves) {
+  target.active = undefined;
+  saveStatus(target === pacSaves ? 'No FM-PAC installed.' : 'No SRAM cartridge loaded.', target);
 }
-function attachSave(rom, mapper) {
-  if (!wasm.msx_sram_len()) { detachSave(); return; }
+function attachSave(rom, mapper, target = gameSaves) {
+  if (!target.size()) { detachSave(target); return; }
   // Reopening identical bytes must also retain unsaved RAM when storage is unavailable.
-  if (activeSave?.rom === rom && activeSave.mapper === mapper) {
-    restoreSave(decodeSave(activeSave.current, rom, mapper, wasm.msx_sram_len()));
+  if (target.active?.rom === rom && target.active.mapper === mapper) {
+    restoreSave(target.decode(target.active.current, rom, mapper, target.size()), target);
     return;
   }
-  activeSave = { rom, mapper, key: `${savePrefix}${rom}:${mapper}`, stored: null, current: null, blocked: false };
+  target.active = { rom, mapper, key: `${target.prefix}${rom}:${mapper}`, stored: null, current: null, blocked: false };
   try {
-    activeSave.stored = localStorage.getItem(activeSave.key);
-    if (activeSave.stored !== null) {
-      restoreSave(decodeSave(activeSave.stored, rom, mapper, wasm.msx_sram_len()));
-      saveStatus('SRAM restored from this browser. Reset keeps it.');
-    } else saveStatus('New SRAM. Saved locally while playing; Reset keeps it.');
+    target.active.stored = localStorage.getItem(target.active.key);
+    if (target.active.stored !== null) {
+      restoreSave(target.decode(target.active.stored, rom, mapper, target.size()), target);
+      saveStatus('SRAM restored from this browser. Reset keeps it.', target);
+    } else saveStatus('New SRAM. Saved locally while playing; Reset keeps it.', target);
   } catch (error) {
-    activeSave.blocked = true;
-    saveStatus(`SRAM restore unavailable: ${error.message} Playing is possible. Existing storage is preserved; export a backup or explicitly import a valid save.`);
+    target.active.blocked = true;
+    saveStatus(`SRAM restore unavailable: ${error.message} Playing is possible. Existing storage is preserved; export a backup or explicitly import a valid save.`, target);
   }
-  activeSave.current = encodeSave(sramBytes(), rom, mapper);
+  target.active.current = target.encode(sramBytes(target), rom, mapper);
 }
-function persistSave() {
-  if (!activeSave || !ready) return;
-  const save = activeSave;
+function persistOneSave(target) {
+  if (!target.active || !ready) return;
+  const save = target.active;
   try {
-    save.current = encodeSave(sramBytes(), save.rom, save.mapper);
+    save.current = target.encode(sramBytes(target), save.rom, save.mapper);
     if (save.blocked || save.current === save.stored) return;
     if (localStorage.getItem(save.key) !== save.stored) {
       save.blocked = true;
@@ -515,43 +564,50 @@ function persistSave() {
     }
     localStorage.setItem(save.key, save.current);
     save.stored = save.current;
-    saveStatus('SRAM saved in this browser. Reset keeps it. Export a backup for safekeeping.');
+    saveStatus('SRAM saved in this browser. Reset keeps it. Export a backup for safekeeping.', target);
   } catch (error) {
     save.blocked = true;
-    saveStatus(`SRAM is in memory only: ${error.message} Export a backup before leaving or changing cartridges.`);
+    saveStatus(`SRAM is in memory only: ${error.message} Export a backup before leaving or changing cartridges.`, target);
   }
 }
+function persistSave() { persistOneSave(gameSaves); persistOneSave(pacSaves); }
 setInterval(persistSave, 1000);
 window.addEventListener('pagehide', persistSave);
-$('export-save').addEventListener('click', () => {
-  if (!activeSave) return;
-  persistSave();
-  const url = URL.createObjectURL(new Blob([activeSave.current], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url; link.download = `msx-sram-${activeSave.rom}-${activeSave.mapper}.json`; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-$('import-save').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  const save = activeSave, generation = importGeneration;
-  try {
-    if (!file || !save || loading) return;
-    if (file.size > 16384) throw new Error('Save is too large.');
-    const text = await file.text();
-    if (save !== activeSave || generation !== importGeneration || loading) return;
-    const bytes = decodeSave(text, save.rom, save.mapper, wasm.msx_sram_len());
-    restoreSave(bytes);
-    // Explicit import authorizes replacement, including a corrupt/conflicting stored record.
-    save.current = encodeSave(bytes, save.rom, save.mapper);
-    save.blocked = false;
-    try { save.stored = localStorage.getItem(save.key); }
-    catch { /* persistSave reports storage errors and leaves execution possible. */ }
-    persistSave();
-    if (!save.blocked) saveStatus('Imported SRAM and saved locally. Reset to let the game read it at startup.');
-  } catch (error) {
-    if (save === activeSave && generation === importGeneration) saveStatus(`Save import rejected: ${error.message} Current SRAM is unchanged.`);
-  } finally { event.target.value = ''; }
-});
+for (const [target, exportId, importId, filename] of [
+  [gameSaves, 'export-save', 'import-save', 'msx-sram'],
+  [pacSaves, 'export-pac-save', 'import-pac-save', 'msx-fm-pac'],
+]) {
+  $(exportId).addEventListener('click', () => {
+    if (!target.active) return;
+    persistOneSave(target);
+    const save = target.active;
+    const url = URL.createObjectURL(new Blob([save.current], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = `${filename}-${save.rom}-${save.mapper}.json`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  $(importId).addEventListener('change', async event => {
+    const file = event.target.files[0];
+    const save = target.active, generation = importGeneration;
+    try {
+      if (!file || !save || loading) return;
+      if (file.size > 16384) throw new Error('Save is too large.');
+      const text = await file.text();
+      if (save !== target.active || generation !== importGeneration || loading) return;
+      const bytes = target.decode(text, save.rom, save.mapper, target.size());
+      restoreSave(bytes, target);
+      // Explicit import authorizes replacement of corrupt/conflicting records.
+      save.current = target.encode(bytes, save.rom, save.mapper);
+      save.blocked = false;
+      try { save.stored = localStorage.getItem(save.key); }
+      catch { /* persistOneSave reports errors while keeping execution possible. */ }
+      persistOneSave(target);
+      if (!save.blocked) saveStatus('Imported SRAM and saved locally. Reset to let software read it at startup.', target);
+    } catch (error) {
+      if (save === target.active && generation === importGeneration) saveStatus(`Save import rejected: ${error.message} Current SRAM is unchanged.`, target);
+    } finally { event.target.value = ''; }
+  });
+}
 
 // Both local files and curated static assets use the same staged Rust cartridge API.
 function uploadRom(bytes, kind, mapper, targetModel) {

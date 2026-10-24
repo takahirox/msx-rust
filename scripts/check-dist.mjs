@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-const expected = ['fh-test-cartridge.rom','music-diagnostic-firmware.rom','music-test-cartridge.rom','emu2413-LICENSE.txt','cassette-test-cartridge.rom','cassette-test.cas','joystick-test-cartridge.rom','ram-mapper-test-cartridge.rom','weave-disk-demo.dsk','weave-disk.rom','saves.js',...Array.from({length: 5}, (_, i) => `mapper-${i + 6}.rom`),'scc-test-cartridge.rom','cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
+const expected = ['fm-pac-diagnostic-firmware.rom','fm-pac-test-cartridge.rom','fh-test-cartridge.rom','music-diagnostic-firmware.rom','music-test-cartridge.rom','emu2413-LICENSE.txt','cassette-test-cartridge.rom','cassette-test.cas','joystick-test-cartridge.rom','ram-mapper-test-cartridge.rom','weave-disk-demo.dsk','weave-disk.rom','saves.js',...Array.from({length: 5}, (_, i) => `mapper-${i + 6}.rom`),'scc-test-cartridge.rom','cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
 assert.deepEqual((await readdir('dist')).sort(), [...expected, 'demos'].sort(), 'Unexpected deployment files; review their provenance.');
 for (const file of expected) assert((await readFile(`dist/${file}`)).length > 0, `Empty ${file}`);
 for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt', 'ROM-LICENSE.txt']]) {
@@ -9,7 +9,7 @@ for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt
 }
 const module = await WebAssembly.compile(await readFile('dist/msx_wasm.wasm'));
 assert.deepEqual(WebAssembly.Module.imports(module), []);
-for (const name of ['msx_install_music_rom','msx_music_profile','msx_remove_music_rom','msx_tape_upload', 'msx_mount_tape', 'msx_rewind_tape', 'msx_eject_tape', 'msx_tape_flags', 'msx_tape_rate', 'msx_tape_position', 'msx_joystick', 'msx_joystick_indexed', 'msx_release_keys', 'memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy', 'msx_sram', 'msx_sram_len', 'msx_restore_sram', 'msx_install_sound_cartridge', 'msx_sound_cartridge_profile', 'msx_remove_sound_cartridge', 'msx_disk_profile', 'msx_install_disk_rom', 'msx_remove_disk_rom', 'msx_mount_disk', 'msx_boot_disk', 'msx_eject_disk', 'msx_disk', 'msx_disk_len', 'msx_disk_flags', 'msx_disk_protect', 'msx_disk_exported', 'msx_disk_boot_state']) {
+for (const name of ['msx_install_fm_pac','msx_fm_pac_profile','msx_remove_fm_pac','msx_fm_pac_sram','msx_fm_pac_sram_len','msx_restore_fm_pac_sram','msx_install_music_rom','msx_music_profile','msx_remove_music_rom','msx_tape_upload', 'msx_mount_tape', 'msx_rewind_tape', 'msx_eject_tape', 'msx_tape_flags', 'msx_tape_rate', 'msx_tape_position', 'msx_joystick', 'msx_joystick_indexed', 'msx_release_keys', 'memory', 'msx_frame', 'msx_upload', 'msx_cancel_upload', 'msx_load', 'msx_load_demo', 'msx_error', 'msx_error_len', 'msx_detected_mapper', 'msx_detection_confidence', 'msx_detection', 'msx_detection_len', 'msx_model', 'msx_width', 'msx_height', 'msx_frame_cycles', 'msx_cbios', 'msx_diagnostic', 'msx_firmware', 'msx_boot_policy', 'msx_sram', 'msx_sram_len', 'msx_restore_sram', 'msx_install_sound_cartridge', 'msx_sound_cartridge_profile', 'msx_remove_sound_cartridge', 'msx_disk_profile', 'msx_install_disk_rom', 'msx_remove_disk_rom', 'msx_mount_disk', 'msx_boot_disk', 'msx_eject_disk', 'msx_disk', 'msx_disk_len', 'msx_disk_flags', 'msx_disk_protect', 'msx_disk_exported', 'msx_disk_boot_state']) {
   assert(WebAssembly.Module.exports(module).some(e => e.name === name), `Missing Wasm export ${name}`);
 }
 for (const id of [6, 7, 8, 9, 10]) {
@@ -137,5 +137,16 @@ for (const file of ['music-diagnostic-firmware.rom','music-test-cartridge.rom','
 const fh = await readFile('dist/fh-test-cartridge.rom');
 assert.equal(fh.length, 16384);
 assert.equal(fh.subarray(0,2).toString(), 'AB');
+
+
+const pac = await readFile('dist/fm-pac-diagnostic-firmware.rom');
+assert.equal(pac.length, 65536);
+for (let bank=0; bank<4; bank++) {
+  assert.equal(pac.subarray(bank*16384+0x18, bank*16384+0x20).toString(), 'WVFPTEST');
+  assert.deepEqual([...pac.subarray(bank*16384+0x100, bank*16384+0x103)], [0x3e,0x51+bank,0xc9]);
+}
+const pacCart = await readFile('dist/fm-pac-test-cartridge.rom');
+assert.equal(pacCart.length, 16384); assert.equal(pacCart.subarray(0,2).toString(), 'AB');
+for (const file of ['fm-pac-diagnostic-firmware.rom','fm-pac-test-cartridge.rom']) assert(html.includes(file));
 
 console.log('Deployment inventory, FM/cassette/disk fixtures, pinned ROM/notice hashes, provenance, subpath links and import-free Wasm verified.');

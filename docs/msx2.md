@@ -297,7 +297,7 @@ Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
 ports read FFh. Raster effects depending on exact hardware timing, changing bitmap
 layouts during an active command, undocumented mixed modes and edge-case sprite
 priority are not compatibility guarantees. MSX2+, turbo R, cassette recording/custom
-waveforms, expanded modern SCC cartridges, FM-PAC/MSX-AUDIO and
+waveforms, expanded modern SCC cartridges, MSX-AUDIO and
 game-specific patches remain unsupported. Standard read-only MSX CAS playback is
 available on both models; see [cassette wiring, reconstruction policies and diagnostic limits](cassette.md). Raw disk images, the optional Philips
 interface, supported ASCII SRAM cartridges and ROMless Snatcher/SD Snatcher
@@ -799,6 +799,8 @@ page 1, independently of cartridge slot 1, disk slot 2, sub-ROM 3-0 and RAM 3-3.
 It adds clocked YM2413 synthesis and write-only 7Ch/7Dh on MSX2; it does not
 change the generation byte or imply a complete historical machine profile.
 MSX1 parks the image inactive. See [the selected profile](msx-music.md).
+
+External FM-PAC is separately optional on both models: [slot-2 expansion, banked firmware and shared SRAM](fm-pac.md).
 
 
 ## Field timing and R9 fixation
