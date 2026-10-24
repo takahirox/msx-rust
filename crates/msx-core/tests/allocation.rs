@@ -279,3 +279,28 @@ fn staged_music_install_reset_and_removal_do_not_allocate() {
     DENY.with(|s| s.set(false));
     assert!(!m.has_msx_music());
 }
+
+#[test]
+fn fm_pac_reservation_failure_preserves_session_and_reset_remove_do_not_allocate() {
+    for model in [Model::Msx1, Model::Msx2] {
+        let mut m = Machine::default();
+        m.set_model(model);
+        m.install_fm_pac(firmware::fm_pac_diagnostic_firmware())
+            .unwrap();
+        m.restore_fm_pac_sram(&[0x79; 8190]).unwrap();
+        m.cpu.pc = 0x4321;
+        let incoming = firmware::fm_pac_diagnostic_firmware();
+        FAIL_SIZE.with(|s| s.set(8190));
+        let result = m.install_fm_pac(incoming);
+        FAIL_SIZE.with(|s| s.set(0));
+        assert!(result.unwrap_err().contains("memory"));
+        assert_eq!(m.cpu.pc, 0x4321);
+        assert_eq!(m.fm_pac_sram(), [0x79; 8190]);
+        DENY.with(|s| s.set(true));
+        m.reset();
+        m.restore_fm_pac_sram(&[0x37; 8190]).unwrap();
+        m.remove_fm_pac();
+        DENY.with(|s| s.set(false));
+        assert!(!m.has_fm_pac());
+    }
+}

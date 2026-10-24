@@ -63,3 +63,8 @@ API existed before this change.
 Observed results: the Z80 diagnostic's exact RAM assertion received six zeros
 instead of `01 08 57 65 FF A5`; the active-FM assertion received only silence.
 Both tests pass with the implemented bus. This check was executed locally.
+
+Issue #75: `python3 tests/reference/missing-fm-pac.py` substitutes the source Issue's
+baseline Bus in a temporary copy while retaining current installation APIs.
+Two independent external-device tests must fail with assertion evidence. The
+production worktree is unchanged. See [external diagnostics and execution record](../../docs/fm-pac.md#independently-authored-diagnostics-and-validation).

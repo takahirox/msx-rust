@@ -7,6 +7,7 @@ pub mod disk;
 pub use cartridge::Mapper;
 use cartridge::Mapping;
 pub mod firmware;
+mod fm_pac;
 pub mod font;
 pub mod psg;
 pub mod rtc;
@@ -56,6 +57,7 @@ pub struct Hardware {
     philips_rom: Option<Vec<u8>>,
     music_rom: Option<Vec<u8>>,
     fm: ym2413::Ym2413,
+    fm_pac: Option<fm_pac::FmPac>,
     /// Physical RAM storage. CPU-address observations must use the Bus mapping.
     pub ram: Vec<u8>,
     ram_segments: [u8; 4],
@@ -92,6 +94,7 @@ impl Default for Hardware {
             philips_rom: None,
             music_rom: None,
             fm: ym2413::Ym2413::default(),
+            fm_pac: None,
             // Reserve the largest profile up front; model changes and reset
             // must not allocate during a transactional cartridge commit.
             ram: vec![0; 256 * 1024],
@@ -140,6 +143,9 @@ impl Hardware {
         self.vdp.reset();
         self.psg.reset();
         self.fm = ym2413::Ym2413::default();
+        if let Some(pac) = &mut self.fm_pac {
+            pac.reset();
+        }
         if let Some(cart) = &mut self.sound_cartridge {
             cart.reset();
             self.scc.reset_scci();
@@ -187,11 +193,14 @@ impl Hardware {
             usize::from(address)
         }
     }
+    fn expanded(&self, primary: u8) -> bool {
+        (primary == 3 && self.model == Model::Msx2) || (primary == 2 && self.fm_pac.is_some())
+    }
     fn slot(&self, address: u16) -> (u8, u8) {
         let page = (address >> 14) * 2;
         let primary = (self.slots >> page) & 3;
-        let secondary = if self.model == Model::Msx2 && primary == 3 {
-            (self.secondary[3] >> page) & 3
+        let secondary = if self.expanded(primary) {
+            (self.secondary[usize::from(primary)] >> page) & 3
         } else {
             0
         };
@@ -200,11 +209,12 @@ impl Hardware {
 }
 impl Bus for Hardware {
     fn read(&mut self, address: u16) -> u8 {
-        if address == 0xffff && self.model == Model::Msx2 && self.slots >> 6 == 3 {
-            return !self.secondary[3];
+        if address == 0xffff && self.expanded(self.slots >> 6) {
+            return !self.secondary[usize::from(self.slots >> 6)];
         }
         let a = address as usize;
         match self.slot(address) {
+            (2, 1) if self.fm_pac.is_some() => self.fm_pac.as_ref().unwrap().read(address),
             (0, 0) => self.bios.get(a).copied().unwrap_or(255),
             (2, 0)
                 if (self.philips_rom.is_some() || self.firmware == Firmware::Disk)
@@ -240,11 +250,12 @@ impl Bus for Hardware {
         }
     }
     fn write(&mut self, address: u16, value: u8) {
-        if address == 0xffff && self.model == Model::Msx2 && self.slots >> 6 == 3 {
-            self.secondary[3] = value;
+        if address == 0xffff && self.expanded(self.slots >> 6) {
+            self.secondary[usize::from(self.slots >> 6)] = value;
             return;
         }
         match self.slot(address) {
+            (2, 1) if self.fm_pac.is_some() => self.fm_pac.as_mut().unwrap().write(address, value),
             (2, 0)
                 if (self.philips_rom.is_some() || self.firmware == Firmware::Disk)
                     && (0x7ff8..=0x7fff).contains(&address) =>
@@ -313,8 +324,18 @@ impl Bus for Hardware {
     }
     fn output(&mut self, port: u16, value: u8) {
         match port as u8 {
-            0x7c if self.model == Model::Msx2 && self.music_rom.is_some() => self.fm.select(value),
-            0x7d if self.model == Model::Msx2 && self.music_rom.is_some() => self.fm.write(value),
+            p @ (0x7c | 0x7d) => {
+                if self.model == Model::Msx2 && self.music_rom.is_some() {
+                    if p == 0x7c {
+                        self.fm.select(value);
+                    } else {
+                        self.fm.write(value);
+                    }
+                }
+                if let Some(pac) = &mut self.fm_pac {
+                    pac.output(p, value);
+                }
+            }
             0x98 => self.vdp.write(value),
             0x99 => self.vdp.control(value),
             0x9a => self.vdp.write_palette(value),
@@ -621,6 +642,35 @@ impl Machine {
         self.hardware.music_rom = None;
         self.reset();
     }
+    /// Independently install the original external FM-PAC profile in slot 2-1.
+    /// Reserve SRAM before committing; invalid/failed imports leave the session intact.
+    pub fn install_fm_pac(&mut self, rom: Vec<u8>) -> Result<(), String> {
+        let pac = fm_pac::FmPac::new(rom)?;
+        self.hardware.fm_pac = Some(pac);
+        self.reset();
+        Ok(())
+    }
+    pub fn has_fm_pac(&self) -> bool {
+        self.hardware.fm_pac.is_some()
+    }
+    pub fn remove_fm_pac(&mut self) {
+        if self.hardware.fm_pac.take().is_some() {
+            self.reset();
+        }
+    }
+    /// Only the 8190 battery-backed bytes; unlock latches are never save data.
+    pub fn fm_pac_sram(&self) -> &[u8] {
+        self.hardware.fm_pac.as_ref().map_or(&[], |pac| &pac.sram)
+    }
+    pub fn restore_fm_pac_sram(&mut self, bytes: &[u8]) -> Result<(), String> {
+        match &mut self.hardware.fm_pac {
+            Some(pac) if bytes.len() == 8190 => {
+                pac.sram.copy_from_slice(bytes);
+                Ok(())
+            }
+            _ => Err("Save size does not match installed FM-PAC SRAM (8190 bytes).".into()),
+        }
+    }
     /// Mount a private staged image without changing execution, slots or firmware.
     pub fn mount_disk(&mut self, bytes: Vec<u8>, protected: bool) -> Result<(), String> {
         let disk = disk::Disk::new(bytes, protected)?;
@@ -671,7 +721,8 @@ impl Machine {
         let scc = (h.mapping.kind == Mapper::KonamiScc || h.sound_cartridge.is_some())
             .then_some(&mut h.scc);
         let fm = (h.model == Model::Msx2 && h.music_rom.is_some()).then_some(&mut h.fm);
-        h.psg.tick_with_expansions(cycles, scc, fm);
+        let pac = h.fm_pac.as_mut().map(|pac| &mut pac.chip);
+        h.psg.tick_with_fm_pac(cycles, scc, fm, pac);
         if self.hardware.model == Model::Msx2 {
             self.hardware.rtc.tick(cycles);
         }

@@ -13,7 +13,8 @@ game cartridge, system BIOS or disk ROM. Slot 1 remains the cartridge/SCC-I,
 slot 2 the disk interface, 3-0 the sub-ROM and 3-3 the RAM mapper. FFFFh's
 inverted secondary-slot readback and write latch retain precedence on all
 expanded slot-3 selections. No FM-PAC memory registers, enable latch, banking or
-SRAM are provided. MSX-AUDIO and MSX1 FM expansions are outside this profile.
+SRAM are provided by this internal profile. The separately optional
+[external FM-PAC](fm-pac.md) supports MSX1/MSX2. MSX-AUDIO remains unsupported.
 
 The explicit selection establishes the hardware profile. Only exact image length
 is validated: a universal header/signature cannot identify all internal firmware.

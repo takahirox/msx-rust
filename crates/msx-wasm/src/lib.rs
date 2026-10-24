@@ -792,3 +792,98 @@ mod music_tests {
         assert_eq!(msx_firmware(), 1);
     }
 }
+
+/// Profile 1 is the original external 64 KiB FM-PAC, independent of internal FM.
+#[no_mangle]
+pub extern "C" fn msx_install_fm_pac(length: u32, profile: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let rom = std::mem::take(&mut a.upload);
+        let result = if profile != 1 {
+            Err("Select the original external FM-PAC profile.".into())
+        } else if length as usize != rom.len() {
+            Err("Invalid FM-PAC firmware transfer length.".into())
+        } else {
+            a.machine.install_fm_pac(rom)
+        };
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_fm_pac_profile() -> u32 {
+    APP.with(|a| u32::from(a.borrow().machine.has_fm_pac()))
+}
+#[no_mangle]
+pub extern "C" fn msx_remove_fm_pac() {
+    APP.with(|a| a.borrow_mut().machine.remove_fm_pac());
+}
+#[no_mangle]
+pub extern "C" fn msx_fm_pac_sram() -> *const u8 {
+    APP.with(|a| a.borrow().machine.fm_pac_sram().as_ptr())
+}
+#[no_mangle]
+pub extern "C" fn msx_fm_pac_sram_len() -> u32 {
+    APP.with(|a| a.borrow().machine.fm_pac_sram().len() as u32)
+}
+#[no_mangle]
+pub extern "C" fn msx_restore_fm_pac_sram(length: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let bytes = std::mem::take(&mut a.upload);
+        let result = if length as usize != bytes.len() {
+            Err("Invalid FM-PAC SRAM transfer length.".into())
+        } else {
+            a.machine.restore_fm_pac_sram(&bytes)
+        };
+        disk_result(&mut a, result)
+    })
+}
+
+#[cfg(test)]
+mod fm_pac_tests {
+    use super::*;
+    #[test]
+    fn independent_profile_staging_atomic_saves_and_retention() {
+        msx_remove_fm_pac();
+        for model in [0, 1] {
+            msx_model(model);
+            for (length, profile) in [(65536, 0), (65536, 2), (65535, 1), (65537, 1)] {
+                msx_upload(65536);
+                APP.with(|a| a.borrow_mut().machine.cpu.pc = 0x4321);
+                assert_eq!(msx_install_fm_pac(length, profile), 0);
+                APP.with(|a| assert_eq!(a.borrow().machine.cpu.pc, 0x4321));
+                assert_eq!(msx_fm_pac_profile(), 0);
+            }
+            msx_upload(65536);
+            msx_cancel_upload();
+            assert_eq!(msx_install_fm_pac(65536, 1), 0);
+            for n in [0, 1, 16384, 65535, 65537] {
+                msx_upload(n);
+                assert_eq!(msx_install_fm_pac(n, 1), 0);
+            }
+            msx_upload(65536);
+            assert_eq!(msx_install_fm_pac(65536, 1), 1);
+            assert_eq!(msx_fm_pac_profile(), 1);
+            assert_eq!(msx_fm_pac_sram_len(), 8190);
+            msx_upload(8190);
+            APP.with(|a| a.borrow_mut().upload.fill(0x5a));
+            assert_eq!(msx_restore_fm_pac_sram(8190), 1);
+            for n in [0, 8189, 8191, 8192] {
+                msx_upload(n);
+                assert_eq!(msx_restore_fm_pac_sram(n), 0);
+                APP.with(|a| assert_eq!(a.borrow().machine.fm_pac_sram(), [0x5a; 8190]));
+            }
+            msx_upload(8190);
+            assert_eq!(msx_restore_fm_pac_sram(8189), 0);
+            msx_reset();
+            msx_builtin();
+            msx_model(1 - model);
+            APP.with(|a| assert_eq!(a.borrow().machine.fm_pac_sram(), [0x5a; 8190]));
+            assert_eq!(msx_fm_pac_profile(), 1);
+            msx_remove_fm_pac();
+            assert_eq!(msx_fm_pac_sram_len(), 0);
+            msx_upload(8190);
+            assert_eq!(msx_restore_fm_pac_sram(8190), 0);
+        }
+    }
+}

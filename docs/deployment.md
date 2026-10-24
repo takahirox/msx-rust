@@ -37,14 +37,16 @@ The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 original firmware, cartridge, disk and CAS fixtures from Rust source. It also
 copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
 It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **41 files**:
+The complete deployable inventory is **44 files**:
 
 - `index.html`, `style.css`, `app.js`, `saves.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
+- `fm-pac-diagnostic-firmware.rom`, `fm-pac-test-cartridge.rom` (original MIT external accessory diagnostics; [provenance](fm-pac.md#behavioral-references-and-provenance))
 - `music-diagnostic-firmware.rom`, `music-test-cartridge.rom`, `emu2413-LICENSE.txt` (original diagnostics and MIT synthesis adaptation; [provenance](msx-music.md#synthesis-and-adaptation-audit))
 - `cassette-test-cartridge.rom`, `cassette-test.cas` (original Z80 loader and synthetic CAS; [provenance](cassette.md#references-and-original-fixtures))
 - `weave-disk.rom`, `weave-disk-demo.dsk`
+- `fh-test-cartridge.rom` (original MIT horizontal interrupt diagnostic)
 - `scc-test-cartridge.rom`, `joystick-test-cartridge.rom`, `ram-mapper-test-cartridge.rom`
 - `mapper-6.rom`, `mapper-7.rom`, `mapper-8.rom`, `mapper-9.rom`, `mapper-10.rom`
 - `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
