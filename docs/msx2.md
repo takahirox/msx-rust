@@ -295,9 +295,10 @@ superimposition, light pen, mouse color-bus interface or optional expansion VRAM
 Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
 ports read FFh. Raster effects depending on exact hardware timing, changing bitmap
 layouts during an active command, undocumented mixed modes and edge-case sprite
-priority are not compatibility guarantees. MSX2+, turbo R, tape drives, expanded
-modern SCC cartridges, FM audio and
-game-specific patches remain unsupported. Raw disk images, the optional Philips
+priority are not compatibility guarantees. MSX2+, turbo R, cassette recording/custom
+waveforms, expanded modern SCC cartridges, FM audio and
+game-specific patches remain unsupported. Standard read-only MSX CAS playback is
+available on both models; see [cassette wiring, reconstruction policies and diagnostic limits](cassette.md). Raw disk images, the optional Philips
 interface, supported ASCII SRAM cartridges and ROMless Snatcher/SD Snatcher
 SCC-I profiles are available. Classic SCC and SCC-I audio work on both models;
 see [SCC details](scc.md).

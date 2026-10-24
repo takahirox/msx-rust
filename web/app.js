@@ -23,6 +23,7 @@ let mainFile;
 let subFile;
 let cartridge = '';
 let diskName = '';
+let tapeName = '';
 let diskRomName = '';
 let activeSave;
 let importGeneration = 0;
@@ -48,6 +49,7 @@ function updateControls() {
   updateSoundCartridge();
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !activeSave;
   updateDisk();
+  updateTape();
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
@@ -117,6 +119,7 @@ function render() {
   const pixels = new Uint8ClampedArray(wasm.memory.buffer, wasm.msx_pixels(), width * height * 4);
   context.putImageData(new ImageData(pixels, width, height), 0, 0);
   updateDisk();
+  updateTape();
   const text = readString(wasm.msx_transcript(), wasm.msx_transcript_len());
   if ($('transcript').textContent !== text) $('transcript').textContent = text;
 }
@@ -255,6 +258,62 @@ $('remove-sound-cartridge').addEventListener('click', () => {
     status('Import canceled. Session, sound cartridge and media unchanged.'); return;
   }
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); });
+});
+
+// Tape uses the same generation/staging boundary as other local media imports.
+function updateTape() {
+  const flags = ready ? wasm.msx_tape_flags() : 0;
+  for (const id of ['open-cas', 'tape', 'tape-rate']) $(id).disabled = !ready || loading;
+  $('rewind-tape').disabled = !ready || !(flags & 1) || loading;
+  $('eject-tape').disabled = !ready || (!(flags & 1) && !loading);
+  $('eject-tape').textContent = loading ? 'Cancel import' : 'Eject tape';
+  const text = flags & 1 ? `Cassette: ${tapeName} · ${wasm.msx_tape_rate()} baud · ${flags & 4 ? 'end of tape' : paused ? 'paused' : flags & 2 ? 'playing' : 'stopped'} · motor ${flags & 2 ? 'on' : 'off'} · ${Math.floor(wasm.msx_tape_position())} s` : 'Cassette: empty';
+  if ($('tape-status').textContent !== text) $('tape-status').textContent = text;
+}
+function cancelMediaImport() {
+  importGeneration++;
+  loading = false;
+  wasm.msx_cancel_upload();
+}
+$('open-cas').addEventListener('click', () => $('tape').click());
+$('tape').addEventListener('cancel', () => {
+  cancelMediaImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
+});
+$('tape').addEventListener('change', async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const generation = ++importGeneration;
+  const rate = Number($('tape-rate').value);
+  loading = true; updateControls(); status(`Loading CAS ${file.name}…`);
+  try {
+    if (!/\.cas$/i.test(file.name) || !file.size || file.size > 16 * 1024 * 1024) throw new Error('Select a nonempty MSX .cas image up to 16 MiB.');
+    if (![1200, 2400].includes(rate)) throw new Error('CAS rate must be 1200 or 2400 baud.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (generation !== importGeneration) return;
+    const pointer = wasm.msx_tape_upload(bytes.length);
+    if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
+    if (!wasm.msx_mount_tape(bytes.length, rate)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    tapeName = file.name;
+    status('CAS mounted at the beginning. Software controls the cassette motor.');
+  } catch (error) {
+    if (generation !== importGeneration) return;
+    wasm.msx_cancel_upload();
+    status(`CAS import failed: ${error.message} Session and previous tape unchanged.`, 'error');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+    event.target.value = '';
+  }
+});
+$('rewind-tape').addEventListener('click', () => {
+  cancelMediaImport(); wasm.msx_rewind_tape(); updateControls();
+  status('Tape rewound. Execution unchanged.');
+});
+$('eject-tape').addEventListener('click', () => {
+  const canceled = loading;
+  cancelMediaImport();
+  if (!canceled) { wasm.msx_eject_tape(); tapeName = ''; }
+  updateControls(); status(canceled ? 'Import canceled. Session and tape unchanged.' : 'Tape ejected. Execution unchanged.');
 });
 
 // Disk media and interface imports share the ROM generation token and staging allocation.

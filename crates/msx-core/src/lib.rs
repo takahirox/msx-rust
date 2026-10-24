@@ -1,6 +1,7 @@
 //! Platform-independent, original MSX1/MSX2 implementation. No browser dependencies.
 pub mod basic;
 pub mod cartridge;
+pub mod cassette;
 pub mod cpu;
 pub mod disk;
 pub use cartridge::Mapper;
@@ -49,6 +50,7 @@ pub struct Hardware {
     pub secondary: [u8; 4],
     pub rtc: rtc::Rtc,
     pub fdc: disk::Controller,
+    pub cassette: cassette::Cassette,
     pub disk_rom: Vec<u8>,
     philips_rom: Option<Vec<u8>>,
     /// Physical RAM storage. CPU-address observations must use the Bus mapping.
@@ -82,6 +84,7 @@ impl Default for Hardware {
             secondary: [0; 4],
             rtc: rtc::Rtc::default(),
             fdc: disk::Controller::default(),
+            cassette: cassette::Cassette::default(),
             disk_rom: firmware::disk_rom(),
             philips_rom: None,
             // Reserve the largest profile up front; model changes and reset
@@ -272,11 +275,13 @@ impl Bus for Hardware {
                     } else {
                         (self.joystick2, 0x20)
                     };
-                    0x40 | if control & common == 0 {
-                        inputs & 0x3f
-                    } else {
-                        0x3f
-                    }
+                    (u8::from(self.cassette.input(self.ppi_c & 0x10 == 0)) << 7)
+                        | 0x40
+                        | if control & common == 0 {
+                            inputs & 0x3f
+                        } else {
+                            0x3f
+                        }
                 } else {
                     self.psg.read()
                 }
@@ -628,6 +633,9 @@ impl Machine {
         let cycles = self.cpu.step(&mut self.hardware);
         self.hardware.vdp.tick(cycles);
         self.hardware.fdc.tick(cycles);
+        self.hardware
+            .cassette
+            .tick(cycles, self.hardware.ppi_c & 0x10 == 0);
         let h = &mut self.hardware;
         // Register visibility controls CPU access, not the installed chip's audio.
         let scc = (h.mapping.kind == Mapper::KonamiScc || h.sound_cartridge.is_some())

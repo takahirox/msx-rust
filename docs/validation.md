@@ -1110,3 +1110,106 @@ DAC latency, analog effects and deformation timing retain documented synthesis
 approximations. No proprietary firmware or commercial-game bytes were used.
 Fixture success does not establish Snatcher or SD Snatcher execution/playability.
 Issue #49 requires no post-merge verification; publication was not performed.
+
+## Issue 63 cassette playback
+
+Source: [Issue #63](https://github.com/takahirox/msx-rust/issues/63), read live with
+`gh issue view 63 --repo takahirox/msx-rust --json number,title,body,state` before
+implementation. Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node 24.12.0, Playwright 1.64.1 / Chromium. Evaluation baseline:
+`3bf1359b15a7cd717d21776af54886887f34b27d`; assigned checkpoint: `8f7d5b9`.
+The read-only GitHub main-head lookup matched the evaluation baseline.
+See [format, timing, lifecycle, fixture provenance and limits](cassette.md).
+
+The transport reconstructs standard CAS without waveform expansion, uses rational
+CPU-clock phase, routes only PSG R14.7, and derives active-low motor state from the
+existing PPI C4 latch. Native pulse expectations independently calculate exact
+edge timestamps for 00/FF/55/AA/80/81/FE/7F, leader/gap/block boundaries and final
+stop bits. They compare single-cycle, irregular and large partitions, a position
+over twenty minutes into playback, motor phase continuity, reset/firmware/model
+retention, rewind/eject, malformed files and byte/block bounds. A dedicated cross-media test preserves populated SRAM, modified disk bytes, CPU,
+firmware and PSG audio through tape replacement/rewind/eject. A real allocator
+failure during metadata reservation preserves the previous medium, rate and
+position; reset/rewind/eject allocate nothing. Raw ABI tests cover invalid rates,
+lengths, empty/oversized staging and cancellation without changing execution.
+
+The original Z80 loader executes on MSX1/MSX2 at 1200/2400 baud, measures both
+leaders (within five high-frequency cycles of 16000/32000 and 4000/8000), decodes
+all 50 independently specified header/body bytes into mapped RAM, checks idle-low
+while stopping/resuming the motor inside a stop pulse, and executes its recovered
+payload. Native tests assert exact RAM, result marker and every displayed bit.
+Twelve browser cases exercise compiled Wasm through real file choosers at `/` and
+`/msx-rust/`, assert every recovered byte in actual Canvas pixels and the green
+result, repeat after Rewind/Reset, and cover pause, end-of-tape, eject, preserved
+BASIC/disk, invalid format/rate/stage/allocation, cancellation and stale async
+completion after a newer import or cartridge transition. Tests supply raw CAS
+bytes only; no decoded-byte injection, BIOS tape traps or proprietary ROMs are used.
+
+### Baseline failure observed
+
+Exported baseline `3bf1359` with `git archive` into ignored
+`target/cassette-baseline`, copied the generated original cassette cartridge into
+its core tests, and ran a standalone integration probe with the baseline's own
+CPU/hardware. The baseline has no CAS mounting API, so it cannot attach the
+matching image. The probe loaded the same cartridge on each model, executed 1600
+frames, sampled R14.7 after every frame, inspected C1FFh and asserted the recovered
+payload's VDP R7=22h result. It failed that assertion on both models:
+
+| Baseline observation | MSX1 | MSX2 |
+| --- | --- | --- |
+| Completed frames | 1600 | 1600 |
+| Final PC (hex) | 4146 | 4148 |
+| High cassette samples | 0 | 0 |
+| Payload completion C1FFh | 00h | 00h |
+| VDP R7 | 11h | 11h |
+
+The loader remained in the pulse wait and never executed the payload. The probe
+failed as expected (0 passed, 1 failed); it is separate from the passing final
+workspace suite. The final native/browser loader succeeds with the matching CAS
+mounted on both models/rates. This comparison demonstrates the missing baseline
+signal/loading path, not genuine BIOS or commercial-title compatibility.
+
+### Mandatory checks
+
+| Check | Final result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed, 261 tests; zero failures/ignored |
+| `./scripts/build.sh` | Passed with pinned Rust and the existing local linker workaround |
+| `node scripts/check-dist.mjs` | Passed; 38 files, including CAS/loader, notices and seven cassette exports |
+| `npm ci` / `npx playwright install chromium` | Passed |
+| `npx playwright test tests/cassette.spec.js --reporter=line` | Passed, 12 cases; all also passed in the final full run |
+| Focused responsive/fullscreen and media checks | Passed, 9 cases |
+| `npm test` | Passed, 174 cases in 13.7 minutes; zero failures/skips |
+| Source-Issue/full-diff review, whitespace and local links | Passed; no blocking findings remain |
+
+Homebrew Rust initially shadowed the requested compiler. Selecting the pinned
+sysroot in PATH fixed that mismatch; the Wasm link then encountered the host's
+previously documented `libLLVM.dylib` lookup failure. The ignored worktree-local
+`target/cassette-toolchain/rust-lld` wrapper sets that same toolchain's library
+path and executes its unchanged linker, selected with
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. No project build settings, compiler
+installation or dependencies changed. Initial diagnostic color expectations were
+corrected to observe the payload's green backdrop and the two model palettes;
+stale-session tests use real enabled cancellation controls. Final focused checks
+above include those fixes. The first full browser run passed 170 cases and failed
+four desktop/fullscreen layout checks: the added cassette row reduced display
+height. Compact desktop rows and a shared horizontally scrolling media strip in
+landscape fullscreen resolved those regressions. All nine focused layout/media
+checks then passed, including keyboard access to both transport groups. The final
+full browser rerun passed all 174 cases and includes the expanded file-read/size-
+failure and landscape media-access assertions.
+
+Reviewed the live source Issue and complete diff under the repository review
+guidelines, including parsing ambiguities, exact clock arithmetic and bounds,
+PSG/joystick/PPI isolation, lifecycle and fractional phase, transactional imports,
+firmware/SRAM/disk/audio retention, independent Z80/Canvas expectations, responsive
+layout, licenses, distribution inventory and local Markdown links. The layout
+findings were fixed and rechecked; no other blocking source-review findings remain.
+No PR review or merge was performed by this implementation node.
+
+Optional pinned upstream runtime comparison, genuine BIOS tape loading,
+commercial software and physical hardware checks were not performed. No
+commercial tape is claimed working. No post-merge verification is required for
+Issue #63. This node does not push, open PRs, comment, merge or deploy.

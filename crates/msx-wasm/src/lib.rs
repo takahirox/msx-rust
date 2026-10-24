@@ -615,3 +615,109 @@ mod tests {
         assert_eq!(msx_disk_boot_state(), 2);
     }
 }
+
+/// Transactional, bounded CAS staging; allocation failures leave the tape intact.
+#[no_mangle]
+pub extern "C" fn msx_tape_upload(length: u32) -> *mut u8 {
+    if length as usize > msx_core::cassette::MAX_BYTES {
+        APP.with(|a| {
+            let mut a = a.borrow_mut();
+            a.upload = Vec::new();
+            a.error = "CAS exceeds the 16 MiB image limit.".into();
+        });
+        return std::ptr::null_mut();
+    }
+    msx_upload(length)
+}
+#[no_mangle]
+pub extern "C" fn msx_mount_tape(length: u32, rate: u32) -> u32 {
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        let bytes = std::mem::take(&mut a.upload);
+        let result = if length as usize != bytes.len() {
+            Err("Invalid CAS transfer length. Select the file again.".into())
+        } else {
+            a.machine.hardware.cassette.mount(bytes, rate)
+        };
+        disk_result(&mut a, result)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_rewind_tape() {
+    APP.with(|a| a.borrow_mut().machine.hardware.cassette.rewind());
+}
+#[no_mangle]
+pub extern "C" fn msx_eject_tape() {
+    APP.with(|a| a.borrow_mut().machine.hardware.cassette.eject());
+}
+/// Bit 0: mounted; bit 1: PPI motor latch on; bit 2: end of tape.
+#[no_mangle]
+pub extern "C" fn msx_tape_flags() -> u32 {
+    APP.with(|a| {
+        let a = a.borrow();
+        let h = &a.machine.hardware;
+        u32::from(h.cassette.mounted())
+            | (u32::from(h.ppi_c & 0x10 == 0) << 1)
+            | (u32::from(h.cassette.ended()) << 2)
+    })
+}
+#[no_mangle]
+pub extern "C" fn msx_tape_rate() -> u32 {
+    APP.with(|a| a.borrow().machine.hardware.cassette.rate())
+}
+#[no_mangle]
+pub extern "C" fn msx_tape_position() -> f64 {
+    APP.with(|a| a.borrow().machine.hardware.cassette.position_cycles() as f64 / 3_579_545.0)
+}
+
+#[cfg(test)]
+mod cassette_tests {
+    use super::*;
+    #[test]
+    fn bounded_staging_cancel_bad_rate_and_failed_imports_preserve_session() {
+        for model in [0, 1] {
+            msx_model(model);
+            let bytes = msx_core::firmware::cassette_test_image();
+            let n = bytes.len() as u32;
+            let stage = || {
+                let p = msx_tape_upload(n);
+                assert!(!p.is_null());
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+                }
+            };
+            stage();
+            assert_eq!(msx_mount_tape(n, 2400), 1);
+            APP.with(|a| {
+                let mut a = a.borrow_mut();
+                a.machine.cpu.pc = 0x1234;
+                a.machine.hardware.cassette.tick(8_123_456, true);
+            });
+            let position = msx_tape_position();
+            for rate in [0, 1, 1199, 2401, u32::MAX] {
+                stage();
+                assert_eq!(msx_mount_tape(n, rate), 0);
+                assert_eq!(msx_tape_position(), position);
+                assert_eq!(msx_tape_rate(), 2400);
+            }
+            stage();
+            assert_eq!(msx_mount_tape(n - 1, 1200), 0);
+            stage();
+            msx_cancel_upload();
+            assert_eq!(msx_mount_tape(n, 1200), 0);
+            assert!(msx_tape_upload(0).is_null());
+            assert!(msx_tape_upload(16 * 1024 * 1024 + 1).is_null());
+            assert!(msx_tape_upload(u32::MAX).is_null());
+            assert_eq!(msx_mount_tape(0, 1200), 0);
+            assert_eq!(msx_tape_position(), position);
+            APP.with(|a| assert_eq!(a.borrow().machine.cpu.pc, 0x1234));
+            msx_reset();
+            assert_eq!(msx_tape_position(), position);
+            assert_eq!(msx_tape_flags(), 3);
+            msx_rewind_tape();
+            assert_eq!(msx_tape_position(), 0.0);
+            msx_eject_tape();
+            assert_eq!(msx_tape_flags(), 2);
+        }
+    }
+}

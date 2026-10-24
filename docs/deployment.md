@@ -34,14 +34,18 @@ installs the toolchain specified by the repository before the build runs.
 
 The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 `dist/`, copies only the web entry files and license notices, then generates the
-seven original boot/test ROMs from Rust source. It also copies only the three pinned
-C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
+original firmware, cartridge, disk and CAS fixtures from Rust source. It also
+copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
 It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **25 files**:
+The complete deployable inventory is **38 files**:
 
-- `index.html`, `style.css`, `app.js`
+- `index.html`, `style.css`, `app.js`, `saves.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
+- `cassette-test-cartridge.rom`, `cassette-test.cas` (original Z80 loader and synthetic CAS; [provenance](cassette.md#references-and-original-fixtures))
+- `weave-disk.rom`, `weave-disk-demo.dsk`
+- `scc-test-cartridge.rom`, `joystick-test-cartridge.rom`, `ram-mapper-test-cartridge.rom`
+- `mapper-6.rom`, `mapper-7.rom`, `mapper-8.rom`, `mapper-9.rom`, `mapper-10.rom`
 - `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
 - `cbios-test-cartridge.rom`, `cbios-msx1-test-cartridge.rom`
 - `cbios_main_msx1.rom`, `cbios_main_msx2.rom`, `cbios_sub.rom`

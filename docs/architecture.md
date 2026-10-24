@@ -29,8 +29,9 @@ calls the AB init pointer. Reset restores mapper power-on banks. See the [mapper
 and selection rules](../README.md#rom-loading-and-legal-guidance). With an external
 system ROM, normal reset mapping is restored and that ROM probes slots itself. A9h
 reads the active-low keyboard row selected by AAh; ABh handles PPI control and port-C
-bit set/reset. PSG registers 14/15 integrate joystick input. Printer and cassette data
-are absent. MSX2 expands slot 3 for sub-ROM and RAM; see the [MSX2 hardware, commands,
+bit set/reset. PSG registers 14/15 integrate joystick input; R14.7 receives clocked
+[cassette playback](cassette.md) under active-low PPI C4. Printer data is absent.
+MSX2 expands slot 3 for sub-ROM and RAM; see the [MSX2 hardware, commands,
 timing limits and tests](msx2.md).
 
 The Weave BASIC boot ROM's private F0/F1 service interface is specific to Weave BASIC.
@@ -46,8 +47,8 @@ Two independent active-low masks store up/down/left/right/trigger A/trigger B in
 bits 0–5, initially 3Fh. PSG R15 bit 6 selects connector 1 (0) or 2 (1). R15 bits
 4/5 independently drive each connector's pin 8. Standard switches connect their
 inputs to this common: low reports held inputs; high reports 3Fh without changing
-stored state. R14 bits 6/7 keep the existing 1/0 values. Other R15 bits retain
-existing latch/readback behavior. The motherboard compatibility policy fixes R14
+stored state. R14 bit 6 stays high; bit 7 carries cassette input (idle low).
+Other R15 bits retain existing latch/readback behavior. The motherboard compatibility policy fixes R14
 to peripheral input and R15 to peripheral output regardless of R7 bits 6/7; R7
 readback and bits 0–5 audio mixer controls remain intact. This describes this
 emulated motherboard, not universal discrete AY-3-8910 direction/electrical behavior.
