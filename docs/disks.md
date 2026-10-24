@@ -107,7 +107,7 @@ polled and remains disconnected from CPU IRQ.
 
 | Address | Read | Write |
 | --- | --- | --- |
-| 7FF8h | WD status, acknowledges IRQ | WD command |
+| 7FF8h | WD status, acknowledges ordinary IRQ | WD command |
 | 7FF9h | Track | Track (idle only) |
 | 7FFAh | Sector | Sector (idle only) |
 | 7FFBh | Data, consumes a read byte when DRQ | Data, supplies a write byte when DRQ |
@@ -117,7 +117,8 @@ polled and remains disconnected from CPU IRQ.
 | 7FFFh | Bit 6 **active-low IRQ**, bit 7 **active-low DRQ**, all other bits pulled high | Ignored |
 
 Signal reads do not acknowledge either signal. Data transfer services DRQ; status
-reads acknowledge IRQ. Drive readback reports bit 2 low once after A: insert/eject,
+reads acknowledge ordinary IRQ (D8 requires D0). Drive readback reports bit 2
+low once after A: insert/eject,
 then high; it acknowledges change only for selected A:, even with the motor off.
 Absent B:/no drive behave as unchanged upstream dummy drives and do not consume
 A:'s change. Reset sets side/drive latches to 00h (A selected, motor off) and
@@ -155,7 +156,7 @@ no C-BIOS sub-ROM is installed in this original boot mode. No mapper RAM is adde
 
 | Address | Read | Write |
 | --- | --- | --- |
-| 7FF8h | WD status (acknowledges IRQ) | WD command |
+| 7FF8h | WD status (acknowledges ordinary IRQ) | WD command |
 | 7FF9h | Track register | Track register (idle only) |
 | 7FFAh | Sector register | Sector register (idle only) |
 | 7FFBh | Data register / consume read byte when DRQ | Data register / supply write byte when DRQ |
@@ -165,8 +166,9 @@ no C-BIOS sub-ROM is installed in this original boot mode. No mapper RAM is adde
 | 7FFFh | Bit 7 IRQ, bit 6 DRQ (active high) | Ignored |
 
 IRQ is polled through the interface; it is **not connected to the CPU interrupt
-line**, which remains the VDP IRQ. Reading status clears IRQ, reading the signal
-latch does not. Insert/eject and completion raise interface IRQ; controller Reset
+line**, which remains the VDP IRQ. Reading status clears ordinary pending IRQ;
+the immediate D8 latch requires D0. Reading the signal latch acknowledges neither.
+Insert/eject and completion raise interface IRQ; controller Reset
 clears it, cancels transfers, restores track/side zero, sector one, motor off, while
 retaining media/change/dirty/protect state. Disk change clears only by 7FFEh read.
 
@@ -200,7 +202,8 @@ this raw-sector subset.
 Status: bit 0 busy, bit 1 DRQ for sector commands, bit 2 lost data, bit 4 seek/
 record-not-found, bit 6 write-protect failure, bit 7 not ready. Type I status uses
 bit 2 for track zero, bit 1 for index, bit 6 for the media protect signal instead.
-Status errors persist until the next command; bit 7 always reflects live READY.
+Stored errors persist until an accepted ordinary command or idle FORCE INTERRUPT;
+busy FORCE INTERRUPT retains them. Bit 7 always reflects live READY.
 A drive is ready only with media, A: selected and motor on. Writes check protection before and after transfer.
 
 Type-I movement uses the 1 MHz WD2793 profile: rate bits 00/01/10/11 select
@@ -216,7 +219,8 @@ at rate 00 issues pulses at 0, 6, …, 468 ms and completes at 474 ms (1,696,705
 cycles). Equal Track/Data with V=0 completes immediately with no artificial delay.
 BUSY stays asserted and DRQ clear until completion, when interface IRQ rises.
 FORCE INTERRUPT cancels future events but retains all issued head/register changes;
-status/signal acknowledgement and polarity are unchanged. Media replacement/ejection,
+ordinary status acknowledgement and interface polarity are unchanged; D8 has a
+separate persistent immediate latch as described below. Media replacement/ejection,
 reset and interface removal cancel pending events; reset/removal retain their
 existing reset-to-zero lifecycle.
 
@@ -350,7 +354,7 @@ repeated/early reads return the register without advancing the disk. The final
 byte stays available with DRQ through the CRC tail until serviced or completion.
 Missing its one-byte budget latches LOST DATA even without a replacement byte;
 a late read during the tail still returns it. Completion clears DRQ, clears BUSY,
-and raises IRQ; Data retains its last value. Status reads acknowledge IRQ only.
+and raises IRQ; Data retains its last value. Status reads acknowledge ordinary IRQ only.
 
 An initially unserviced write aborts at its separate check with LOST DATA and no
 media changes. Once the first byte is latched, later unserviced positions become
@@ -364,8 +368,8 @@ DRQ do not service that future request. CPU service never shifts deadlines or
 completes/commits byte 512.
 LOST DATA survives normal completion, subsequent multi-record searches/transfers,
 and their RNF failure; a newly accepted ordinary command or reset clears it.
-Existing FORCE INTERRUPT status/latching behavior is unchanged and remains outside
-this task. Continued read overrun, initial write rejection, later zero-fill and
+FORCE INTERRUPT retains this stored LOST DATA when canceling a busy command;
+its status and interrupt-latch rules are specified below. Continued read overrun, initial write rejection, later zero-fill and
 the CRC/trailing-FE sequence are informed by the TI transcription, printed pages
 7, 11, 20 and 40; the exact final-read service/DRQ policy above is synthetic.
 
@@ -388,6 +392,49 @@ Completed earlier sectors survive later cancellation, and dirty-media guards sti
 require exact export before replacement/ejection. This staged-sector safety policy
 deliberately differs from physical partial-write fidelity: a real interrupted write
 can leave partial data or CRC damage, which raw DSK does not represent.
+
+## FORCE INTERRUPT status and IRQ sources
+
+Type IV accepts D0h..DFh even while BUSY. Busy cancellation clears BUSY but
+retains the interrupted Type-I/II status interpretation and stored results,
+including LOST DATA. Idle FORCE INTERRUPT clears stored results and selects
+Type-I status. Status storage is separate from live READY, DRQ, index, track-zero
+and Type-I write-protect recomputation: canceling a transfer always lowers DRQ,
+so the live DRQ bit clears even when stored LOST DATA survives. Type-I protect
+readback follows current selected media; Type-II write-protect is a stored failure.
+
+Ordinary completion/lifecycle/conditional IRQ is separate from the immediate
+latch. D8 sets the immediate latch, which survives repeated Status/signal reads,
+elapsed time, ordinary commands and other nonzero Type-IV masks. Only D0 or
+reset releases it. We explicitly adopt pinned openMSX's **D0 command-boundary
+release** policy; the manufacturer's wording permits a subsequent Status/command
+acknowledgement interpretation and the precise electrical release edge remains
+unmeasured. D8→D0→Status and D8→D0→ordinary command both restore ordinary
+acknowledgement. Reset clears both IRQ sources and conditional masks.
+
+D1 arms not-ready→ready, D2 ready→not-ready, D4 every rising index; combinations
+OR these conditions. Status acknowledges a pending conditional IRQ without
+disarming later events. Repeated reads or unchanged READY levels do not retrigger.
+READY edges include drive/motor controls and media insertion/ejection. The existing
+unconditional insert/eject lifecycle IRQ and disk-change notification remain in
+force even with no Type-IV mask. Only rotating, selected A media generates index,
+on the absolute 715909-cycle revolution boundaries; stopped/absent media produces
+none. Accepted ordinary commands and D0 disarm conditions; ignored busy commands
+do not. Arming at an already high index/READY level does not replay its edge.
+
+Cancellation discards pending movement, settling, searches, transfers and tails
+without a completion IRQ, retains issued steps and complete sectors, and drops
+incomplete staged writes. Canceled events cannot resume with later ticks. Device
+byte timing, write protection, dirty-media guards and exact export are unchanged.
+This remains the instruction-boundary scheduler: internal cancellation latency,
+too-rapid command replacement, full HLD lifecycle and further commands are outside
+scope.
+
+The behavior follows the [TI second-source manufacturer transcription](https://deramp.com/swtpc.com/DC_5/TMS279X_DataSheet.pdf),
+printed pp. 26 and 29 (edited transcription, without physical WD2793 confirmation),
+and the [pinned openMSX immediate-latch implementation](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/WD2793.cc).
+Upstream's incomplete READY handling and unconditional Type-IV status decoding
+are not used as the status/conditional oracle.
 
 ## Weave firmware ABI and boot contract
 
@@ -443,14 +490,16 @@ RAM segments. No host BIOS traps or proprietary inputs are involved. Tests cover
 both geometries/models and the browser suite runs at `/` and `/msx-rust/`.
 The separate original `philips-movement.hex` sector probe (#47) observes an
 intermediate Track=2 and BUSY during a five-track seek, forces an immediate IRQ,
-checks active-low signals/acknowledgement, waits beyond the original seek duration,
+checks the persistent D8 latch across Status reads, releases it with D0, waits
+beyond the original seek duration,
 then reads track 2/sector 1 and writes its eight-byte observation trace to track
 2/sector 9. Native tests and compiled-Wasm browser tests execute the same bytes
 on both models; green VDP output and the exact exported image require every CPU
 check to succeed. The original `philips-readiness.hex` AB ROM (#53) boots through
 the same system fixture without any mounted disk. It observes reset-selected A,
-seeks to track 2, polls no-input verification BUSY after more than one second, forces/acknowledges
-IRQ, and paints a white checkpoint. The host then inserts a raw image without
+seeks to track 2, polls no-input verification BUSY after more than one second,
+forces IRQ, releases D8 with D0, and paints a white checkpoint. The host then
+inserts a raw image without
 resetting CPU/head. Ordinary firmware polling checks delayed no-step verification,
 reads retained track 2 and writes `[84,02,80,81,81,BF,80,00]` (hex) to the first
 eight bytes of track 2/sector 9. Green VDP output requires success; the exact full
@@ -490,6 +539,18 @@ sector 5 stays unchanged. Native and compiled-Wasm tests cover both interfaces,
 models, geometries and browser roots with full-image comparisons. The diagnostic
 poll bound exceeds one revolution + 559 byte periods (779940 cycles); native
 execution permits 8M cycles including boot reads and CPU payload verification.
+
+Issue #61 adds original `philips-force.hex` and `philips-force-weave.hex` CPU
+probes. They check busy LOST DATA retention, idle Type-I selection, repeated
+D8 Status reads, ordinary/nonzero-mask latch survival, both D0 acknowledgement
+sequences, combined READY/index masks, repeated index IRQ after acknowledgement,
+unchanged-level silence, ordinary disarming, and canceled staged writes. A
+37-byte checked trace is exported in sector 9 with 35h padding. Native tests and
+compiled Wasm execute the same bytes on both models, interfaces and geometries;
+browser cases run at both site roots and compare every exported byte. The native
+Type-IV suite adds independent literal statuses and exact index boundaries under
+large, irregular and single-cycle ticks; existing movement/Type-II cancellation
+suites retain all phase and completed-sector checks with corrected D8 expectations.
 
 These fixtures establish the selected bus contract, not commercial compatibility.
 

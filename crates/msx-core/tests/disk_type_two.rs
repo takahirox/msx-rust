@@ -308,7 +308,7 @@ fn cancellation_in_settle_search_handoff_transfer_and_tail_never_resurrects_or_c
                 assert_eq!(f.read(0) & 1, 0);
                 f.tick(u32::MAX);
                 assert!(!f.drq);
-                assert!(!f.irq); // no new completion after acknowledgement
+                assert_eq!(f.irq, cancel == 1); // only D8 remains latched, no completion
                 assert_eq!(f.read(0) & 1, 0);
                 if let Some(disk) = &f.disk {
                     assert_eq!(disk.bytes(), original);
@@ -344,6 +344,8 @@ fn multi_write_cancellation_keeps_completed_sectors_and_dirty_media_guards() {
     f.write(0, 0xd8);
     f.read(0);
     f.tick(u32::MAX);
+    assert!(f.irq); // Status cannot acknowledge D8
+    f.write(0, 0xd0);
     assert!(!f.irq);
     assert!(!f.drq);
     assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);

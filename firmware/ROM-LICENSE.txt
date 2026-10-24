@@ -103,6 +103,8 @@ from the same source, with synthetic payloads/status traces and no external ROM
 or implementation bytes. Issue #59 adds philips-clock.hex and
 philips-clock-weave.hex from the same original generator: synthetic byte-clock
 overrun/underrun traces and patterned payloads through both interfaces.
+Issue #61 adds philips-force.hex and philips-force-weave.hex, independently
+authored Type-IV status/IRQ sequence probes with synthetic traces and payloads.
 See docs/disks.md for synthetic timing policies and limitations.
 
 ROMless Snatcher / SD Snatcher SCC-I profiles (Issue #49):

@@ -123,6 +123,9 @@ fn drive_select_side_motor_latches_change_and_signal_polarity() {
                 assert_eq!(m.hardware.read(0x7fff), 0x7f);
                 assert_eq!(m.hardware.read(0x7ffb), 0xa9);
                 m.hardware.write(0x7ff8, 0xd8);
+                m.hardware.read(0x7ff8);
+                assert_eq!(m.hardware.read(0x7fff), 0xbf);
+                m.hardware.write(0x7ff8, 0xd0);
             } else {
                 assert_eq!(m.hardware.read(0x7fff), 0xbf);
                 assert_eq!(m.hardware.read(0x7ff8) & 0x80, 0x80);
@@ -372,7 +375,7 @@ fn cpu_observes_incremental_seek_interrupts_and_addresses_retained_position() {
         );
         image[2 * 9 * 512..3 * 9 * 512].fill(0x62);
         let mut expected = image.clone();
-        let trace = [2, 1, 0xff, 2, 0xbf, 0, 0xff, 2];
+        let trace = [2, 1, 0xff, 2, 0xbf, 0, 0xbf, 2];
         expected[(2 * 9 + 8) * 512..(2 * 9 + 8) * 512 + 8].copy_from_slice(&trace);
         m.mount_disk(image, false).unwrap();
         m.install_philips_disk_rom(rom()).unwrap();
@@ -661,6 +664,85 @@ fn cpu_observes_device_clock_overrun_and_underrun_on_both_interfaces_and_geometr
                     0xa5,
                     "{model:?} philips={philips} pc={:04x}",
                     m.cpu.pc
+                );
+                assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn cpu_observes_force_interrupt_status_latches_edges_and_exact_export_on_both_interfaces() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for size in [368_640, 737_280] {
+            for philips in [false, true] {
+                let mut m = Machine::default();
+                m.set_model(model);
+                let mut image = if philips {
+                    vec![0x35; size]
+                } else {
+                    fixture(
+                        include_str!("../../../tests/fixtures/philips-force-weave.hex"),
+                        size,
+                        0x35,
+                    )
+                };
+                if philips {
+                    let mut main = fixture(
+                        include_str!("../../../tests/fixtures/philips-system.hex"),
+                        32768,
+                        0,
+                    );
+                    main[0x2d] = u8::from(model == Model::Msx2);
+                    if model == Model::Msx2 {
+                        let mut sub = vec![0; 16384];
+                        sub[..2].copy_from_slice(b"CD");
+                        m.load_msx2_firmware(&main, &sub).unwrap();
+                    } else {
+                        m.load_bios(&main).unwrap();
+                    }
+                } else {
+                    image[2] = if size == 737_280 { 0xf9 } else { 0xf8 };
+                }
+                let (on, off) = if philips { (0xbf, 0xff) } else { (0x80, 0) };
+                // Literal CPU-visible trace, independent of the generator and
+                // production status/timing helpers. Type-I samples mask index.
+                let trace = [
+                    7, 4, on, 4, on, 1, on, 0, on, 4, off, on, 4, off, off, 0, off, on, 0x84, off,
+                    off, on, 4, off, on, 4, off, on, 4, off, 4, off, off, off, off, 0, off,
+                ];
+                let mut expected = image.clone();
+                expected[8 * 512..9 * 512].fill(0x35);
+                expected[8 * 512..8 * 512 + trace.len()].copy_from_slice(&trace);
+                m.mount_disk(image, false).unwrap();
+                if philips {
+                    m.install_philips_disk_rom(fixture(
+                        include_str!("../../../tests/fixtures/philips-force.hex"),
+                        16384,
+                        255,
+                    ))
+                    .unwrap();
+                }
+                m.boot_disk().unwrap();
+                while m.cpu.tstates < 8_000_000 && !m.cpu.halted {
+                    m.step();
+                }
+                assert!(
+                    m.cpu.halted,
+                    "{model:?} philips={philips} pc={:04x}",
+                    m.cpu.pc
+                );
+                assert_eq!(
+                    m.hardware.read(0xc061),
+                    0xa5,
+                    "{model:?} philips={philips} pc={:04x}",
+                    m.cpu.pc
+                );
+                assert_eq!(
+                    (0..trace.len())
+                        .map(|i| m.hardware.read(0x9000 + i as u16))
+                        .collect::<Vec<_>>(),
+                    trace
                 );
                 assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
             }

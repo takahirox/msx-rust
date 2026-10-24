@@ -1,3 +1,90 @@
+# Issue 61 WD2793 FORCE INTERRUPT status and interrupt latching
+
+Source: [Correct WD2793 FORCE INTERRUPT status and interrupt latching](https://github.com/takahirox/msx-rust/issues/61).
+Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Playwright 1.64.1 / Chromium. Assigned checkpoint: `f078bf1`; controller
+baseline: `183d1b79e0bdd6e1c718faf7653b740ea5a38fd7`. The live source Issue was
+read through the GitHub connector before implementation.
+
+Busy Type-IV cancellation now retains stored errors and the interrupted status
+interpretation while clearing BUSY/DRQ and dropping pending phases. Idle Type IV
+refreshes Type-I status. Live drive/READY/DRQ readback is separate from stored
+results. Ordinary pending IRQ and the persistent D8 source are represented
+separately: Status acknowledges only the former. Ordinary commands and other
+nonzero Type-IV masks preserve D8; D0 releases it at the command boundary and
+disarms conditions. This explicitly adopts pinned openMSX's release policy; the
+precise physical release edge is unmeasured. Reset clears both sources and masks.
+READY edge handling includes mount/eject and drive/motor writes, preserving
+existing unconditional lifecycle IRQ/change notifications. D1/D2/D4 combinations
+rearm on later edges/indexes after acknowledgement without level retriggering;
+absent/stopped media produces no index events.
+
+Nine independent native Type-IV tests use literal register expectations and
+300-rpm index boundaries under large, irregular and single-cycle ticks. They
+cover busy Type-I/II versus idle status, stored LOST DATA through read/write and
+CRC-tail cancellation, normal acknowledgement, immediate-latch/D0 sequences,
+all conditional combinations, repeated events, both control wirings, media
+lifecycle and reset. Existing Type-I/II suites retain movement, settling, search,
+initial write windows, transfers, tails, completed sectors, write protection and
+dirty-media guards; obsolete D8 acknowledgement expectations were corrected.
+
+Two original CPU fixtures execute through real Weave boot/DISKIO or Philips AB
+discovery, on MSX1/MSX2 and both raw geometries. Each checks busy LOST DATA,
+idle Type-I readback, persistent D8 across Status/ordinary/nonzero-mask commands,
+both D0 sequences, combined READY/index arming, repeated index acknowledgement,
+unchanged-level silence, ordinary disarming and canceled incomplete writes.
+Native tests assert the 37-byte RAM trace and the entire exported image; sixteen
+compiled-Wasm cases at `/` and `/msx-rust/` require the same CPU success and exact
+image. The movement/readiness fixtures now explicitly release D8 with D0. No
+production status/timing helper supplies expected bytes, and no proprietary
+inputs, BIOS bypasses or new dependencies are used. Provenance is recorded in
+`firmware/ROM-LICENSE.txt`.
+
+Baseline sensitivity: before changing the controller, three of the first eight
+new native tests failed: busy cancellation returned 00h instead of LOST DATA
+04h, idle Type IV returned 00h instead of Type-I 06h, and Status cleared D8.
+The original CPU probe also failed with EEh instead of A5h when temporarily
+substituting only baseline `disk.rs`; corrected bytes were restored in a Python
+`finally` block. Corrected focused results: 9/9 native sequences, all eight
+native CPU combinations and all 16 compiled-Wasm cases (39.0 seconds).
+
+| Check | Actual result |
+| --- | --- |
+| Baseline native sequences / CPU probe | Expected failures as recorded above |
+| `cargo fmt --all -- --check` | Passed with pinned Rust 1.99.0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed with pinned Rust 1.99.0 |
+| `cargo test --workspace --locked` | Passed: all 252 tests, none failed or ignored |
+| `./scripts/build.sh` | Passed with pinned Rust and documented local linker workaround |
+| `node scripts/check-dist.mjs` | Passed: inventory, hashes, provenance, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm Type-IV probes | Passed: all 16 cases, none failed/skipped |
+| `npm test` | Passed: all 162 cases in 13.2 minutes, none failed or skipped |
+| Fixture regeneration, JS syntax, local Markdown targets, `git diff --check` | Passed: 11 fixtures reproduce exactly; no whitespace errors |
+
+Preliminary native checks used the shadowing Homebrew Rust 1.94; final checks
+select README's pinned sysroot-first PATH. The unmodified build first failed on
+this host's previously documented `libLLVM.dylib` lookup issue. The ignored
+`target/local-linker/rust-lld` wrapper sets that pinned toolchain's library path
+and invokes its original linker, selected per command with
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. No tracked toolchain/build settings
+or host files changed. Clippy initially reported two test-expression precedence
+warnings; explicit parentheses fixed them before the final passing check.
+
+Source-Issue/full-diff self-review: implementation, independent tests, generated
+fixtures, documentation and provenance reviewed against all acceptance criteria.
+All mandatory local checks passed, including existing slot isolation, firmware/
+sub-ROM/mapper, SRAM, PSG/SCC/SCC-I audio, browser lifecycle and provenance
+regressions. FDC IRQ remains disconnected from CPU IRQ. No blocking findings
+remain in the local source-Issue/full-diff review. No push, PR, comment or merge
+was performed.
+
+The TI edited manufacturer transcription (printed pp. 26/29) and pinned openMSX
+source were inspected. Optional upstream runtime trace comparison, physical
+measurements and commercial-software checks were unperformed. Native/CPU/browser
+diagnostics do not establish commercial-game compatibility. Internal cancellation
+latency, rapid replacement and full HLD lifecycle remain the Issue's stated
+limits. Issue #61 requires no post-merge verification.
+
 # Issue 59 WD2793 device-clocked Type-II byte transfers
 
 Source: [Clock WD2793 Type-II byte transfers independently and correct lost-data handling](https://github.com/takahirox/msx-rust/issues/59).
