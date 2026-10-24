@@ -749,3 +749,200 @@ fn cpu_observes_force_interrupt_status_latches_edges_and_exact_export_on_both_in
         }
     }
 }
+
+#[test]
+fn cpu_reads_address_ids_crc_starvation_and_recovery_on_both_interfaces_and_geometries() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for size in [368_640, 737_280] {
+            for philips in [false, true] {
+                let mut m = Machine::default();
+                m.set_model(model);
+                let side = u8::from(size == 737_280);
+                let mut image = if philips {
+                    vec![0x35; size]
+                } else {
+                    fixture(
+                        include_str!("../../../tests/fixtures/philips-address-weave.hex"),
+                        size,
+                        0x35,
+                    )
+                };
+                if philips {
+                    let mut main = fixture(
+                        include_str!("../../../tests/fixtures/philips-system.hex"),
+                        32768,
+                        0,
+                    );
+                    main[0x2d] = u8::from(model == Model::Msx2);
+                    if model == Model::Msx2 {
+                        let mut sub = vec![0; 16384];
+                        sub[..2].copy_from_slice(b"CD");
+                        m.load_msx2_firmware(&main, &sub).unwrap();
+                    } else {
+                        m.load_bios(&main).unwrap();
+                    }
+                } else {
+                    image[2] = if size == 737_280 { 0xf9 } else { 0xf8 };
+                    image[509] = side;
+                }
+                let trace = [
+                    0,
+                    0,
+                    2,
+                    2,
+                    0x9f,
+                    0x3c,
+                    if philips { 0xbf } else { 0x80 },
+                    0,
+                    if philips { 0xff } else { 0 },
+                    4,
+                    0x0d,
+                    0,
+                    0,
+                    5,
+                    2,
+                    0x06,
+                    0xab,
+                    0,
+                    2,
+                    side,
+                    2,
+                    2,
+                    if side == 1 { 0x45 } else { 0x72 },
+                    if side == 1 { 0x64 } else { 0x54 },
+                    0,
+                    123,
+                    2,
+                ];
+                let offset = (2 * (side as usize + 1) * 9 + 8) * 512;
+                let mut expected = image.clone();
+                expected[offset..offset + 512].fill(0x35);
+                expected[offset..offset + trace.len()].copy_from_slice(&trace);
+                m.mount_disk(image, false).unwrap();
+                if philips {
+                    let mut rom = fixture(
+                        include_str!("../../../tests/fixtures/philips-address.hex"),
+                        16384,
+                        255,
+                    );
+                    rom[0x3ff] = side;
+                    m.install_philips_disk_rom(rom).unwrap();
+                }
+                m.boot_disk().unwrap();
+                for reset in [false, true] {
+                    if reset {
+                        m.reset();
+                    }
+                    while m.cpu.tstates < 8_000_000 && !m.cpu.halted {
+                        m.step();
+                    }
+                    assert!(
+                        m.cpu.halted,
+                        "{model:?} philips={philips} pc={:04x}",
+                        m.cpu.pc
+                    );
+                    assert_eq!(
+                        m.hardware.read(0xc069),
+                        0xa5,
+                        "{model:?} philips={philips} size={size} pc={:04x}",
+                        m.cpu.pc
+                    );
+                    assert_eq!(
+                        (0..trace.len())
+                            .map(|i| m.hardware.read(0x9000 + i as u16))
+                            .collect::<Vec<_>>(),
+                        trace
+                    );
+                    assert!(
+                        m.hardware.fdc.disk.as_ref().unwrap().bytes() == expected,
+                        "first differing image byte: {:?}",
+                        m.hardware
+                            .fdc
+                            .disk
+                            .as_ref()
+                            .unwrap()
+                            .bytes()
+                            .iter()
+                            .zip(&expected)
+                            .position(|(a, b)| a != b)
+                    );
+                    assert!(m.hardware.fdc.disk.as_ref().unwrap().dirty);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn mapped_address_cancellation_latch_aliases_and_completed_writes_preserve_media() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for philips in [false, true] {
+            for elapsed in [
+                107_386, 107_387, 159_091, 159_321, 159_893, 160_008, 160_121,
+            ] {
+                for cancel in 0..8 {
+                    let mut m = Machine::default();
+                    m.set_model(model);
+                    m.mount_disk(vec![0x35; 737_280], false).unwrap();
+                    if philips {
+                        m.install_philips_disk_rom(rom()).unwrap();
+                    }
+                    m.boot_disk().unwrap();
+                    m.hardware.slots = 0xf8;
+                    m.hardware.secondary[3] = 0xff;
+                    m.hardware.write(0x7ffd, if philips { 0x80 } else { 0x81 });
+                    // First complete an ordinary write so cancellation/guards must
+                    // preserve actual dirty data, not merely an artificial flag.
+                    m.hardware.write(0x7ff8, 0xa0);
+                    for _ in 0..512 {
+                        byte_ready(&mut m);
+                        m.hardware.write(0x7ffb, 0x61);
+                    }
+                    m.hardware.fdc.tick(1000);
+                    let expected = m.hardware.fdc.disk.as_ref().unwrap().bytes().to_vec();
+                    assert_eq!(&expected[..512], &[0x61; 512]);
+                    assert!(m.hardware.fdc.disk.as_ref().unwrap().dirty);
+                    // Reset the clock/position while retaining the completed write.
+                    m.hardware.fdc.reset();
+                    m.hardware.write(0x7ffd, if philips { 0x80 } else { 0x81 });
+                    m.hardware.write(0x7ff8, 0xc4);
+                    m.hardware.fdc.tick(elapsed);
+                    assert!(m.mount_disk(vec![0; 737_280], false).is_err());
+                    assert!(m.eject_disk().is_err());
+                    // Failed guards did not cancel the pending command.
+                    assert_ne!(m.hardware.read(0x7ff8) & 1, 0);
+                    // Equivalent A selectors and unused latch bits must not cancel
+                    // any phase. Side latch uses only its low bit in both profiles.
+                    m.hardware.write(0x7ffc, 0xfe);
+                    if philips {
+                        m.hardware.write(0x7ffd, 0xfe);
+                    } else {
+                        m.hardware.write(0x7ffd, 0x81);
+                    }
+                    assert_ne!(m.hardware.read(0x7ff8) & 1, 0);
+                    match cancel {
+                        0 => m.hardware.write(0x7ff8, 0xd0),
+                        1 => m.hardware.write(0x7ff8, 0xd8),
+                        2 => m.reset(),
+                        3 if philips => m.remove_philips_disk_rom(),
+                        3 => m.use_builtin(),
+                        4 => m.hardware.write(0x7ffc, 1),
+                        5 => m.hardware.write(0x7ffd, if philips { 0 } else { 1 }),
+                        6 => m.hardware.write(0x7ffd, if philips { 0x81 } else { 0x82 }),
+                        _ => m.hardware.write(0x7ffd, if philips { 0x83 } else { 0x80 }),
+                    }
+                    m.hardware.fdc.read(0);
+                    m.hardware.fdc.write(4, 0);
+                    m.hardware.fdc.write(5, 0x81);
+                    m.hardware.fdc.tick(u32::MAX);
+                    assert!(!m.hardware.fdc.drq);
+                    assert_eq!(m.hardware.fdc.irq, cancel == 1);
+                    assert_eq!(m.hardware.fdc.read(0) & 1, 0);
+                    let disk = m.hardware.fdc.disk.as_ref().unwrap();
+                    assert_eq!(disk.bytes(), expected);
+                    assert!(disk.dirty);
+                }
+            }
+        }
+    }
+}

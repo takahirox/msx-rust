@@ -290,6 +290,49 @@ for (const site of sites) {
       }
     }
   }
+  for (const model of ['0', '1']) {
+    for (const size of [368640, 737280]) {
+      for (const philips of [false, true]) {
+        test(`CPU Read Address IDs, CRC, starvation, recovery and Reset ${philips ? 'Philips' : 'Weave'} MSX${Number(model)+1} ${size} ${site}`, async ({page}) => {
+          const errors = [], requests = [];
+          page.on('pageerror', error => errors.push(error.message));
+          page.on('request', request => requests.push(request));
+          await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+          if (model === '0') await page.locator('#model').selectOption('0');
+          await page.locator('#advanced-panel > summary').click();
+          if (philips) await installSystem(page, model);
+          const side = Number(size === 737280);
+          const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('address-weave', size, 0x35);
+          if (!philips) { disk[2] = side ? 0xf9 : 0xf8; disk[509] = side; }
+          // Literal ID/CRC/status trace, independently asserted by CPU and host.
+          const trace = [0,0,2,2,0x9f,0x3c,philips ? 0xbf : 0x80,0,
+            philips ? 0xff : 0,4,0x0d,0,0,5,2,0x06,0xab,0,
+            2,side,2,2,side ? 0x45 : 0x72,side ? 0x64 : 0x54,0,123,2];
+          const expected = Buffer.from(disk), offset = (2*(side+1)*9+8)*512;
+          expected.fill(0x35, offset, offset+512); Buffer.from(trace).copy(expected, offset);
+          await page.locator('#disk').setInputFiles(file('original-address.dsk', disk));
+          await expect(page.locator('#disk-status')).toContainText('original-address.dsk');
+          await page.locator('#disk-protected').uncheck();
+          if (philips) {
+            const rom = await fixture('address',16384,255); rom[0x3ff] = side;
+            await page.locator('#disk-rom').setInputFiles(file('original-address.rom', rom));
+            await expect(page.locator('#disk-profile-status')).toContainText('original-address.rom');
+          } else { await page.locator('#boot-disk').click(); }
+          await greenOutput(page, model);
+          await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
+          await page.locator('#eject-disk').click();
+          await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
+          // Reset retains the completed write and reruns the serviced/unserviced
+          // diagnostic through compiled Wasm; the complete export must be exact.
+          await page.locator('#reset').click();
+          await greenOutput(page, model);
+          expect(await exportDisk(page)).toEqual(expected);
+          expect(errors).toEqual([]);
+          expect(requests.every(request => request.method()==='GET' && request.url().startsWith(site))).toBe(true);
+        });
+      }
+    }
+  }
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');

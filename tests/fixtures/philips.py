@@ -1,4 +1,4 @@
-"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57/#59/#61; no external ROM/code inputs.
+"""Original MIT test-only Z80 fixtures for Issues #41/#47/#49/#53/#57/#59/#61/#69; no external ROM/code inputs.
 Run python3 tests/fixtures/philips.py to regenerate the sparse hex images.
 The system probes slot 1, MSX2 sub-ROM/RAM, then slot 2's AB init vector.
 """
@@ -490,3 +490,85 @@ force_loader = loader.copy(); force_loader[3] = 3 # load three sectors of code
 weave_force = force_probe(0xc200, False)
 assert len(weave_force) <= 1536
 save('philips-force-weave', [(0, force_loader), (510, list(b'WV')), (512, weave_force)])
+
+# Issue #69: original Read Address trace. Align to a real index IRQ, then
+# inspect ID 2, starve ID 3, recover with E=1 at ID 5, seek cylinder 2 and
+# inspect ID 2 on the recorded side. Every byte/CRC is checked by Z80 code.
+# The side parameter is ROM file offset 03FF (Philips), boot offset 01FD (Weave).
+def address_probe(base, philips):
+    c = Z80(base)
+    trace = 0
+    def ld(address): c.emit(0x3a, address & 255, address >> 8)
+    def st(address): c.emit(0x32, address & 255, address >> 8)
+    def val(address, byte): c.emit(0x3e, byte); st(address)
+    def ck(byte): c.emit(0xfe, byte); c.jump(0xc2, 'fail')
+    def cmd(byte): val(0x7ff8, byte)
+    def record(register, byte):
+        nonlocal trace
+        ld(register); st(0x9000+trace); ck(byte); trace += 1
+    def poll(label):
+        c.emit(0x11, 0xff, 0xff)
+        c.label(label); ld(0x7fff); c.emit(0xe6, 0x40 if philips else 0x80)
+        c.jump(0xca if philips else 0xc2, label+'_done')
+        c.emit(0x1b, 0x7a, 0xb3); c.jump(0xc2, label); c.jump(0xc3, 'fail')
+        c.label(label+'_done')
+    def align(label):
+        cmd(0xd4); poll(label); cmd(0xd0)
+    def read_id(label, command, expected, sided=False):
+        nonlocal trace
+        cmd(command)
+        c.emit(0x21, trace, 0x90, 0x06, 6)
+        # Bounded initial wait, then <114-cycle per-byte servicing, real registers.
+        c.emit(0x11, 0xff, 0xff)
+        c.label(label); ld(0x7fff); c.emit(0xe6, 0x80 if philips else 0x40)
+        c.jump(0xca if philips else 0xc2, label+'_data')
+        c.emit(0x1b, 0x7a, 0xb3); c.jump(0xc2, label); c.jump(0xc3, 'fail')
+        c.label(label+'_data'); ld(0x7ffb); c.emit(0x77, 0x23, 0x05); c.jump(0xc2, label)
+        poll(label+'_complete')
+        if sided:
+            ld(0x9200); c.emit(0xb7); c.jump(0xca, label+'_side0')
+            for i, byte in enumerate([2,1,2,2,0x45,0x64]):
+                ld(0x9000+trace+i); ck(byte)
+            c.jump(0xc3, label+'_checked'); c.label(label+'_side0')
+        for i, byte in enumerate(expected):
+            ld(0x9000+trace+i); ck(byte)
+        if sided: c.label(label+'_checked')
+        trace += 6
+    val(0x7ffd, 0x80 if philips else 0x81); val(0x7ffc, 0)
+    val(0x9000, 0x35)
+    c.emit(0x21, 0, 0x90, 0x11, 1, 0x90, 0x01, 0xff, 1, 0xed, 0xb0)
+    val(0x7ff9, 123); val(0x7ffa, 255)
+    align('index0')
+    read_id('first', 0xc0, [0,0,2,2,0x9f,0x3c])
+    record(0x7fff, 0xbf if philips else 0x80)
+    record(0x7ff8, 0); record(0x7fff, 0xff if philips else 0)
+    cmd(0xc0); poll('starve'); record(0x7ff8, 4); record(0x7ffb, 0x0d)
+    read_id('recovery', 0xc4, [0,0,5,2,0x06,0xab]); record(0x7ff8, 0)
+    # Repair only Track before SEEK; physical cylinder is still zero.
+    val(0x7ff9, 0); val(0x7ffb, 2); cmd(0x10); poll('seek')
+    ld(0x43ff if philips else 0xc1fd); st(0x9200); st(0x7ffc)
+    val(0x7ff9, 123); val(0x7ffa, 255)
+    align('index2')
+    read_id('cylinder', 0xc0, [2,0,2,2,0x72,0x54], True)
+    record(0x7ff8, 0); record(0x7ff9, 123); record(0x7ffa, 2)
+    assert trace == 27
+    # Export all observations using a normal sector write on cylinder 2, side 0.
+    val(0x7ff9, 2); val(0x7ffc, 0); val(0x7ffa, 9); cmd(0xa0)
+    c.emit(0x21, 0, 0x90, 0x01, 0, 2)
+    c.label('write'); ld(0x7fff); c.emit(0xe6, 0x80 if philips else 0x40)
+    c.jump(0xc2 if philips else 0xca, 'write')
+    c.emit(0x7e); st(0x7ffb); c.emit(0x23, 0x0b, 0x78, 0xb1); c.jump(0xc2, 'write')
+    wait_complete(c, 'complete'); ld(0x7ff8); ck(0)
+    val(0xc069, 0xa5); c.emit(0x3e, 0xf2); c.jump(0xc3, 'paint')
+    c.label('fail'); val(0xc069, 0xee); c.emit(0x3e, 0xf6)
+    c.label('paint'); c.emit(0xd3, 0x99, 0x3e, 0x87, 0xd3, 0x99,
+        0xaf, 0xd3, 0x99, 0x3e, 0x80, 0xd3, 0x99,
+        0x3e, 0x40, 0xd3, 0x99, 0x3e, 0x81, 0xd3, 0x99)
+    c.label('halt'); c.emit(0x76); c.jump(0xc3, 'halt')
+    return c.done()
+
+save('philips-address', [(0, [ord('A'), ord('B'), 0, 0x44]), (0x3ff, [0]), (0x400, address_probe(0x4400, True))])
+address_loader = loader.copy(); address_loader[3] = 3
+weave_address = address_probe(0xc200, False)
+assert len(weave_address) <= 1536
+save('philips-address-weave', [(0, address_loader), (509, [0]), (510, list(b'WV')), (512, weave_address)])

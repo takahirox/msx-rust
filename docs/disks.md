@@ -173,8 +173,8 @@ clears it, cancels transfers, restores track/side zero, sector one, motor off, w
 retaining media/change/dirty/protect state. Disk change clears only by 7FFEh read.
 
 Supported WD command families: restore, seek, step, step-in, step-out (track update
-bit honored); single/multiple read and write sector; force interrupt (immediate,
-ready transitions and index condition). Busy ignores new commands except force
+bit honored); single/multiple read and write sector; Read Address; force interrupt
+(immediate, ready transitions and index condition). Busy ignores new commands except force
 interrupt. The physical head is bounded to 0..79 and is separate from the Track
 register. Each issued SEEK pulse moves the head and updates Track by one toward
 the latched Data target; equal registers cause no movement and existing
@@ -195,12 +195,12 @@ about physical drives' extra cylinders. Type I commands with V set settle and
 search matching-cylinder IDs as specified below; V clear skips verification.
 Sector side compare is honored when enabled. Multi-record transfers increment
 the sector register and search again; sector 10 fails after its fifth observed
-index without crossing a track. Unsupported read-address/read-track/write-track/format
-commands return record-not-found. CRC/deleted marks and density controls are outside
-this raw-sector subset.
+index without crossing a track. Unsupported read-track/write-track/format commands
+return record-not-found. Damaged CRCs/deleted marks and density controls are outside
+this raw-sector subset; Read Address synthesizes valid normal-MFM ID CRCs.
 
-Status: bit 0 busy, bit 1 DRQ for sector commands, bit 2 lost data, bit 4 seek/
-record-not-found, bit 6 write-protect failure, bit 7 not ready. Type I status uses
+Status: bit 0 busy, bit 1 DRQ for sector and Read Address commands, bit 2 lost data,
+bit 4 seek/record-not-found, bit 6 write-protect failure, bit 7 not ready. Type I status uses
 bit 2 for track zero, bit 1 for index, bit 6 for the media protect signal instead.
 Stored errors persist until an accepted ordinary command or idle FORCE INTERRUPT;
 busy FORCE INTERRUPT retains them. Bit 7 always reflects live READY.
@@ -393,6 +393,72 @@ require exact export before replacement/ejection. This staged-sector safety poli
 deliberately differs from physical partial-write fidelity: a real interrupted write
 can leave partial data or CRC damage, which raw DSK does not represent.
 
+## Scheduled Read Address
+
+Both interfaces accept **C0h** (E=0) and **C4h** (E=1) within the same normal-MFM
+360/720 KiB profile. READY is sampled at acceptance, before the optional 30 ms
+settling delay (1 MHz controller, HLT assumed high). A protected disk is readable.
+The next available rotational ID is selected, without Track/Sector comparison or
+Type-II side-compare, multi-record or write state. Its cylinder is the physical
+head position and its side is the selected recorded side. At ID match this profile
+sets Sector to that cylinder; Track and physical head position remain unchanged.
+
+The six transfers are **C,H,R,N,CRC-high,CRC-low**, with R=1..9 and N=02h. CRC uses
+polynomial 1021h, initial FFFFh, over `A1 A1 A1 FE C H R N`, most significant bit
+first. Examples: `00 00 01 02 CA 6F` and `02 01 03 02 76 55`. Raw DSK contains
+payloads only: neither payload address marks nor payload CRC-looking bytes supply
+ID metadata. All synthesized IDs have valid CRCs, so CRC-error status stays clear;
+damaged-ID CRC testing requires a media representation outside this task.
+
+Using the existing ID phase H (start of FE) and B=114.54544 CPU cycles (32 us),
+the selected schedule is:
+
+| Event | Absolute deadline | CPU-cycle offset from H (ceil) |
+| --- | --- | --- |
+| C, H, R, N, CRC-high, CRC-low arrivals | H + (2+i)B, i=0..5 | 230, 344, 459, 573, 688, 802 |
+| Final byte's service budget expires | H + 8B | 917 |
+| Timed completion | H + 9B | 1031 |
+
+FE and C must first assemble before the first arrival. All events use absolute
+fractional deadlines, including when a tick spans settling, search and the entire
+transfer. Data reads acknowledge only the current request. Polling status/signals
+cannot advance bytes. An unread arrival is replaced and LOST DATA sticks through
+completion. The final CRC-low byte has a full one-byte service budget; a read on
+or after H+8B is late. It remains readable with DRQ until H+9B, when completion
+clears DRQ/BUSY and raises ordinary IRQ. Reading it after completion returns the
+holding register, without changing the result. A new command clears LOST DATA.
+
+These exact first-byte, Sector-update and completion edges are **selected profile
+conventions**, not physically confirmed WD2793 edges. In particular the existing
+read path's final-byte service budget and additional completion interval are
+preserved for Read Address; this is not an extra on-disk CRC after the returned
+CRC bytes. Type-III status uses BUSY, DRQ, LOST DATA, CRC error, RNF and live NOT
+READY; it does not expose Type-I index/track-zero/protect signals. Ordinary status
+acknowledgement does not release a previously latched immediate D8 IRQ.
+
+An unsupported side has rotational index input but no ID. The selected no-ID
+policy is RNF at the **fifth observed rising index**, counting a search-start
+index inclusively and inspecting an ID before a coincident index. This reuses the
+existing search convention; it is not a physical WD2793 timeout measurement.
+FORCE INTERRUPT, reset, successful mount/eject, interface removal and effective
+drive/side/motor changes cancel settling, search and every transfer/tail phase.
+Canceled work never resumes. Failed dirty-media replacement/ejection leaves the
+command running. Equivalent Philips A selectors and unused latch bits retain
+their existing behavior. Completed writes, dirty/protect/change state and exact
+exports retain the existing ownership rules.
+
+Command flags, settling, six bytes, CRC checking and cylinder-to-Sector behavior
+follow the [TI second-source transcription](https://deramp.com/swtpc.com/DC_5/TMS279X_DataSheet.pdf),
+printed pp. 10, 13, 23 and 39–40. This edited manufacturer transcription has not
+been confirmed on physical WD2793 hardware. The
+[pinned openMSX controller](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/WD2793.cc)
+corroborates next-ID selection and Type-III sequencing, but its no-ID timeout is
+TODO and its read servicing is not our timing oracle. Its
+[normal-track construction](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/SectorBasedDisk.cc)
+and [ID decoder](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/RawTrack.cc)
+corroborate CHRN and MFM CRC coverage/order. Read/Write Track, formatting, additional
+image formats and full HLD modeling remain outside this implementation.
+
 ## FORCE INTERRUPT status and IRQ sources
 
 Type IV accepts D0h..DFh even while BUSY. Busy cancellation clears BUSY but
@@ -554,6 +620,27 @@ suites retain all phase and completed-sector checks with corrected D8 expectatio
 
 These fixtures establish the selected bus contract, not commercial compatibility.
 
+Issue #69 adds original MIT `philips-address.hex` and
+`philips-address-weave.hex`, generated by the same `philips.py`. The original Z80
+code polls real mapped signals, services exactly six ID bytes, checks literal
+CHRN/CRC values, deliberately starves a second transfer, recovers with E=1, seeks
+to cylinder 2 and reads the selected recorded side with Track=123. Native and
+compiled-Wasm browser tests execute the same fixtures on both models, interfaces
+and geometries. An ordinary sector write exports the independently checked
+27-byte observation trace; all other bytes are checked exactly, including after
+Reset. Browser coverage runs at `/` and `/msx-rust/` with local original firmware
+and no host BIOS shortcut, proprietary bytes or external fixture inputs.
+
+`disk_type_three.rs` supplies literal rotational phases, byte timestamps and CRC
+vectors independent of controller helpers. It covers all nine IDs, cylinders
+0/2/79, both recorded sides/geometries, E=0/1, boundary/fractional starts, successive
+IDs/wrap, no READY/no ID, first/final-byte service and completion, starvation and
+recovery, IRQ acknowledgement, and large/irregular/single-cycle tick partitions.
+Controller and mapped-register cancellation matrices cover all pending phases;
+completed writes and dirty guards remain intact. Regenerate fixtures with
+`python3 tests/fixtures/philips.py`; re-running it must leave the sparse hex files
+unchanged. Diagnostic success does not establish commercial playability.
+
 ## Provenance and reproducibility
 
 The drive, controller, reset loader, Weave disk ROM, demo program, synthetic sector data,
@@ -669,3 +756,52 @@ hardware/trace comparison and proprietary firmware/software boot testing were no
 performed; no commercial compatibility is inferred. Coordinator review remains a
 separate pre-merge step. Issue #41 requires no post-merge verification. Nothing was
 pushed, published, merged or commented during this implementation.
+
+## Issue #69 validation (2026-10-24)
+
+Validation used pinned Rust 1.99.0 (toolchain `bin` first in PATH as documented in
+README), Node 24.12.0, `npm ci` (three development packages, no audit findings),
+and `npx playwright install chromium`. No dependency versions or repository build
+configuration changed. The unmodified build first failed because macOS rust-lld
+could not locate `libLLVM.dylib`; the existing local workaround described above
+was reproduced as ignored `target/issue69-rust-lld`, selected by
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. It sets `DYLD_LIBRARY_PATH` to the
+same pinned toolchain's `lib` directory and executes that toolchain's rust-lld
+with unchanged arguments. The subsequent build passed.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | Passed: 291 tests |
+| `./scripts/build.sh` | Passed with the task-local linker wrapper above |
+| `node scripts/check-dist.mjs` | Passed |
+| New compiled-Wasm Read Address cases | Passed: all 16, both site roots |
+| `npm test` | Passed: all 200 browser cases (14.9 minutes), including all 184 existing cases |
+| Fixture reproducibility | Passed: all 13 Philips hex images unchanged after regeneration |
+| `git diff --check` | Passed |
+
+Regression sensitivity was verified by temporarily substituting only
+`disk.rs` from Issue baseline `61b2ee1b0291f7e6e64a1785c15df8f33c5c0ff5`.
+The independent all-ID timestamp/status test failed on the baseline's immediate
+completion IRQ; the original CPU fixture independently failed with its EE failure
+marker rather than A5 success. The final controller was restored byte-for-byte;
+all five new controller tests and both new native bus/CPU tests passed again.
+During fixture development, exact image comparison also caught a scratch byte
+inside the export buffer; the fixture now uses separate scratch RAM. An initial
+Clippy precedence finding in the signal oracle was corrected before the passing
+full checks.
+
+Source-Issue and full-diff review followed `docs/review-guidelines.md`: checked
+command acceptance/flags, CHRN/CRC, absolute timing and final-byte conventions,
+Type-III status/IRQ, no-ID ordering/timeout, cancellation/media ownership,
+independent native and original CPU/Wasm evidence, and documented limits. The
+change reuses existing search/read/cancellation paths and adds no controller
+framework, image format, UI, firmware shortcut or unrelated timing corrections.
+No blocking review findings remain. All required README checks passed; none were
+skipped or left unperformed.
+
+Optional pinned-upstream trace comparison and physical WD2793 measurements were
+not performed. They are not acceptance requirements. No commercial software
+compatibility is claimed. Issue #69 requires no post-merge verification; nothing
+was pushed, published, merged or commented during this implementation.

@@ -16,6 +16,20 @@ fn id_phase(id: u64) -> u64 {
     (id * 715_909).div_ceil(9) * CLOCK_SCALE
 }
 
+fn address_bytes(cylinder: u8, side: u8, sector: u8) -> [u8; 6] {
+    // Normal MFM ID CRC includes the three missing-clock A1 bytes and FE.
+    // Raw DSK has no ID metadata: never interpret payload marks as headers.
+    let mut crc = 0xffff_u16;
+    for byte in [0xa1, 0xa1, 0xa1, 0xfe, cylinder, side, sector, 2] {
+        crc ^= u16::from(byte) << 8;
+        for _ in 0..8 {
+            crc = (crc << 1) ^ if crc & 0x8000 != 0 { 0x1021 } else { 0 };
+        }
+    }
+    let [high, low] = crc.to_be_bytes();
+    [cylinder, side, sector, 2, high, low]
+}
+
 #[derive(Debug)]
 pub struct Disk {
     bytes: Vec<u8>,
@@ -113,6 +127,7 @@ pub struct Controller {
     verify: bool,
     transfer: Transfer,
     write_sector: bool,
+    read_address: bool,
     compare_side: Option<u8>,
     index: usize,
     write_serviced: bool,
@@ -151,6 +166,7 @@ impl Default for Controller {
             verify: false,
             transfer: Transfer::Idle,
             write_sector: false,
+            read_address: false,
             compare_side: None,
             index: 0,
             write_serviced: false,
@@ -392,6 +408,7 @@ impl Controller {
         self.drq = false;
         self.force_mask = 0;
         self.type_one = cmd & 0x80 == 0;
+        self.read_address = cmd & 0xf0 == 0xc0;
         self.status = 1;
         if !self.type_one && !self.ready() {
             self.finish(0x80);
@@ -441,7 +458,18 @@ impl Controller {
                         self.start_sector_search();
                     }
                 }
-                _ => self.finish(0x10), // Read address/track and format are outside raw-sector profile.
+                0xc0 => {
+                    self.write_sector = false;
+                    self.multi = false;
+                    self.compare_side = None;
+                    if cmd & 4 != 0 {
+                        self.transfer = Transfer::SectorSettle;
+                        self.next_event = self.clock + SETTLE;
+                    } else {
+                        self.start_sector_search();
+                    }
+                }
+                _ => self.finish(0x10), // Read/write track and format remain unsupported.
             }
         }
     }
@@ -561,13 +589,25 @@ impl Controller {
             .as_ref()
             .and_then(|disk| disk.offset(self.physical_track, self.side, sector));
         if let Some(offset) = offset.filter(|_| {
-            self.track == self.physical_track
-                && self.sector == sector
-                && self.compare_side.is_none_or(|side| side == self.side)
+            self.read_address
+                || (self.track == self.physical_track
+                    && self.sector == sector
+                    && self.compare_side.is_none_or(|side| side == self.side))
         }) {
             self.offset = offset;
-            self.buffer
-                .copy_from_slice(&self.disk.as_ref().unwrap().bytes[offset..offset + SECTOR_SIZE]);
+            if self.read_address {
+                self.buffer[..6].copy_from_slice(&address_bytes(
+                    self.physical_track,
+                    self.side,
+                    sector,
+                ));
+                // Selected profile: latch the returned cylinder at ID match.
+                self.sector = self.physical_track;
+            } else {
+                self.buffer.copy_from_slice(
+                    &self.disk.as_ref().unwrap().bytes[offset..offset + SECTOR_SIZE],
+                );
+            }
             self.index = 0;
             self.write_serviced = false;
             self.transfer = if self.write_sector {
@@ -577,7 +617,15 @@ impl Controller {
             };
             // ID phase is the start of FE. Fixed synthetic MFM header/gap
             // offsets; see the timing table in docs/disks.md.
-            self.next_event = self.clock + BYTE_TIME * if self.write_sector { 9 } else { 46 };
+            self.next_event = self.clock
+                + BYTE_TIME
+                    * if self.read_address {
+                        2 // Assemble FE then C; remaining ID bytes follow at 32 us.
+                    } else if self.write_sector {
+                        9
+                    } else {
+                        46
+                    };
             return;
         }
         if phase == 0 {
@@ -624,7 +672,7 @@ impl Controller {
         self.drq = true;
         self.index += 1;
         self.next_event += BYTE_TIME;
-        if self.index == SECTOR_SIZE {
+        if self.index == if self.read_address { 6 } else { SECTOR_SIZE } {
             self.transfer = Transfer::ReadTail;
         }
     }
@@ -675,7 +723,7 @@ impl Controller {
                 Transfer::Read => self.read_event(),
                 Transfer::ReadTail => {
                     // The final byte has the same one-byte service budget.
-                    // Keep it available through the CRC tail, even if late.
+                    // Keep it available until timed completion, even if late.
                     if self.drq {
                         self.status |= 4;
                     }
