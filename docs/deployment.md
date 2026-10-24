@@ -37,7 +37,7 @@ The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 original firmware, cartridge, disk and CAS fixtures from Rust source. It also
 copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
 It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **44 files**:
+The complete deployable inventory is **45 files**:
 
 - `index.html`, `style.css`, `app.js`, `saves.js`
 - `msx_wasm.wasm`
@@ -47,6 +47,7 @@ The complete deployable inventory is **44 files**:
 - `cassette-test-cartridge.rom`, `cassette-test.cas` (original Z80 loader and synthetic CAS; [provenance](cassette.md#references-and-original-fixtures))
 - `weave-disk.rom`, `weave-disk-demo.dsk`
 - `fh-test-cartridge.rom` (original MIT horizontal interrupt diagnostic)
+- `command-timing-test-cartridge.rom` (original MIT phased LMMV/LMMM diagnostic; [profile and provenance](msx2.md#autonomous-lmmvlmmm-timing-issue-77))
 - `scc-test-cartridge.rom`, `joystick-test-cartridge.rom`, `ram-mapper-test-cartridge.rom`
 - `mapper-6.rom`, `mapper-7.rom`, `mapper-8.rom`, `mapper-9.rom`, `mapper-10.rom`
 - `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`

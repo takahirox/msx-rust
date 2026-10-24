@@ -666,6 +666,9 @@ MSX1. They also check 512/256-pixel modes, 212 lines, all 256 direct colors and
 sprite/command pixels. Screenshots go to `test-results/msx2-screen7.png` and
 `msx2-screen8.png`.
 
+The original MSX2 [command timing diagnostic](docs/msx2.md#autonomous-lmmvlmmm-timing-issue-77)
+checks phased LMMV/LMMM progress and CE through compiled Wasm at both site roots.
+
 The Rust tests include exhaustive arithmetic/BCD cases, instruction-family vectors,
 interrupt and timing checks, VDP port/mode/sprite/IRQ tests, PSG waveform/envelopes,
 slots/PPI, plain and bank-switched cartridge execution, BASIC syntax/runtime tests,

@@ -159,8 +159,8 @@ Behavioral references:
 [openMSX CPU/table decoding](https://github.com/openMSX/openMSX/blob/master/src/video/VDP.cc)
 and [command addresses](https://github.com/openMSX/openMSX/blob/master/src/video/VDPCmdEngine.cc).
 Implementation and fixtures are original; no upstream code was copied.
-VRAM arbitration, command-speed corrections, expansion VRAM and exact
-mid-command mode-change timing remain outside this correction. Commercial-title
+CPU VRAM arbitration, timing for commands other than LMMV/LMMM, expansion VRAM
+and exact mid-command mode-change timing remain outside this correction. Commercial-title
 compatibility and optional openMSX/hardware comparison remain unestablished.
 
 ## Firmware and memory profile
@@ -289,8 +289,9 @@ is unwired. Test acceleration and external clock pulse outputs are not modeled.
   changes, recreates memory views and keeps a 4:3 display area with pixelated
   scaling, including the 512-pixel modes. Existing audio and input remain active.
 
-Command timing is a deterministic approximation (one pixel/byte work unit per
-eight CPU T-states), **not** V9938 arbitration timing. There is no VRAM contention,
+LMMV/LMMM use [phased autonomous bitmap service](#autonomous-lmmvlmmm-timing-issue-77).
+Other commands retain one pixel/byte work unit per eight CPU T-states. CPU VRAM
+requests are not arbitrated against command accesses. There is no CPU VRAM contention,
 cycle-exact horizontal blanking, analog overscan/composite output, digitizer,
 superimposition, light pen, mouse color-bus interface or optional expansion VRAM.
 Expansion VRAM reads FFh and ignores writes. Unsupported optional peripheral
@@ -494,7 +495,8 @@ coverage. `git diff --check` passed. Local source-Issue/full-diff review followe
 [the review guidelines](review-guidelines.md), checked all acceptance criteria
 against the implementation and evidence, and found no remaining blocking issues.
 
-Exact arbitration and command-speed modeling remain separate work. Live color
+This historical Issue #45 record deferred timing; Issue #77 below adds autonomous
+LMMV/LMMM timing. CPU arbitration and other command speeds remain separate. Live color
 writes are covered below. No physical-device execution, upstream-emulator
 comparison run, proprietary ROM acquisition or human gameplay was performed; commercial compatibility remains
 unestablished. Issue #45 requires no post-merge verification.
@@ -527,11 +529,12 @@ synchronizes before updating COL in `setCmdReg`; these five commands consume
 that state. These references inform behavior only: the correction, native vectors
 and Z80 probe are independently authored, without upstream code or ROM bytes.
 
-Timing still uses one work unit per eight CPU T-states. In `Machine::step`, Z80
+At Issue #51, timing used one work unit per eight CPU T-states; Issue #77 below
+replaces that approximation for LMMV/LMMM. In `Machine::step`, Z80
 I/O side effects occur before the VDP receives that instruction's elapsed budget,
 including MSX M1 fetch waits. Thus a register write affects the work advanced by
-its own OUT instruction. Access-phase synchronization, exact VRAM arbitration,
-command speeds and physical transition timing are outside this correction.
+its own OUT instruction. Issue #77 adds autonomous access phases for LMMV/LMMM. CPU VRAM arbitration,
+other command speeds and physical bus transition timing remain outside this correction.
 
 The [native vectors](../crates/msx-core/tests/vdp_command_edges.rs) cover SCREEN
 5–8 LINE/LMMV/HMMV with multiple writes at partial work budgets, split versus
@@ -923,3 +926,138 @@ of 99. Corrected boundary, sequence, transition, row, IRQ, lifecycle and CPU-pro
 results pass. See [the validation record](interlace-validation.md) for full checks.
 No hardware, pinned-emulator trace comparison or commercial-title playability
 validation was performed; those comparisons are optional.
+
+
+## Autonomous LMMV/LMMM timing (Issue #77)
+
+LMMV now reads the full destination byte and writes it in separate service slots.
+LMMM reads the source pixel, reads the destination byte, then writes. Reads latch
+at their own phases; only writes change VRAM. A later CPU modification of either
+byte cannot retroactively change its latch. Logical operations use the latched
+destination, including its packed neighbors; transparent/invalid operations still
+consume the scheduled phases. LMMV uses the latest R44 color at the write phase.
+CE remains set through the final write; completion coordinates/counts retain the
+existing clipping, reverse-top, overlap, wrapping and absent-expansion policies.
+STOP, command replacement, BASIC mode setup and reset discard all pending phases.
+
+The selected profile is based on the [2013 NMS8250 measurements](https://openmsx.org/vdp-vram-timing/vdp-timing.html),
+the [later NMS8250/NMS8280 findings, sections 3–6 and 14](https://github.com/m9710797/vdp-timing-measurements/blob/master/part2/5.slots/FINDINGS8.md),
+and the pinned openMSX [command engine](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDPCmdEngine.cc),
+[service grids](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDPAccessSlots.cc)
+and [startup definitions](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDPAccessSlots.hh).
+The [Yamaha V9938 manual](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
+printed pp. 54, 84–85, establishes CE/completion and faster service when display
+or sprites are inhibited. Representative delays within measured plateaus are
+modeling choices; the 2013 work did not measure startup. Repository code, numeric
+vectors and the CPU probe are independently authored from these behavioral facts;
+no upstream implementation or third-party test program is copied or bundled.
+
+| Command | Startup | Access phases and thresholds | Additional row delay |
+| --- | --- | --- | --- |
+| LMMV | 88 | destination read → write: 24; write → next read: 72 | 58 |
+| LMMM | 64 | source read → destination read: 32; destination read → write: 24; write → next source read: 60 | 68 |
+
+All values are **memory-cycle thresholds**, followed by selection of an eligible
+service slot. The three grids have 154 slots per line with display disabled
+(or in vertical border), 88 with display enabled and sprites inhibited, and 31
+with sprites enabled. Empty sprite tables still incur the sprite-fetch cost.
+Sprite-enabled service adds one to every threshold, including startup. A wait
+beginning on one of the 25 packed six-clock pairs in the sprites-inhibited grid
+adds one. This applies to command accesses; CPU request arbitration remains
+separate. Padding removes two memory clocks at upstream phases 1334/1344 for
+blank service, two at 1332/1342 for sprites inhibited, and 2/1/1 at
+1330/1337/1348 with sprites enabled. The refresh hole counts in full.
+
+The existing R46 mutation is the **modeled upstream callback timestamp**. Local
+horizontal phase plus 202, modulo 1368, gives the upstream /RAS phase. Accesses
+at or before the elapsed tick endpoint are observable; master clocks are never
+rounded to whole CPU T-states internally. For SCREEN 5, display disabled, local
+phase zero, NX=3, NY=1, color 3, the write events are 114, 218 and 314 master
+clocks after R46, first observable at CPU T=19, 37 and 53. The preceding T-state
+still exposes the previous bytes. Upstream's 18-clock callback-to-/CSW offset is
+already represented by its startup thresholds; it does **not** establish actual
+instruction-level bus timing here. Machine still performs I/O side effects before
+advancing that instruction's full elapsed budget, including M1 fetch waits.
+
+LMMV/LMMM raster intervals stop at horizontal and field boundaries before
+advancing into the next interval. Pending phases, latched bytes, and elapsed memory time survive
+tick partitions and direct/indirect R1/R8 writes. Padding uses the grid active
+when its clock is crossed; eligible slots and the sprite addend use the current
+grid. The packed-start addend is retained from the access that began the wait.
+Status reads advance no command work. For these phased commands, scanline rendering
+observes only writes that have occurred by that line's endpoint. Other commands
+retain their original tick path, including transfer-stall budgeting.
+
+Vertical and field conventions are retained. Service switches on the repository's
+display-relative visible-line boundaries; upstream's one-line-before-display
+grid transition is not reconstructed, including the carried pre-display half-line.
+R18 does not move command slots/padding, and R9 S1/S0 does not select 1365-clock
+lines. Mid-command bitmap-layout changes remain unsupported. Other commands and
+CPU transfers keep their prior eight-T-state timing; SRCH semantics, CPU VRAM
+request arbitration, bus subcycles and commercial-title playability are separate.
+
+The [native vectors](../crates/msx-core/tests/vdp_command_timing.rs) contain literal
+master-clock writes for both commands, SCREEN 5–8, all three grids, several start
+phases, scanline/padding crossings and equal-area wide/tall rectangles. Selected
+vectors distinguish each of the sprite, packed-slot and padding addends. Tests
+assert full physical VRAM, preceding observable boundaries, CE and completion
+registers, partial source/destination reads, live direct/indirect R44 writes,
+every pending-phase cancellation, expansion absence, service-grid transitions,
+interlaced field crossings and bulk versus single-T-state equivalence. Existing
+edge/color/interleaving checks retain their result assertions with timing budgets
+updated for these commands.
+
+The original [CPU diagnostic](../crates/msx-core/src/firmware/command_timing_fixture.rs)
+generates `dist/command-timing-test-cartridge.rom`. Six SCREEN 5 cases cover both
+commands and display off / sprites inhibited / sprites enabled settings. Each
+64×1 command samples CE at +662 CPU T: 12 for the starting OUT and 130 five-T
+NOPs. Baseline completes at +512 T; the fastest corrected case takes over 1000 T.
+It checks completed first bytes and untouched last bytes, then bounded-polls CE
+and verifies all 32 final bytes through the actual read buffer/ports. Expectations
+use specification-derived bounds valid for every horizontal start phase, without
+production timing helpers. Each stage records CE/progress in RAM and displays
+CMD PASS/FAIL and a green/red bar. Native tests execute it under both C-BIOS and
+the original loader; [browser tests](../tests/vdp-command-timing.spec.js) observe
+the compiled Wasm's Canvas at `/` and `/msx-rust/`, including Reset. The probe is
+downloadable under advanced options. No proprietary firmware or game is required.
+
+Baseline evidence: with only production `vdp.rs` and `vdp_command.rs` restored to
+`802254379eae15fee0e2386d87798c8a3f11fb28`, the new LMMV vector fails at CPU T=18
+and LMMM at T=20, both because VRAM changed before the first expected write.
+The CPU probe fails stage 1 with CE=0 at its +662-T sample (FAIL marker EEh).
+Restoring the implementation passes these same checks.
+
+Validation on 2026-10-24, macOS arm64, pinned Rust 1.99.0, Node.js 24.12.0 and
+Playwright 1.64.1 / Chromium:
+
+| Check | Result |
+| --- | --- |
+| Baseline regression proof | Both literal timing tests and the CPU diagnostic fail with baseline production code; corrected code passes |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 333 passed; no failed or ignored tests |
+| Final focused timing suite | 12 passed, including 176 literal layout/grid/start/shape vectors and the exact zero-initialized Issue vector |
+| `./scripts/build.sh` | Passed with the documented local macOS pinned-toolchain/linker wrapper |
+| `node scripts/check-dist.mjs` | Passed, including new ROM inventory/header/download link and unchanged third-party provenance |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm command probe | Two passed at `/` and `/msx-rust/`, including Reset |
+| `npm test` | 220 passed in 15.1 minutes, including both command probes, Reset and retained video/audio/disk/SRAM/cassette/firmware/lifecycle checks |
+| `git diff --check`; `git diff --cached --check`; local documentation links | Passed |
+| Source-Issue/full-diff review | Complete; transfer-stall finding resolved, no remaining blocking findings |
+
+The initial host-PATH build selected Homebrew Rust 1.94.0 and lacked its Wasm
+standard library. Selecting the installed pinned toolchain then exposed the
+already documented `rust-lld` / `libLLVM.dylib` loader issue. The ignored local
+wrapper described in [deployment.md](deployment.md#pre-merge-validation) resolved
+it without compiler, dependency, system or production build-setting changes.
+Source review caught a transfer-stall compatibility risk from raster-splitting
+legacy commands: a new regression observed an early second LMMC write after a
+stall crossed a scanline. Legacy commands now retain their original tick path;
+that regression passes. An earlier browser run was intentionally interrupted
+(96 passed, one interrupted, 123 unperformed) to rebuild this final implementation;
+its partial result is not counted as a complete suite pass. The complete final
+run above supersedes it. No mandatory check remains skipped or unperformed.
+
+Optional hardware/openMSX trace comparison was not performed; these synthetic
+results do not establish commercial-game compatibility. Required post-merge
+verification: none.

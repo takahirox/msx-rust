@@ -1,7 +1,27 @@
 //! Independent implementation of the MSX2 Technical Handbook command interface.
-//! A work unit completes every eight CPU T-states. This is deterministic, not
-//! cycle-exact V9938 arbitration; CPU transfers additionally wait for TR.
+//! LMMV/LMMM use phased bitmap service; other commands retain eight-T-state
+//! work units. CPU transfers additionally wait for TR. See docs/msx2.md.
 use super::Vdp;
+#[path = "vdp_command_slots.rs"]
+mod slots;
+use slots::Grid;
+
+#[derive(Clone, Copy)]
+enum Phase {
+    Source,
+    Destination,
+    Write,
+}
+
+struct Access {
+    phase: Phase,
+    // Memory clocks can briefly go backwards when a stretched cycle completes.
+    elapsed: i32,
+    delay: i32,
+    tight: i32,
+    source: u8,
+    destination: u8,
+}
 
 pub(super) struct Command {
     code: u8,
@@ -20,6 +40,7 @@ pub(super) struct Command {
     unit: usize,
     width: usize,
     pending: Option<u8>,
+    access: Option<Access>,
 }
 impl Command {
     fn step_x(&self) -> i32 {
@@ -78,6 +99,22 @@ impl Vdp {
             unit,
             width,
             pending: None,
+            access: if matches!(code, 8 | 9) {
+                Some(Access {
+                    phase: if code == 8 {
+                        Phase::Destination
+                    } else {
+                        Phase::Source
+                    },
+                    elapsed: 0,
+                    delay: if code == 8 { 88 } else { 64 },
+                    tight: self.command_grid().tight((self.cycles + 202) % 1368),
+                    source: 0,
+                    destination: 0,
+                })
+            } else {
+                None
+            },
         };
         if code == 14 {
             c.sx = c.dx;
@@ -164,8 +201,103 @@ impl Vdp {
         }
         c.row >= c.ny
     }
+    fn command_grid(&self) -> Grid {
+        if self.registers[1] & 0x40 == 0 || self.line >= self.visible_lines() as u16 {
+            Grid::Blank
+        } else if self.registers[8] & 2 != 0 {
+            Grid::NoSprites
+        } else {
+            Grid::Sprites
+        }
+    }
+    pub(super) fn tick_bitmap_command(&mut self, clocks: u32) {
+        if !self.command.as_ref().is_some_and(|c| c.access.is_some()) {
+            return;
+        }
+        let Some(mut c) = self.command.take() else {
+            return;
+        };
+        let grid = self.command_grid();
+        // No CPU-T rounding: a service event can occur between tick endpoints.
+        for offset in 1..=clocks {
+            let t = (self.cycles + offset + 202) % 1368;
+            let access = c.access.as_mut().unwrap();
+            access.elapsed += 1 - grid.padding(t);
+            if access.elapsed < access.delay + access.tight + grid.extra() || !grid.slot(t) {
+                continue;
+            }
+            let sx = c.sx + c.col as i32 * c.step_x();
+            let sy = (c.sy + c.row as i32 * c.step_y()) & 1023;
+            let dx = c.dx + c.col as i32 * c.step_x();
+            let dy = (c.dy + c.row as i32 * c.step_y()) & 1023;
+            let (address, shift, mask) = self.bitmap_address(dx as usize, dy as usize);
+            // Take the phase state out so rectangle advancement can borrow c.
+            let mut access = c.access.take().unwrap();
+            match access.phase {
+                Phase::Source => {
+                    access.source = if c.arg & 0x10 != 0 {
+                        255
+                    } else {
+                        self.point(sx as usize, sy as usize)
+                    };
+                    access.phase = Phase::Destination;
+                    access.delay = 32;
+                }
+                Phase::Destination => {
+                    access.destination = if c.arg & 0x20 != 0 {
+                        255
+                    } else {
+                        self.at(address)
+                    };
+                    access.phase = Phase::Write;
+                    access.delay = 24;
+                }
+                Phase::Write => {
+                    let source = (if c.code == 8 { c.color } else { access.source }) & mask;
+                    let dest = (access.destination >> shift) & mask;
+                    let result = match c.op & 7 {
+                        0 => Some(source),
+                        1 => Some(source & dest),
+                        2 => Some(source | dest),
+                        3 => Some(source ^ dest),
+                        4 => Some(!source),
+                        _ => None,
+                    };
+                    if c.arg & 0x20 == 0 && !(c.op & 8 != 0 && source == 0) {
+                        if let Some(value) = result {
+                            self.set_byte(
+                                address,
+                                (access.destination & !(mask << shift)) | ((value & mask) << shift),
+                            );
+                        }
+                    }
+                    let row = c.row;
+                    if self.next_rectangle(&mut c) {
+                        self.finish_command(&c);
+                        return;
+                    }
+                    access.phase = if c.code == 8 {
+                        Phase::Destination
+                    } else {
+                        Phase::Source
+                    };
+                    access.delay = if c.code == 8 { 72 } else { 60 };
+                    if row != c.row {
+                        access.delay += if c.code == 8 { 58 } else { 68 };
+                    }
+                }
+            }
+            access.elapsed = 0;
+            access.tight = grid.tight(t);
+            c.access = Some(access);
+        }
+        self.command = Some(c);
+    }
     pub(super) fn tick_command(&mut self, cycles: u32) {
         if self.command.is_none() {
+            return;
+        }
+        if self.command.as_ref().is_some_and(|c| c.access.is_some()) {
             return;
         }
         self.command_cycles += cycles;
@@ -250,12 +382,8 @@ impl Vdp {
                     }
                     c.col += 1;
                 }
-                8 | 9 | 11 => {
-                    let value = match c.code {
-                        9 => source,
-                        11 => c.pending.take().unwrap(),
-                        _ => c.color,
-                    };
+                11 => {
+                    let value = c.pending.take().unwrap();
                     if c.arg & 0x20 == 0 {
                         self.pset(dx as usize, dy as usize, value, c.op);
                     }

@@ -1,6 +1,8 @@
 //! Original firmware/cartridge generators (MIT) and separately licensed C-BIOS binaries.
 //! See firmware/boot.asm for the exact boot routine, including the native BASIC ABI.
 use crate::font;
+mod command_timing_fixture;
+pub use command_timing_fixture::command_timing_cartridge;
 mod cassette_fixture;
 pub use cassette_fixture::{cassette_test_cartridge, cassette_test_image};
 mod disk;
