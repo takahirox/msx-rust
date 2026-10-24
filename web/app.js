@@ -150,6 +150,8 @@ function frame(time) {
     accumulator += elapsed;
     let count = 0;
     while (accumulator >= frameMilliseconds() && count++ < 5) {
+      // Charge the budget used on entry. The CPU may fix a new R9 timing
+      // during this call; charging its new budget would lose or duplicate time.
       const elapsedFrame = frameMilliseconds();
       for (const key of pendingText.splice(0, 64)) wasm.msx_text(key);
       wasm.msx_frame();

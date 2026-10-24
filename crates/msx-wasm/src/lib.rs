@@ -22,6 +22,8 @@ pub extern "C" fn msx_model(model: u32) {
             .set_model(if model == 1 { Model::Msx2 } else { Model::Msx1 })
     });
 }
+/// Budget consumed by the next msx_frame call, including active interlace.
+/// Sample before calling: pending R9 changes may fix during that call.
 #[no_mangle]
 pub extern "C" fn msx_frame_cycles() -> u32 {
     APP.with(|a| a.borrow().machine.hardware.vdp.frame_cycles() as u32)

@@ -200,3 +200,66 @@ fn frame_budgets_preserve_overshoot_and_clock_frequencies() {
         }
     }
 }
+
+#[test]
+fn interlaced_machine_fields_preserve_instruction_debt_pcm_and_transitions() {
+    for initial in [8, 10, 0x88, 0x8a] {
+        let mut m = machine(Model::Msx2);
+        for (a, b) in [(0xc100, 0xc3), (0xc101, 0), (0xc102, 0xc1)] {
+            m.hardware.write(a, b); // JP C100: exactly 11 elapsed T per iteration.
+        }
+        m.hardware.vdp.set_register(9, initial);
+        m.hardware.vdp.set_register(0, 0x16);
+        m.hardware.vdp.set_register(1, 0x20);
+        let mut nominal = 0u64;
+        let mut samples = 0;
+        for field in 1..=110 {
+            // Repeated pending writes, including transitions in both directions.
+            if field > 100 {
+                for value in [0x82, 8, 0, [0, 2, 8, 10][field as usize % 4]] {
+                    m.hardware.vdp.set_register(9, value);
+                }
+            }
+            let budget = if field <= 101 {
+                if initial & 2 == 0 {
+                    59_850
+                } else {
+                    71_250
+                }
+            } else {
+                [59_736, 71_364, 59_850, 71_250][(field as usize - 1) % 4]
+            };
+            assert_eq!(m.hardware.vdp.frame_cycles(), budget);
+            nominal += budget as u64;
+            m.frame();
+            assert_eq!(m.cpu.tstates, nominal.div_ceil(11) * 11);
+            assert!(m.cpu.tstates - nominal < 11);
+            assert_eq!(m.hardware.vdp.frames, field);
+            samples += m.hardware.psg.samples.len();
+            assert_eq!(samples as u64, m.cpu.tstates * 44_100 / 3_579_545);
+            // Both independent sources occurred despite arbitrary instruction phase.
+            m.hardware.vdp.set_register(15, 1);
+            assert_eq!(m.hardware.vdp.read_status() & 1, 1);
+            assert!(m.hardware.vdp.irq());
+            m.hardware.vdp.set_register(15, 0);
+            assert_eq!(m.hardware.vdp.read_status() & 0x80, 0x80);
+            assert!(!m.hardware.vdp.irq());
+            if field == 100 {
+                let (executed, pcm) = if initial & 2 == 0 {
+                    (5_985_001, 73_735)
+                } else {
+                    (7_125_008, 87_780)
+                };
+                assert_eq!((m.cpu.tstates, samples), (executed, pcm));
+                assert_eq!(
+                    nominal,
+                    if initial & 2 == 0 {
+                        5_985_000
+                    } else {
+                        7_125_000
+                    }
+                );
+            }
+        }
+    }
+}
