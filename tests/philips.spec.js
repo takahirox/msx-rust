@@ -216,6 +216,43 @@ for (const site of sites) {
       });
     }
   }
+  for (const model of ['0', '1']) {
+    for (const size of [368640, 737280]) {
+      for (const philips of [false, true]) {
+        test(`CPU device-clock overrun, underrun and complete payload export ${philips ? 'Philips' : 'Weave'} MSX${Number(model)+1} ${size} ${site}`, async ({page}) => {
+          const errors = [], requests = [];
+          page.on('pageerror', error => errors.push(error.message));
+          page.on('request', request => requests.push(request));
+          await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
+          if (model === '0') await page.locator('#model').selectOption('0');
+          await page.locator('#advanced-panel > summary').click();
+          if (philips) await installSystem(page, model);
+          const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('clock-weave', size, 0x35);
+          if (!philips) disk[2] = size === 737280 ? 0xf9 : 0xf8;
+          for (let i=0; i<512; i++) disk[1024+i] = (i*73+Math.floor(i/256))&255;
+          const expected = Buffer.from(disk);
+          expected.fill(0, 5*512, 6*512); expected[5*512] = 0x61;
+          disk.copy(expected, 8*512, 1024, 1536);
+          Buffer.from([philips ? 0xbf : 0x80,4,0xb8,0,4,4]).copy(expected, 8*512);
+          await page.locator('#disk').setInputFiles(file('original-clock.dsk', disk));
+          await expect(page.locator('#disk-status')).toContainText('original-clock.dsk');
+          await page.locator('#disk-protected').uncheck();
+          if (philips) {
+            await page.locator('#disk-rom').setInputFiles(file('original-clock.rom', await fixture('clock',16384,255)));
+            await expect(page.locator('#disk-profile-status')).toContainText('original-clock.rom');
+          } else { await page.locator('#boot-disk').click(); }
+          // CPU checks all 512 read bytes, LOST DATA for unread read/initial
+          // starvation/later zero-fill, clean new-command status, and waits for
+          // the final serializer/CRC tail before painting success.
+          await greenOutput(page, model);
+          await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
+          expect(await exportDisk(page)).toEqual(expected);
+          expect(errors).toEqual([]);
+          expect(requests.every(request => request.method()==='GET' && request.url().startsWith(site))).toBe(true);
+        });
+      }
+    }
+  }
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');

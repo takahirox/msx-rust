@@ -305,14 +305,65 @@ printed pages 10, 12–13, 17 and 20, applying its 1 MHz WD2793 profile. The
 scheduled settling/search; its optional-side TODO and uncertain stopped-rotation
 handling are not behavior oracles. These references are not physical measurements.
 
-After a matching ID, the bounded synthetic handoff waits 114 CPU cycles for first
-DRQ, then 114 cycles after each serviced byte. An unserviced DRQ aborts with
-lost-data after 4096 cycles. All phase/DRQ/timeout deadlines use the same absolute
-clock and consume only residual elapsed time: a large tick can encounter an ID,
-raise DRQ and time out that pending byte, just as single-cycle ticks do. The
-service-relative byte cadence and generous service window remain approximations;
-ID-to-data gaps, physical byte cadence and lost-data fidelity are separate work.
-CPU bus accesses still occur at instruction boundaries.
+After a matching ID, Type-II bytes run independently of CPU service at nominal
+250 kbit/s MFM: one byte takes **32 microseconds = 114.54544 CPU cycles** at
+3,579,545 Hz. All deadlines share one absolute clock in 1/100000 CPU cycles;
+only observation at a CPU instruction boundary rounds upward. Adding the exact
+fractional period retains the remainder across every byte and phase. Single,
+irregular and large ticks visit the same events in chronological order.
+
+The existing nine ID positions are retained. Their phase denotes the **start of
+the FE ID-address-mark byte**, with ID 1 coincident with rising index. Relative to
+a matching ID at `H`, let `B = 114.54544 cycles`. The selected raw-image profile is:
+
+| Device event | Absolute deadline | CPU-cycle offset from H (ceil) |
+| --- | --- | --- |
+| Initial write DRQ | H + 9B | 1031 |
+| Initial write check; abort if unserviced | H + 17B | 1948 |
+| Second write DRQ (byte index 1) | H + 44B | 5040 |
+| Later write request, index i=1..511 | H + (43+i)B | 5040..63459 |
+| Consume requested write byte i=1..511 | H + (44+i)B | 5155..63573 |
+| First write byte reaches media | H + 45B | 5155 |
+| Last write byte reaches media | H + 556B | 63688 |
+| Read byte arrival, index i=0..511 | H + (46+i)B | 5270..63802 |
+| Final read byte's service budget expires | H + 558B | 63917 |
+| Read completion after two CRC bytes; write completion after CRC + trailing FE | H + 559B | 64031 |
+
+The first-to-second write request interval is 35B = 4009.0904 cycles; later
+requests are one B apart.
+
+These are **synthetic offsets**, not physical phase measurements. The local normal
+MFM layout uses a seven-byte ID header, 22 gap bytes, 12 sync bytes, three A1s and
+a data mark, informed by the
+[pinned raw-sector layout](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/fdc/SectorBasedDisk.cc).
+The eight-byte initial-write window and extended first-to-second DRQ interval
+follow the pinned controller's `startWriteSector`/`checkStartWrite`/pre-data
+schedule as a selected policy. The first supplied byte is latched at the initial
+check; subsequent data uses a one-byte serializer pipeline. The read's extra
+byte of assembly latency and its completion boundary are local profile choices.
+Raw DSK supplies neither headers nor angular timing. We retain the nine evenly
+spaced IDs rather than adopting the upstream track's global gap placement.
+
+On each read arrival, Data updates and DRQ asserts. Replacing unread data latches
+LOST DATA and continues. Reading Data acknowledges only the current byte;
+repeated/early reads return the register without advancing the disk. The final
+byte stays available with DRQ through the CRC tail until serviced or completion.
+Missing its one-byte budget latches LOST DATA even without a replacement byte;
+a late read during the tail still returns it. Completion clears DRQ, clears BUSY,
+and raises IRQ; Data retains its last value. Status reads acknowledge IRQ only.
+
+An initially unserviced write aborts at its separate check with LOST DATA and no
+media changes. Once the first byte is accepted, later unserviced positions become
+zero and LOST DATA latches while the sector continues. A late write supplies the
+currently asserted request; it cannot recover an earlier zero-filled position.
+Data accesses outside a pending write request update register readback but do not
+queue bytes. CPU service never shifts deadlines or completes/commits byte 512.
+LOST DATA survives normal completion, subsequent multi-record searches/transfers,
+and their RNF failure; a newly accepted ordinary command or reset clears it.
+Existing FORCE INTERRUPT status/latching behavior is unchanged and remains outside
+this task. Continued read overrun, initial write rejection, later zero-fill and
+the CRC/trailing-FE sequence are informed by the TI transcription, printed pages
+7, 11, 20 and 40; the exact final-read service/DRQ policy above is synthetic.
 
 After each complete multi-record sector, Sector increments and a fresh search
 starts at the current rotation without repeating E settling. There is no automatic
@@ -326,8 +377,13 @@ separate from physical WD2793 drive-switch behavior. Type I retains its existing
 non-canceling control-write policy.
 
 Sector data is bounded to a fixed 512-byte transfer buffer. Writes commit only
-once all 512 bytes arrive, retaining all bytes outside that sector. A canceled,
-protected or timed-out partial write leaves the mounted image unchanged.
+at the scheduled end of the serializer/CRC tail, retaining all bytes outside that
+sector. A completed zero-filled sector commits and becomes dirty if its contents
+changed; an explicitly canceled incomplete sector or a protected write is discarded.
+Completed earlier sectors survive later cancellation, and dirty-media guards still
+require exact export before replacement/ejection. This staged-sector safety policy
+deliberately differs from physical partial-write fidelity: a real interrupted write
+can leave partial data or CRC damage, which raw DSK does not represent.
 
 ## Weave firmware ABI and boot contract
 
@@ -376,8 +432,8 @@ Regenerate with `python3 tests/fixtures/philips.py`. They discover the AB header
 call its initialization vector through normal slot mapping. The disk ROM polls
 active-low signals, reads a sector without `WV` into RAM, then executes its code.
 The sector renders a green VDP backdrop and polls a complete 512-byte A6h write to
-sector 9 (side 0 for 360 KiB, side 1 for 720 KiB). Native variants test protection, forced abort and service timeout;
-expected full images prove exact writes and unchanged partial writes. The system
+sector 9 (side 0 for 360 KiB, side 1 for 720 KiB). Native variants test protection, forced abort and later zero-fill;
+expected full images prove exact writes, zero-fill and discarded canceled writes. The system
 also accesses a parked ASCII8 SRAM cartridge, the MSX2 sub-ROM and separate mapper
 RAM segments. No host BIOS traps or proprietary inputs are involved. Tests cover
 both geometries/models and the browser suite runs at `/` and `/msx-rust/`.
@@ -398,7 +454,7 @@ exported image checks unchanged surrounding bytes. Native tests and compiled Was
 run this diskless-to-mounted sequence on both models at both browser roots.
 The original `philips-search.hex` AB ROM (#57) polls Type-II E=0 and E=1 reads
 of known sector-3 payloads and delayed sector-10 failure. It checks BUSY and
-active-low signals, bounds first-DRQ polls by 30 ms + one revolution + 114 cycles,
+active-low signals, bounds first-DRQ polls by 30 ms + one revolution + 46 byte periods,
 and bounds RNF by four revolutions .. 30 ms + five revolutions. Poll loops include
 MSX M1 waits (42 cycles for success, 62 for failure). It writes the fixed trace
 `01 FF 7F 00 01 FF BF 10` twice, followed by 496 known 62h bytes, through an E=1
@@ -409,11 +465,28 @@ entire exported image. Green requires all CPU checks to pass.
 Existing 65535-iteration signal polls allow over five million cycles, exceeding
 30 ms + five revolutions (3686931.35 cycles). Native Weave boot budgets now allow
 600 NTSC frames for twelve reads: each sector is bounded by one revolution plus
-512 × (114 + 4096) cycles, with additional positioning/setup time. The independent
+559 × 114.54544 cycles, with additional positioning/setup time. The independent
 three-transfer/final-track fixture allows 180 frames including a 79-track seek;
 a read/write pair allows 120 frames. Browser output waits allow 15 seconds for
-these emulated bounds plus host scheduling. Earlier generated fixtures remain
-byte-for-byte unchanged.
+these emulated bounds plus host scheduling. Serviced-byte loops fit within the
+device byte period and explicitly wait for serializer/CRC completion; first-DRQ count checks occur after the full read so
+they cannot cause an artificial overrun. The Weave driver chooses read/write
+once per sector to keep both polling paths within that period.
+
+Issue #59 adds original `philips-clock.hex` and `philips-clock-weave.hex`
+fixtures from the same generator. The former runs through AB discovery; the
+latter boots an original WV sector and loads its diagnostic via real DISKIO.
+Both leave an entire read unserviced, verify LOST DATA and the final Data value,
+read and compare all 512 independently patterned bytes, reject an initially
+starved write without media changes, and let a started write zero-fill all later
+positions. A final complete write exports six observed signal/status bytes plus
+506 payload bytes. Its prefix is `BF 04 B8 00 04 04` for Philips and
+`80 04 B8 00 04 04` for Weave; sector 6 is `61` followed by 511 zeroes, and
+sector 5 stays unchanged. Native and compiled-Wasm tests cover both interfaces,
+models, geometries and browser roots with full-image comparisons. The diagnostic
+poll bound exceeds one revolution + 559 byte periods (779940 cycles); native
+execution permits 8M cycles including boot reads and CPU payload verification.
+
 These fixtures establish the selected bus contract, not commercial compatibility.
 
 ## Provenance and reproducibility

@@ -1,4 +1,4 @@
-//! Original timestamp oracles for the selected raw-DSK profile (Issue #57).
+//! Original timestamp oracles for the selected raw-DSK profile (Issues #57/#59).
 use msx_core::disk::{Controller, Disk};
 
 const REV: u32 = 715_909;
@@ -6,6 +6,25 @@ const REV: u32 = 715_909;
 const IDS: [u32; 9] = [
     0, 79_546, 159_091, 238_637, 318_182, 397_728, 477_273, 556_819, 636_364,
 ];
+
+// Independent rational oracle: 32 us at 3,579,545 CPU Hz. Never round each byte.
+fn byte_at(id: u32, n: u32) -> u32 {
+    id + (u64::from(n) * 3_579_545 * 32).div_ceil(1_000_000) as u32
+}
+fn request_at(id: u32, write: bool, index: u32) -> u32 {
+    byte_at(
+        id,
+        if write {
+            if index == 0 {
+                9
+            } else {
+                43 + index
+            }
+        } else {
+            46 + index
+        },
+    )
+}
 
 fn drive(size: usize) -> Controller {
     let mut f = Controller::default();
@@ -65,15 +84,16 @@ fn every_id_read_write_e_side_and_geometry_has_an_independent_first_drq_deadline
                             }
                             at(&mut f, &mut now, id);
                             state(&mut f, 1, false, false);
-                            at(&mut f, &mut now, id + 113);
+                            let first = request_at(id, write, 0);
+                            at(&mut f, &mut now, first - 1);
                             state(&mut f, 1, false, false);
-                            at(&mut f, &mut now, id + 114);
+                            at(&mut f, &mut now, first);
                             state(&mut f, 3, false, true);
-                            at(&mut f, &mut now, id + 115);
+                            at(&mut f, &mut now, first + 1);
                             state(&mut f, 3, false, true);
                             for byte in 0..512 {
                                 if byte != 0 {
-                                    f.tick(114);
+                                    at(&mut f, &mut now, request_at(id, write, byte));
                                 }
                                 assert!(f.drq);
                                 if write {
@@ -85,6 +105,11 @@ fn every_id_read_write_e_side_and_geometry_has_an_independent_first_drq_deadline
                                     );
                                 }
                             }
+                            state(&mut f, 1, false, false);
+                            at(&mut f, &mut now, byte_at(id, 559) - 1);
+                            state(&mut f, 1, false, false);
+                            assert!(!f.disk.as_ref().unwrap().dirty);
+                            at(&mut f, &mut now, byte_at(id, 559));
                             state(&mut f, 0, true, false);
                             if write {
                                 let disk = f.disk.as_ref().unwrap();
@@ -111,11 +136,11 @@ fn fractional_settling_does_not_accept_the_id_just_before_its_deadline() {
     f.tick(now);
     f.write(2, 3);
     f.write(0, 0x84); // search starts at 159091.35, after ID 3 at 159091
-    for target in [159_090, 159_091, 159_092, 875_113] {
+    for target in [159_090, 159_091, 159_092, 880_269] {
         at(&mut f, &mut now, target);
         state(&mut f, 1, false, false);
     }
-    at(&mut f, &mut now, 875_114); // next ID 3 + 114
+    at(&mut f, &mut now, 880_270); // next ID 3 + 46 bytes
     state(&mut f, 3, false, true);
 }
 
@@ -172,68 +197,16 @@ fn c_controls_comparison_of_s_against_the_id_side_lsb() {
                 let mut f = drive(737_280);
                 f.write(4, side);
                 f.write(0, 0x80 | c | s);
-                f.tick(114);
+                f.tick(5_270);
                 if c == 0 || s >> 3 == side {
                     state(&mut f, 3, false, true);
                 } else {
                     state(&mut f, 1, false, false);
-                    f.tick(4 * REV - 114);
+                    f.tick(4 * REV - 5_270);
                     state(&mut f, 0x10, true, false);
                 }
             }
         }
-    }
-}
-
-#[test]
-fn tick_partitions_agree_through_settle_search_handoff_and_pending_byte_timeout() {
-    for (start, cmd, sector) in [
-        (0, 0x84, 1),
-        (51_705, 0xa4, 3),
-        (0, 0x80, 1),
-        (636_365, 0xa0, 9),
-    ] {
-        let first = next_sector_id(start, cmd & 4 != 0, sector) + 114;
-        let mut large = drive(368_640);
-        let mut single = drive(368_640);
-        let mut irregular = drive(368_640);
-        for f in [&mut large, &mut single, &mut irregular] {
-            f.tick(start);
-            f.write(2, sector as u8);
-            f.write(0, cmd);
-        }
-        let mut now = start;
-        for target in [
-            first - 1,
-            first,
-            first + 1,
-            first + 4095,
-            first + 4096,
-            first + 4097,
-        ] {
-            large.tick(target - now);
-            for _ in now..target {
-                single.tick(1);
-            }
-            let mut remaining = target - now;
-            for chunk in [3, 107_387, 17, 400_003, u32::MAX] {
-                let step = remaining.min(chunk);
-                irregular.tick(step);
-                remaining -= step;
-            }
-            let (status, irq, drq) = if target < first {
-                (1, false, false)
-            } else if target < first + 4096 {
-                (3, false, true)
-            } else {
-                (4, target == first + 4096, false)
-            };
-            for f in [&mut large, &mut single, &mut irregular] {
-                state(f, status, irq, drq);
-            }
-            now = target;
-        }
-        assert!(!large.disk.as_ref().unwrap().dirty);
     }
 }
 
@@ -247,16 +220,17 @@ fn multi_record_searches_again_without_settling_and_sector_ten_cannot_cross_trac
             let mut now = 0;
             f.write(2, 8);
             f.write(0, if write { 0xb4 } else { 0x94 });
-            // ID8 + 114, then ID9 + 114. Repeating the 30 ms delay would
-            // miss ID9: sector 8 finishes only 21177 cycles before its ID.
-            for (sector, first) in [(8, 556_933), (9, 636_478)] {
+            // The CRC tail ends <30 ms before the next ID. Repeating E
+            // would miss it; completion must start a new rotational search.
+            for (sector, id) in [(8, 556_819), (9, 636_364)] {
+                let first = request_at(id, write, 0);
                 at(&mut f, &mut now, first - 1);
                 state(&mut f, 1, false, false);
                 at(&mut f, &mut now, first);
                 state(&mut f, 3, false, true);
                 for i in 0..512 {
                     if i != 0 {
-                        at(&mut f, &mut now, first + i * 114);
+                        at(&mut f, &mut now, request_at(id, write, i));
                     }
                     if write {
                         f.write(3, sector);
@@ -264,6 +238,8 @@ fn multi_record_searches_again_without_settling_and_sector_ten_cannot_cross_trac
                         assert_eq!(f.read(3), [0xfe, 0xfb, 0xf8][(sector as usize - 1) % 3]);
                     }
                 }
+                assert_eq!(f.sector, sector);
+                at(&mut f, &mut now, byte_at(id, 559));
                 assert_eq!(f.sector, sector + 1);
                 state(&mut f, 1, false, false);
                 if write {
@@ -271,7 +247,7 @@ fn multi_record_searches_again_without_settling_and_sector_ten_cannot_cross_trac
                 }
                 assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
             }
-            // Search begins at 694732, first index 715909, fifth 3579545.
+            // Search begins at ceil(636364 + 559*114.54544) = 700395, first index 715909, fifth 3579545.
             at(&mut f, &mut now, 5 * REV - 1);
             state(&mut f, 1, false, false);
             at(&mut f, &mut now, 5 * REV);
@@ -291,19 +267,24 @@ fn cancellation_in_settle_search_handoff_and_partial_transfer_never_resurrects_o
     for write in [false, true] {
         // Sector 3 with E: settling, search, matched ID handoff, pending byte,
         // and a partially serviced sector.
-        for elapsed in [107_386, 107_387, 159_091, 159_204, 159_205, 159_206] {
+        for elapsed in [
+            107_386, 107_387, 159_091, 160_121, 160_122, 161_038, 161_039, 164_131, 164_360,
+            164_361, 222_777, 223_008, 223_121,
+        ] {
             for cancel in 0..7 {
                 let mut f = drive(737_280);
                 let original = f.disk.as_ref().unwrap().bytes().to_vec();
                 f.write(2, 3);
                 f.write(0, if write { 0xa4 } else { 0x84 });
-                f.tick(elapsed);
-                if elapsed == 159_206 {
-                    if write {
-                        f.write(3, 0x17);
-                    } else {
-                        f.read(3);
-                    }
+                if write && elapsed > 161_038 {
+                    f.tick(160_122);
+                    f.write(3, 0x17);
+                    f.tick(elapsed - 160_122);
+                } else {
+                    f.tick(elapsed);
+                }
+                if elapsed >= 160_122 && write {
+                    f.write(3, 0x17);
                 }
                 // Busy writes cannot change ID matching registers or commands.
                 f.write(1, 10);
@@ -343,13 +324,12 @@ fn multi_write_cancellation_keeps_completed_sectors_and_dirty_media_guards() {
     let mut f = drive(368_640);
     let mut expected = f.disk.as_ref().unwrap().bytes().to_vec();
     f.write(0, 0xb0);
-    f.tick(114);
+    let mut now = 0;
     for i in 0..512 {
-        if i != 0 {
-            f.tick(114);
-        }
+        at(&mut f, &mut now, request_at(0, true, i));
         f.write(3, 0x17);
     }
+    at(&mut f, &mut now, byte_at(0, 559));
     expected[..512].fill(0x17);
     assert_eq!(f.sector, 2);
     state(&mut f, 1, false, false);
@@ -357,7 +337,7 @@ fn multi_write_cancellation_keeps_completed_sectors_and_dirty_media_guards() {
     assert!(f
         .mount(Disk::new(vec![0; 368_640], false).unwrap())
         .is_err());
-    f.tick(79_660 - 58_368); // ID2 + handoff, no repeated settling
+    at(&mut f, &mut now, request_at(79_546, true, 0));
     f.write(3, 0x23);
     f.write(0, 0xd8);
     f.read(0);
@@ -387,38 +367,12 @@ fn not_ready_and_write_protection_reject_before_settling_but_protected_reads_sea
         state(&mut f, 0x40, true, false);
         f.write(2, 2);
         f.write(0, 0x80 | e);
-        let first = if e == 0 { 79_660 } else { 795_569 };
+        let first = if e == 0 { 84_816 } else { 800_725 };
         f.tick(first - 1);
         state(&mut f, 1, false, false);
         f.tick(1);
         state(&mut f, 3, false, true);
         assert_eq!(f.read(3), 0xfb);
-    }
-}
-
-#[test]
-fn one_tick_can_cross_settle_id_first_drq_and_timeout_without_reusing_elapsed_time() {
-    for (command, sector, first) in [(0x80, 2, 79_660), (0x84, 1, 716_023), (0xa4, 3, 159_205)] {
-        for target in [
-            first - 1,
-            first,
-            first + 4095,
-            first + 4096,
-            first + 4097,
-            10 * REV,
-        ] {
-            let mut f = drive(368_640);
-            f.write(2, sector);
-            f.write(0, command);
-            f.tick(target);
-            if target < first {
-                state(&mut f, 1, false, false);
-            } else if target < first + 4096 {
-                state(&mut f, 3, false, true);
-            } else {
-                state(&mut f, 4, true, false);
-            }
-        }
     }
 }
 
@@ -435,7 +389,288 @@ fn unchanged_controls_do_not_cancel_settling_or_search() {
             f.write(5, 0x81);
             state(&mut f, 1, false, false);
         }
-        f.tick(114);
+        f.tick(if command == 0xa4 { 1_031 } else { 5_270 });
         state(&mut f, 3, false, true);
+    }
+}
+
+// Advance the same timeline with one large tick, single cycles, or uneven chunks.
+fn partition_at(f: &mut Controller, now: &mut u32, target: u32, mode: u8) {
+    let mut remaining = target - *now;
+    let mut i = 0;
+    while remaining != 0 {
+        let chunk = match mode {
+            0 => remaining,
+            1 => 1,
+            _ => [3, 19, 1, 2003, 107_387][i % 5].min(remaining),
+        };
+        f.tick(chunk);
+        remaining -= chunk;
+        i += 1;
+    }
+    *now = target;
+}
+fn patterned(size: usize) -> Controller {
+    let mut f = Controller::default();
+    let bytes = (0..size).map(|i| (i * 73 + i / 256) as u8).collect();
+    f.mount(Disk::new(bytes, false).unwrap()).unwrap();
+    f.write(5, 0x81);
+    f
+}
+
+#[test]
+fn unread_arrivals_replace_the_register_and_complete_by_time_in_every_tick_partition() {
+    // Include revolution wrap and an ID at a nonzero integral cycle phase.
+    for (start, id, sector) in [(0, 0, 1), (REV - 10, REV, 1), (1, 79_546, 2)] {
+        for mode in 0..3 {
+            let mut f = patterned(737_280);
+            let original = f.disk.as_ref().unwrap().bytes().to_vec();
+            let mut now = start;
+            f.tick(start);
+            f.write(3, 0xa7);
+            f.write(2, sector);
+            f.write(0, 0x80);
+            for i in 0..512 {
+                let arrival = byte_at(id, 46 + i);
+                partition_at(&mut f, &mut now, arrival - 1, mode);
+                assert_eq!(
+                    f.data,
+                    if i == 0 {
+                        0xa7
+                    } else {
+                        original[(sector as usize - 1) * 512 + i as usize - 1]
+                    }
+                );
+                partition_at(&mut f, &mut now, arrival, mode);
+                assert_eq!(f.data, original[(sector as usize - 1) * 512 + i as usize]);
+                state(&mut f, if i == 0 { 3 } else { 7 }, false, true);
+                partition_at(&mut f, &mut now, arrival + 1, mode);
+                assert!(f.drq);
+            }
+            partition_at(&mut f, &mut now, byte_at(id, 559) - 1, mode);
+            state(&mut f, 7, false, true);
+            partition_at(&mut f, &mut now, byte_at(id, 559), mode);
+            state(&mut f, 4, true, false);
+            let last = original[sector as usize * 512 - 1];
+            for _ in 0..4 {
+                assert_eq!(f.read(3), last);
+            }
+            partition_at(&mut f, &mut now, byte_at(id, 559) + 1, mode);
+            state(&mut f, 4, false, false);
+            assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+        }
+    }
+}
+
+#[test]
+fn read_service_acknowledges_only_current_data_and_final_starvation_is_sticky() {
+    for missed in [vec![], vec![0], vec![0, 1, 5, 6, 7], vec![511]] {
+        for mode in 0..3 {
+            let mut f = patterned(368_640);
+            let expected = f.disk.as_ref().unwrap().bytes()[..512].to_vec();
+            let mut now = 0;
+            f.write(0, 0x80);
+            let mut lost = false;
+            for i in 0..512 {
+                let arrival = byte_at(0, 46 + i);
+                partition_at(&mut f, &mut now, arrival - 1, mode);
+                if i == 0 {
+                    assert_eq!(f.read(3), 0);
+                } else if !missed.contains(&(i - 1)) {
+                    assert_eq!(f.read(3), expected[i as usize - 1]);
+                    assert!(!f.drq); // repeated/early read cannot consume the next byte
+                }
+                partition_at(&mut f, &mut now, arrival, mode);
+                if i != 0 && missed.contains(&(i - 1)) {
+                    lost = true;
+                }
+                assert_eq!(f.data, expected[i as usize]);
+                state(&mut f, 3 | if lost { 4 } else { 0 }, false, true);
+                if !missed.contains(&i) {
+                    // Alternating early/late service never moves an arrival.
+                    partition_at(
+                        &mut f,
+                        &mut now,
+                        arrival + if i % 2 == 0 { 80 } else { 1 },
+                        mode,
+                    );
+                    assert_eq!(f.read(3), expected[i as usize]);
+                    assert_eq!(f.read(3), expected[i as usize]);
+                    assert!(!f.drq);
+                }
+            }
+            partition_at(&mut f, &mut now, 63_916, mode); // just before final service expiry
+            assert_eq!(f.read(0) & 4, if lost { 4 } else { 0 });
+            partition_at(&mut f, &mut now, 63_917, mode); // ceil(558 * 114.54544)
+            lost |= missed.contains(&511);
+            assert_eq!(f.read(0) & 4, if lost { 4 } else { 0 });
+            if missed.contains(&511) {
+                assert!(f.drq); // still readable during CRC tail despite late service
+                assert_eq!(f.read(3), expected[511]);
+                assert!(!f.drq);
+            }
+            partition_at(&mut f, &mut now, 64_031, mode);
+            state(&mut f, if lost { 4 } else { 0 }, true, false);
+            f.write(0, 0x80);
+            state(&mut f, 1, false, false); // accepted new command clears LOST DATA
+            f.reset();
+            assert_eq!(f.read(0) & 1, 0);
+        }
+    }
+}
+
+#[test]
+fn initial_write_has_a_distinct_eight_byte_window_and_ignores_idle_data() {
+    for mode in 0..3 {
+        for late in [false, true] {
+            let mut f = patterned(368_640);
+            let original = f.disk.as_ref().unwrap().bytes().to_vec();
+            f.write(3, 0x99); // idle writes are not future sector service
+            f.write(0, 0xa0);
+            let mut now = 0;
+            partition_at(&mut f, &mut now, 1_030, mode);
+            f.write(3, 0x98); // before request: likewise not service
+            state(&mut f, 1, false, false);
+            partition_at(&mut f, &mut now, 1_031, mode);
+            state(&mut f, 3, false, true);
+            assert_eq!(f.read(3), 0x98); // reading does not supply a write request
+            assert!(f.drq);
+            if late {
+                partition_at(&mut f, &mut now, 1_947, mode);
+                f.write(3, 0x61); // last integer cycle before initial check
+                f.write(3, 0x62); // a repeated access cannot overwrite accepted data
+                assert_eq!(f.read(3), 0x62); // read during write cannot acknowledge future requests
+            }
+            partition_at(&mut f, &mut now, 1_948, mode);
+            if late {
+                state(&mut f, 1, false, false);
+                partition_at(&mut f, &mut now, 5_039, mode);
+                state(&mut f, 1, false, false);
+                partition_at(&mut f, &mut now, 5_040, mode);
+                state(&mut f, 3, false, true);
+                partition_at(&mut f, &mut now, 64_030, mode);
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+                partition_at(&mut f, &mut now, 64_031, mode);
+                state(&mut f, 4, true, false);
+                let mut expected = original;
+                expected[..512].fill(0);
+                expected[0] = 0x61;
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
+                assert!(f.disk.as_ref().unwrap().dirty);
+            } else {
+                state(&mut f, 4, true, false);
+                f.write(3, 0x61); // at/after the check cannot resurrect an aborted write
+                partition_at(&mut f, &mut now, REV, mode);
+                state(&mut f, 4, false, false);
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+                assert!(!f.disk.as_ref().unwrap().dirty);
+            }
+        }
+    }
+}
+
+#[test]
+fn later_write_underruns_zero_fill_missed_positions_and_resume_without_moving_deadlines() {
+    for id in [0, REV] {
+        for missed in [vec![], vec![1], vec![1, 2, 3, 100, 101, 511], vec![511]] {
+            for mode in 0..3 {
+                let mut f = patterned(737_280);
+                let original = f.disk.as_ref().unwrap().bytes().to_vec();
+                let mut expected = original.clone();
+                let mut now = if id == 0 { 0 } else { id - 10 };
+                f.tick(now); // command before wrap; all partitions cross the ID/index
+                f.write(0, 0xa0);
+                for i in 0..512 {
+                    let request = request_at(id, true, i);
+                    partition_at(&mut f, &mut now, request - 1, mode);
+                    assert!(!f.drq || (i > 1 && missed.contains(&(i - 1))));
+                    partition_at(&mut f, &mut now, request, mode);
+                    assert!(f.drq);
+                    if missed.contains(&i) {
+                        expected[i as usize] = 0;
+                    } else {
+                        partition_at(
+                            &mut f,
+                            &mut now,
+                            request + if i % 2 == 0 { 80 } else { 1 },
+                            mode,
+                        );
+                        let data = (i * 37 + 11) as u8;
+                        expected[i as usize] = data;
+                        f.write(3, data);
+                        f.write(3, !data); // no extra service / overwrite after acknowledgement
+                        assert!(!f.drq);
+                    }
+                    assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+                }
+                partition_at(&mut f, &mut now, id + 63_572, mode); // last byte not yet consumed
+                assert!(!f.irq);
+                partition_at(&mut f, &mut now, id + 63_573, mode);
+                assert!(!f.drq);
+                assert!(!f.irq);
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+                partition_at(&mut f, &mut now, id + 64_030, mode);
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), original);
+                partition_at(&mut f, &mut now, id + 64_031, mode);
+                state(&mut f, if missed.is_empty() { 0 } else { 4 }, true, false);
+                assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
+                assert!(f.disk.as_ref().unwrap().dirty);
+                partition_at(&mut f, &mut now, id + 64_032, mode);
+                assert!(!f.irq);
+            }
+        }
+    }
+}
+#[test]
+fn write_service_at_a_missed_deadline_belongs_to_the_new_request() {
+    let mut f = patterned(368_640);
+    let mut expected = f.disk.as_ref().unwrap().bytes().to_vec();
+    let mut now = 0;
+    f.write(0, 0xa0);
+    at(&mut f, &mut now, 1_031);
+    f.write(3, 0x61);
+    at(&mut f, &mut now, 5_154);
+    state(&mut f, 3, false, true);
+    at(&mut f, &mut now, 5_155); // byte 1 missed; request is now for byte 2
+    state(&mut f, 7, false, true);
+    f.write(3, 0x72);
+    at(&mut f, &mut now, 64_031);
+    expected[..512].fill(0);
+    expected[0] = 0x61;
+    expected[2] = 0x72;
+    state(&mut f, 4, true, false);
+    assert_eq!(f.disk.as_ref().unwrap().bytes(), expected);
+}
+
+#[test]
+fn lost_data_survives_multi_record_searches_data_and_rnf_until_new_command() {
+    for write in [false, true] {
+        let mut f = drive(368_640);
+        let mut now = 0;
+        f.write(2, 8);
+        f.write(0, if write { 0xb4 } else { 0x94 });
+        if write {
+            at(&mut f, &mut now, request_at(556_819, true, 0));
+            f.write(3, 0x61);
+        }
+        at(&mut f, &mut now, byte_at(556_819, 559));
+        state(&mut f, 5, false, false);
+        assert_eq!(f.sector, 9);
+        for i in 0..512 {
+            at(&mut f, &mut now, request_at(636_364, write, i));
+            state(&mut f, 7, false, true);
+            if write {
+                f.write(3, 0x72);
+            } else {
+                assert_eq!(f.read(3), 0xf8);
+            }
+        }
+        at(&mut f, &mut now, byte_at(636_364, 559));
+        state(&mut f, 5, false, false);
+        assert_eq!(f.sector, 10);
+        at(&mut f, &mut now, 5 * REV);
+        state(&mut f, 0x14, true, false);
+        f.write(0, 0x80);
+        state(&mut f, 1, false, false);
     }
 }

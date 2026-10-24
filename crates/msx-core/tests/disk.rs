@@ -1,6 +1,6 @@
 use msx_core::{
     cpu::Bus,
-    disk::{Controller, Disk, BYTE_CYCLES, SERVICE_TIMEOUT},
+    disk::{Controller, Disk},
     firmware, Firmware, Machine, Model,
 };
 fn drive(size: usize) -> Controller {
@@ -11,8 +11,8 @@ fn drive(size: usize) -> Controller {
 }
 fn byte_ready(f: &mut Controller) {
     // One revolution plus the synthetic handoff; stop on the first DRQ.
-    for _ in 0..6_300 {
-        f.tick(BYTE_CYCLES);
+    for _ in 0..45_100 {
+        f.tick(16);
         if f.drq {
             return;
         }
@@ -45,7 +45,7 @@ fn geometry_and_media_are_bounded() {
     }
 }
 #[test]
-fn commands_status_signals_timeouts_and_private_writes() {
+fn commands_status_signals_overrun_and_private_writes() {
     let mut f = drive(737280);
     assert_eq!(f.read(6), 0x83);
     assert_eq!(f.read(6), 0x81);
@@ -65,6 +65,7 @@ fn commands_status_signals_timeouts_and_private_writes() {
         assert!(f.drq);
         f.write(3, i as u8);
     }
+    f.tick(1_000); // serializer and CRC tail
     assert!(f.irq);
     assert!(!f.drq);
     assert_eq!(f.read(0), 0);
@@ -83,9 +84,10 @@ fn commands_status_signals_timeouts_and_private_writes() {
         byte_ready(&mut f);
         assert_eq!(f.read(3), i as u8);
     }
+    f.tick(1_000); // complete previous read
     f.write(0, 0x80);
     byte_ready(&mut f);
-    f.tick(SERVICE_TIMEOUT);
+    f.tick(60_000); // unread bytes overrun, but transfer completes
     assert_eq!(f.read(0) & 5, 4);
     assert!(!f.irq);
     f.write(0, 0x80);
@@ -116,7 +118,7 @@ fn commands_status_signals_timeouts_and_private_writes() {
 }
 #[test]
 fn z80_disk_boot_and_write_on_both_models() {
-    // A sector is bounded by one revolution + 512*(114+4096) cycles.
+    // A sector is bounded by one revolution + 559*114.54544 cycles.
     // Twelve boot reads fit in 600 NTSC frames; a read/write in 120 frames.
     for model in [Model::Msx1, Model::Msx2] {
         let mut m = Machine::default();
@@ -260,6 +262,7 @@ fn step_multi_record_and_partial_write_lifecycle() {
         assert!(f.drq);
         f.write(3, if i < 512 { 0x5a } else { 0xa5 });
     }
+    f.tick(1_000);
     assert_eq!(f.sector, 10);
     assert_eq!(f.read(0) & 0x11, 1);
     wait(&mut f);
@@ -283,7 +286,7 @@ fn step_multi_record_and_partial_write_lifecycle() {
     byte_ready(&mut f);
     f.write(3, 42);
     byte_ready(&mut f);
-    f.tick(SERVICE_TIMEOUT);
+    f.tick(1_000);
     assert_eq!(f.read(0) & 4, 4);
     assert_eq!(&f.disk.as_ref().unwrap().bytes()[..512], vec![0; 512]);
     f.write(0, 0x80);
@@ -506,6 +509,7 @@ fn seek_direction_and_late_write_protection() {
     f.disk.as_mut().unwrap().write_protected = true;
     byte_ready(&mut f);
     f.write(3, 42);
+    f.tick(1_000);
     assert_eq!(f.read(0) & 0x40, 0x40);
     assert!(f.disk.as_ref().unwrap().bytes().iter().all(|b| *b == 0));
     assert!(!f.disk.as_ref().unwrap().dirty);

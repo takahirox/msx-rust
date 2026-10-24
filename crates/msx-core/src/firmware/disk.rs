@@ -133,23 +133,33 @@ pub fn disk_rom() -> Vec<u8> {
     c.emit(&[0xe1, 0xd1, 0xc1, 0xe6, 0x98]);
     c.jump(0xc2, "hardware-error");
     c.emit(&[0x3a, 1, 0xf1, 0x32, 0xf8, 0x7f, 0xc5, 0xd5, 0x11, 0, 2]); // count512
-    c.label("byte");
-    c.emit(&[0x3a, 0xff, 0x7f, 0xe6, 0x40]);
-    c.jump(0xc2, "transfer-byte");
-    c.emit(&[0x3a, 0xf8, 0x7f, 0xe6, 1]);
-    c.jump(0xc2, "byte");
-    c.emit(&[0xd1, 0xc1]);
-    c.jump(0xc3, "hardware-error");
-    c.label("transfer-byte");
+
+    // Select direction once. Each serviced-byte path including MSX M1 waits
+    // fits within the 32 us (114.54544 CPU cycle) device cadence.
     c.emit(&[0x3a, 1, 0xf1, 0xfe, 0xa0]);
-    c.jump(0xca, "write-byte");
-    c.emit(&[0x3a, 0xfb, 0x7f, 0x77]);
-    c.jump(0xc3, "byte-done");
-    c.label("write-byte");
-    c.emit(&[0x7e, 0x32, 0xfb, 0x7f]);
-    c.label("byte-done");
-    c.emit(&[0x23, 0x1b, 0x7a, 0xb3]);
-    c.jump(0xc2, "byte");
+    c.jump(0xca, "write-poll");
+    for (poll, transfer, write) in [
+        ("read-poll", "read-byte", false),
+        ("write-poll", "write-byte", true),
+    ] {
+        c.label(poll);
+        c.emit(&[0x3a, 0xff, 0x7f, 0xe6, 0x40]);
+        c.jump(0xc2, transfer);
+        c.emit(&[0x3a, 0xf8, 0x7f, 0xe6, 1]);
+        c.jump(0xc2, poll);
+        c.emit(&[0xd1, 0xc1]);
+        c.jump(0xc3, "hardware-error");
+        c.label(transfer);
+        if write {
+            c.emit(&[0x7e, 0x32, 0xfb, 0x7f]);
+        } else {
+            c.emit(&[0x3a, 0xfb, 0x7f, 0x77]);
+        }
+        c.emit(&[0x23, 0x1b, 0x7a, 0xb3]);
+        c.jump(0xc2, poll);
+        c.jump(0xc3, "data-done");
+    }
+    c.label("data-done");
     c.jump(0xcd, "wait-done");
     c.emit(&[0xd1, 0xc1]);
     c.jump(0xda, "hardware-error");

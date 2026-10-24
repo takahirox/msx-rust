@@ -100,7 +100,10 @@ hex system/disk-ROM/sector fixtures are original MIT test software. They execute
 normal slots and controller accesses and do not validate commercial compatibility.
 The added philips-search.hex (Issue #57) is original MIT Z80 test code generated
 from the same source, with synthetic payloads/status traces and no external ROM
-or implementation bytes. See docs/disks.md for timing approximations.
+or implementation bytes. Issue #59 adds philips-clock.hex and
+philips-clock-weave.hex from the same original generator: synthetic byte-clock
+overrun/underrun traces and patterned payloads through both interfaces.
+See docs/disks.md for synthetic timing policies and limitations.
 
 ROMless Snatcher / SD Snatcher SCC-I profiles (Issue #49):
 These are hardware configurations, not ROM assets. No Konami or proprietary game,

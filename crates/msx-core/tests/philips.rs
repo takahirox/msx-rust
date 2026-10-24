@@ -1,12 +1,8 @@
-use msx_core::{
-    cpu::Bus,
-    disk::{BYTE_CYCLES, SERVICE_TIMEOUT},
-    firmware, BootPolicy, Firmware, Machine, Mapper, Model,
-};
+use msx_core::{cpu::Bus, firmware, BootPolicy, Firmware, Machine, Mapper, Model};
 
 fn byte_ready(m: &mut Machine) {
-    for _ in 0..6_300 {
-        m.hardware.fdc.tick(BYTE_CYCLES);
+    for _ in 0..45_100 {
+        m.hardware.fdc.tick(16);
         if m.hardware.fdc.drq {
             return;
         }
@@ -267,9 +263,16 @@ fn real_system_discovers_ab_rom_and_executes_non_wv_sector_with_exact_writes() {
                 disk[0x1f1] = u8::from(size == 737280);
                 assert_ne!(&disk[510..512], b"WV");
                 let mut expected = disk.clone();
-                if !protected && mode == 0 {
+                if !protected && (mode == 0 || mode == 2) {
                     let sector = if size == 737280 { 17 } else { 8 };
-                    expected[sector * 512..(sector + 1) * 512].fill(0xa6);
+                    expected[sector * 512..(sector + 1) * 512].fill(if mode == 2 {
+                        0
+                    } else {
+                        0xa6
+                    });
+                    if mode == 2 {
+                        expected[sector * 512] = 0xa6;
+                    }
                 }
                 m.mount_disk(disk, protected).unwrap();
                 m.install_philips_disk_rom(rom()).unwrap();
@@ -310,7 +313,7 @@ fn real_system_discovers_ab_rom_and_executes_non_wv_sector_with_exact_writes() {
 }
 
 #[test]
-fn bus_write_timeout_abort_side_motor_and_media_changes_never_commit_partial_sectors() {
+fn bus_write_underrun_commits_but_explicit_cancellation_discards_partial_sectors() {
     for model in [Model::Msx1, Model::Msx2] {
         for change in 0..6 {
             let mut m = machine(model);
@@ -325,7 +328,7 @@ fn bus_write_timeout_abort_side_motor_and_media_changes_never_commit_partial_sec
                 0 => m.hardware.write(0x7ff8, 0xd8),
                 1 => {
                     byte_ready(&mut m);
-                    m.hardware.fdc.tick(SERVICE_TIMEOUT);
+                    m.hardware.fdc.tick(1_000);
                 }
                 2 => m.hardware.write(0x7ffc, 1),
                 3 => m.hardware.write(0x7ffd, 0),
@@ -333,8 +336,13 @@ fn bus_write_timeout_abort_side_motor_and_media_changes_never_commit_partial_sec
                 _ => m.remove_philips_disk_rom(),
             }
             let disk = m.hardware.fdc.disk.as_ref().unwrap();
-            assert!(disk.bytes().iter().all(|b| *b == 0x29));
-            assert!(!disk.dirty);
+            let mut expected = vec![0x29; 737280];
+            if change == 1 {
+                expected[..511].fill(0x5a);
+                expected[511] = 0;
+            }
+            assert_eq!(disk.bytes(), expected);
+            assert_eq!(disk.dirty, change == 1);
         }
     }
 }
@@ -520,7 +528,7 @@ fn cpu_polls_type_two_e_settling_rotational_reads_and_missing_sector_then_export
             m.mount_disk(image, false).unwrap();
             m.install_philips_disk_rom(rom).unwrap();
             // Two failed searches, three transfers, and setup fit below 18M
-            // cycles: 2*(settle+5 rev) + 3*(settle+rev+512*(114+4096)).
+            // cycles: 2*(settle+5 rev) + 3*(settle+rev+559*114.54544).
             while m.cpu.tstates < 18_000_000 && !m.cpu.halted {
                 m.step();
             }
@@ -542,14 +550,23 @@ fn profile_removal_and_reset_cancel_every_type_two_phase() {
     for model in [Model::Msx1, Model::Msx2] {
         for remove in [false, true] {
             for write in [false, true] {
-                for elapsed in [107_386, 107_387, 159_091, 159_204, 159_205, 159_206] {
+                for elapsed in [
+                    107_386, 107_387, 159_091, 160_122, 161_038, 161_039, 164_131, 164_361,
+                    222_777, 223_008, 223_121,
+                ] {
                     let mut m = machine(model);
                     m.mount_disk(vec![0x35; 368640], false).unwrap();
                     m.hardware.write(0x7ffd, 0x80);
                     m.hardware.write(0x7ffa, 3);
                     m.hardware.write(0x7ff8, if write { 0xa4 } else { 0x84 });
-                    m.hardware.fdc.tick(elapsed);
-                    if elapsed == 159_206 {
+                    if write && elapsed >= 161_039 {
+                        m.hardware.fdc.tick(160_122);
+                        m.hardware.write(0x7ffb, 0x17);
+                        m.hardware.fdc.tick(elapsed - 160_122);
+                    } else {
+                        m.hardware.fdc.tick(elapsed);
+                    }
+                    if elapsed >= 160_122 {
                         if write {
                             m.hardware.write(0x7ffb, 0x17);
                         } else {
@@ -568,6 +585,82 @@ fn profile_removal_and_reset_cancel_every_type_two_phase() {
                     assert!(!disk.dirty);
                     assert!(disk.bytes().iter().all(|&byte| byte == 0x35));
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn cpu_observes_device_clock_overrun_and_underrun_on_both_interfaces_and_geometries() {
+    for model in [Model::Msx1, Model::Msx2] {
+        for size in [368_640, 737_280] {
+            for philips in [false, true] {
+                let mut m = Machine::default();
+                m.set_model(model);
+                let mut image = if philips {
+                    vec![0x35; size]
+                } else {
+                    fixture(
+                        include_str!("../../../tests/fixtures/philips-clock-weave.hex"),
+                        size,
+                        0x35,
+                    )
+                };
+                if philips {
+                    let mut main = fixture(
+                        include_str!("../../../tests/fixtures/philips-system.hex"),
+                        32768,
+                        0,
+                    );
+                    main[0x2d] = u8::from(model == Model::Msx2);
+                    if model == Model::Msx2 {
+                        let mut sub = vec![0; 16384];
+                        sub[..2].copy_from_slice(b"CD");
+                        m.load_msx2_firmware(&main, &sub).unwrap();
+                    } else {
+                        m.load_bios(&main).unwrap();
+                    }
+                } else {
+                    image[2] = if size == 737_280 { 0xf9 } else { 0xf8 };
+                }
+                // Sector 3 is payload for Philips, but the Weave loader also
+                // loads it. Keep diagnostic code below the first loaded sector.
+                for i in 0..512 {
+                    image[1024 + i] = (i * 73 + i / 256) as u8;
+                }
+                let mut expected = image.clone();
+                expected[5 * 512..6 * 512].fill(0);
+                expected[5 * 512] = 0x61;
+                expected[8 * 512..9 * 512].copy_from_slice(&image[1024..1536]);
+                let trace = [if philips { 0xbf } else { 0x80 }, 4, 0xb8, 0, 4, 4];
+                expected[8 * 512..8 * 512 + 6].copy_from_slice(&trace);
+                m.mount_disk(image, false).unwrap();
+                if philips {
+                    m.install_philips_disk_rom(fixture(
+                        include_str!("../../../tests/fixtures/philips-clock.hex"),
+                        16384,
+                        255,
+                    ))
+                    .unwrap();
+                }
+                m.boot_disk().unwrap();
+                // Boot reads plus five transfers and setup: <8*(rev+559B),
+                // with margin for CPU verification. This is an emulated bound.
+                while m.cpu.tstates < 8_000_000 && !m.cpu.halted {
+                    m.step();
+                }
+                assert!(
+                    m.cpu.halted,
+                    "{model:?} philips={philips} pc={:04x}",
+                    m.cpu.pc
+                );
+                assert_eq!(
+                    m.hardware.read(0xc060),
+                    0xa5,
+                    "{model:?} philips={philips} pc={:04x}",
+                    m.cpu.pc
+                );
+                assert_eq!(m.hardware.fdc.disk.as_ref().unwrap().bytes(), expected);
             }
         }
     }
