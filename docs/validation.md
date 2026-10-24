@@ -1,3 +1,103 @@
+# Issue 57 WD2793 Type-II settling and rotational searches
+
+Source: [Correct WD2793 Type-II settling and rotational sector searches](https://github.com/takahirox/msx-rust/issues/57).
+Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Node.js 24.12.0, Playwright 1.64.1 / Chromium. The assigned checkpoint was
+`d08e08b`; its controller matches evaluation baseline `0c80c26`. The live Issue
+was read using the GitHub connector before implementation.
+
+The shared controller separates E-controlled 30 ms settling, synthetic rotational
+ID/index search and the existing bounded byte transfer. Exact fractional deadlines
+share one absolute clock with Type I. Matching uses physical-cylinder, sector and
+optional ID-side comparison; missing sides supply index without IDs. Failure is
+on the fifth observed index. Search-start inclusion, ID-before-index ordering,
+HLT-high and Type-II control-change cancellation are documented selected policies,
+without silicon confirmation. Multi-record completion increments Sector and
+searches again without E settling or automatic track crossing. Completed writes
+remain committed; cancellation never commits an incomplete sector.
+
+Eleven new native register regressions use independent literal ID timestamps and
+status/data expectations. They cover read/write, both E values, nine ID positions,
+revolution wrap, fractional settling just after an ID, both geometries/sides,
+cylinder/sector/side mismatches, all C/S combinations, fifth-index boundaries,
+large/irregular/single-cycle ticks, direct ticks spanning first DRQ and timeout,
+multi-record handoff/failure, immediate not-ready/protection, unchanged controls,
+dirty-media guards and cancellation in settling/search/handoff/partial transfer.
+Philips bus tests additionally exercise reset/interface removal in every new phase
+on both models. Legacy disk/Type-I/Philips expectations now wait for rotational
+success/failure rather than assuming immediate sector access.
+
+The original MIT `philips-search.hex` AB ROM runs through real system/slot/CPU
+accesses, bounds E=0/E=1 success/failure polls, reads two complete known sector-3
+payloads, then writes the fixed sixteen-byte status/signal trace followed by 496
+known payload bytes to sector 9 using E=1. Native and eight compiled-Wasm cases
+cover both models/geometries and both browser roots. Canvas green requires every
+CPU check to pass; the expected full-image export checks exact writes. Existing
+fixtures reproduce unchanged. [Disk documentation](disks.md#original-philips-fixtures)
+records emulated polling bounds, including M1 waits and larger Weave boot budgets.
+No BIOS bypasses, proprietary firmware/software or physical measurements are inputs.
+
+Before implementation, the first five new register groups all failed on the
+unchanged baseline: early DRQ, skipped fractional settling, immediate mismatch
+IRQ/RNF and tick-partition differences. The corrected versions passed. These
+preliminary checks used the host Homebrew Rust 1.94; final checks select the
+README's pinned sysroot-first PATH. The final suite was also run with pinned
+Rust against only baseline `disk.rs`,
+restoring the corrected source in a `finally` block. Nine register tests fail,
+two pre-existing safety behaviors pass, and the CPU diagnostic fails with EEh
+instead of its A5h completion marker. A legacy native boot budget also failed after
+rotational scheduling because transfers can pass the next sector's ID. Its new
+bound accounts for one revolution plus 512*(114+4096) cycles per sector, with
+positioning/setup time, rather than assuming eleven immediate-success transfers.
+
+| Check | Actual result |
+| --- | --- |
+| Baseline sensitivity | Expected failures: 9 of 11 final register tests and the CPU diagnostic; two safety regressions pass |
+| `cargo fmt --all -- --check` | Passed with pinned Rust 1.99.0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed with pinned Rust 1.99.0 |
+| `cargo test --workspace --locked` | Passed: all 236 tests, none failed or ignored |
+| `./scripts/build.sh` | Passed with pinned Rust and the existing local linker workaround |
+| `node scripts/check-dist.mjs` | Passed: inventory, provenance, pinned hashes, subpath links and import-free Wasm |
+| `npm ci`, `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm Type-II suite | Passed: all eight model/geometry/root cases in 33.9 seconds |
+| Focused Philips lifecycle suite after assertion correction | Passed: all eight model/geometry/root cases in 25.9 seconds |
+| `npm test` | Passed: all 130 cases in 12.8 minutes, none failed or skipped |
+| Fixture regeneration, JS syntax, Markdown links, `git diff --check` | Passed: seven fixtures reproduce; six earlier fixtures unchanged; 23 local links/anchors checked |
+
+The initial Wasm link failed with this host's documented `libLLVM.dylib` lookup
+problem. Setting the parent environment was insufficient; the ignored
+`target/local-linker/rust-lld` wrapper sets the pinned sysroot's library path and
+executes that same toolchain's unchanged linker. The per-command
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER` selects it. No tracked build settings,
+dependencies, host toolchain files or model/provider changed.
+
+The first full browser run was stopped after 83 passes, two lifecycle failures,
+one interrupted case and 44 unperformed cases. The original fixture paints green
+before its write; its substring assertion for "unsaved modifications" also matched
+"no unsaved modifications", allowing premature ejection. Waiting for the full
+positive dirty-media message fixes the race without changing controller behavior.
+All eight affected model/geometry/root cases then passed in 25.9 seconds. The
+complete 130-case suite was restarted against the corrected assertion.
+
+Source-Issue/full-diff self-review checked E/C/S decoding, physical-cylinder and
+geometry matching, fractional/residual event timing, fifth-index failure and
+boundary ordering, multi-record continuation, completed versus staged writes,
+control/media/interface cancellation, dirty/private-media safeguards, interface
+signals/acknowledgement, fixture bounds/provenance and retained Type-I behavior.
+Review also removed an unnecessary polling-budget change from the unrelated
+buffer-bounds test; that test passed again with its original budget. No blocking
+findings remain. All mandatory checks were performed and passed; none were skipped
+or left unperformed. The full browser suite retains MSX1/MSX2 video/input,
+PSG/SCC/SCC-I audio, firmware/sub-ROM/mapper coexistence, SRAM persistence/recovery
+and provenance coverage. No PR was opened or reviewed by this node.
+
+Optional pinned-openMSX runtime trace comparison and physical measurements were
+not performed. Byte cadence/lost-data
+fidelity, physical spin-up, full HLD lifecycle, protected formats and additional
+commands remain separate work. Diagnostic success does not establish commercial
+playability. Issue #57 requires no post-merge verification. No push, PR, merge or
+GitHub comment is part of this node.
+
 # Issue 55 two standard joystick connectors
 
 Source: [Complete two standard joystick connectors across core, Wasm and browser](https://github.com/takahirox/msx-rust/issues/55).

@@ -61,6 +61,8 @@ enum Transfer {
     Seek,
     Settle,
     Verify,
+    SectorSettle,
+    SectorSearch,
     Read,
     Write,
 }
@@ -95,15 +97,15 @@ pub struct Controller {
     movement: Movement,
     clock: u64,
     restore_pulses: u8,
-    verify_indexes: u8,
+    search_indexes: u8,
     step_interval: u64,
     next_event: u64,
     direction_in: bool,
     type_one: bool,
     verify: bool,
     transfer: Transfer,
-    delay: u32,
-    deadline: u32,
+    write_sector: bool,
+    compare_side: Option<u8>,
     index: usize,
     offset: usize,
     buffer: [u8; SECTOR_SIZE],
@@ -130,15 +132,15 @@ impl Default for Controller {
             movement: Movement::default(),
             clock: 0,
             restore_pulses: 0,
-            verify_indexes: 0,
+            search_indexes: 0,
             step_interval: 0,
             next_event: 0,
             direction_in: true,
             type_one: true,
             verify: false,
             transfer: Transfer::Idle,
-            delay: 0,
-            deadline: 0,
+            write_sector: false,
+            compare_side: None,
             index: 0,
             offset: 0,
             buffer: [0; SECTOR_SIZE],
@@ -294,7 +296,15 @@ impl Controller {
                 } else {
                     self.control = value;
                 }
-                if changed && matches!(self.transfer, Transfer::Read | Transfer::Write) {
+                if changed
+                    && matches!(
+                        self.transfer,
+                        Transfer::SectorSettle
+                            | Transfer::SectorSearch
+                            | Transfer::Read
+                            | Transfer::Write
+                    )
+                {
                     self.finish(0x80);
                 }
                 if changed && self.transfer == Transfer::Verify {
@@ -367,18 +377,17 @@ impl Controller {
         } else {
             match cmd & 0xe0 {
                 0x80 | 0xa0 => {
-                    self.transfer = if cmd & 0x20 == 0 {
-                        Transfer::Read
-                    } else {
-                        Transfer::Write
-                    };
+                    self.write_sector = cmd & 0x20 != 0;
                     self.multi = cmd & 0x10 != 0;
-                    // Side compare, if requested, compares C with selected side.
-                    if cmd & 2 != 0 && (cmd >> 3) & 1 != self.side {
-                        self.finish(0x10);
-                        return;
+                    self.compare_side = (cmd & 2 != 0).then_some((cmd >> 3) & 1);
+                    if self.write_sector && self.disk.as_ref().is_some_and(|d| d.write_protected) {
+                        self.finish(0x40);
+                    } else if cmd & 4 != 0 {
+                        self.transfer = Transfer::SectorSettle;
+                        self.next_event = self.clock + SETTLE;
+                    } else {
+                        self.start_sector_search();
                     }
-                    self.start_sector();
                 }
                 _ => self.finish(0x10), // Read address/track and format are outside raw-sector profile.
             }
@@ -419,8 +428,8 @@ impl Controller {
         if has_id && self.track == self.physical_track {
             self.finish(0);
         } else if phase == 0 {
-            self.verify_indexes += 1;
-            if self.verify_indexes == 5 {
+            self.search_indexes += 1;
+            if self.search_indexes == 5 {
                 self.finish(0x10);
             }
         }
@@ -476,7 +485,7 @@ impl Controller {
             // This raw-image drive has a hard upper stop at 79. The attempted
             // pulse updates Track but cannot move the head; report seek error
             // immediately and retain every earlier pulse. Invalid Track values
-            // cannot alias valid sectors (start_sector checks geometry/mismatch).
+            // cannot alias valid sectors (ID search checks the physical cylinder).
             if self.physical_track == 79 {
                 self.finish(0x10);
                 return;
@@ -486,29 +495,45 @@ impl Controller {
             self.physical_track -= 1;
         }
     }
-    fn start_sector(&mut self) {
-        let Some(disk) = &self.disk else {
-            self.finish(0x80);
-            return;
-        };
-        if self.track != self.physical_track {
-            self.finish(0x10);
+    fn start_sector_search(&mut self) {
+        self.transfer = Transfer::SectorSearch;
+        self.search_indexes = 0;
+        self.schedule_search(true);
+    }
+    fn sector_search_event(&mut self) {
+        let phase = self.clock % REVOLUTION;
+        // As for Type I, a matching ID precedes the coincident rising index.
+        let sector = (0..9).find(|&id| id_phase(id) == phase).unwrap() as u8 + 1;
+        let offset = self
+            .disk
+            .as_ref()
+            .and_then(|disk| disk.offset(self.physical_track, self.side, sector));
+        if let Some(offset) = offset.filter(|_| {
+            self.track == self.physical_track
+                && self.sector == sector
+                && self.compare_side.is_none_or(|side| side == self.side)
+        }) {
+            self.offset = offset;
+            self.buffer
+                .copy_from_slice(&self.disk.as_ref().unwrap().bytes[offset..offset + SECTOR_SIZE]);
+            self.index = 0;
+            self.transfer = if self.write_sector {
+                Transfer::Write
+            } else {
+                Transfer::Read
+            };
+            // Bounded raw-sector handoff, not a measured ID-to-data gap.
+            self.next_event = self.clock + u64::from(BYTE_CYCLES) * 1000;
             return;
         }
-        let Some(offset) = disk.offset(self.track, self.side, self.sector) else {
-            self.finish(0x10);
-            return;
-        };
-        if self.transfer == Transfer::Write && disk.write_protected {
-            self.finish(0x40);
-            return;
+        if phase == 0 {
+            self.search_indexes += 1;
+            if self.search_indexes == 5 {
+                self.finish(0x10);
+                return;
+            }
         }
-        self.offset = offset;
-        self.buffer
-            .copy_from_slice(&disk.bytes[offset..offset + SECTOR_SIZE]);
-        self.index = 0;
-        self.delay = BYTE_CYCLES;
-        self.status = 1;
+        self.schedule_search(false);
     }
     fn advance(&mut self) {
         self.drq = false;
@@ -534,12 +559,12 @@ impl Controller {
             }
             if self.multi {
                 self.sector = self.sector.wrapping_add(1);
-                self.start_sector();
+                self.start_sector_search();
             } else {
                 self.finish(0);
             }
         } else {
-            self.delay = BYTE_CYCLES;
+            self.next_event = self.clock + u64::from(BYTE_CYCLES) * 1000;
         }
     }
     pub fn tick(&mut self, cycles: u32) {
@@ -551,7 +576,13 @@ impl Controller {
         // phase transitions inside one large CPU tick.
         while matches!(
             self.transfer,
-            Transfer::Seek | Transfer::Settle | Transfer::Verify
+            Transfer::Seek
+                | Transfer::Settle
+                | Transfer::Verify
+                | Transfer::SectorSettle
+                | Transfer::SectorSearch
+                | Transfer::Read
+                | Transfer::Write
         ) && self.next_event <= end
         {
             self.clock = self.next_event;
@@ -562,33 +593,24 @@ impl Controller {
                 }
                 Transfer::Settle => {
                     self.transfer = Transfer::Verify;
-                    self.verify_indexes = 0;
+                    self.search_indexes = 0;
                     self.schedule_search(true);
                 }
                 Transfer::Verify => self.verification_event(),
+                Transfer::SectorSettle => self.start_sector_search(),
+                Transfer::SectorSearch => self.sector_search_event(),
+                Transfer::Read | Transfer::Write => {
+                    if self.drq {
+                        self.finish(4);
+                    } else {
+                        self.drq = true;
+                        self.next_event = self.clock + u64::from(SERVICE_TIMEOUT) * 1000;
+                    }
+                }
                 _ => unreachable!(),
             }
         }
         self.clock = end;
         self.rotation = ((end % REVOLUTION) / 1000) as u32;
-        if !matches!(self.transfer, Transfer::Read | Transfer::Write) {
-            return;
-        }
-        if !self.ready() {
-            self.finish(0x80);
-            return;
-        }
-        if self.drq {
-            self.deadline = self.deadline.saturating_sub(cycles);
-            if self.deadline == 0 {
-                self.finish(4);
-            }
-        } else {
-            self.delay = self.delay.saturating_sub(cycles);
-            if self.delay == 0 {
-                self.drq = true;
-                self.deadline = SERVICE_TIMEOUT;
-            }
-        }
     }
 }

@@ -29,10 +29,19 @@ fn signals(f: &mut Controller, track: u8, busy: bool, zero: bool, irq: bool) {
     assert_eq!(f.read(0) & 0x15, u8::from(busy) | if zero { 4 } else { 0 });
     assert!(!f.irq); // Status acknowledges; the signal latch does not.
 }
+fn byte_ready(f: &mut Controller) {
+    for _ in 0..6_300 {
+        f.tick(BYTE_CYCLES);
+        if f.drq {
+            return;
+        }
+    }
+    panic!("retained head did not find sector: {:02x}", f.read(0));
+}
 fn read_position(f: &mut Controller, track: u8) {
     f.write(1, track);
     f.write(0, 0x80);
-    f.tick(BYTE_CYCLES);
+    byte_ready(f);
     assert!(f.drq, "head must address track {track}");
     assert_eq!(f.read(3), track);
     f.write(0, 0xd0);
@@ -228,6 +237,8 @@ fn upper_limit_keeps_completed_motion_and_rejects_invalid_sector_aliases() {
         f.tick(u32::MAX);
         for command in [0x80, 0xa0] {
             f.write(0, command);
+            assert_eq!(f.read(0) & 0x11, 1);
+            f.tick(5 * 715_909);
             assert_eq!(f.read(0) & 0x11, 0x10);
             assert!(!f.drq);
         }
@@ -319,7 +330,7 @@ fn media_lifecycle_cancels_future_movement() {
         f.write(4, 0);
         f.write(5, 0x81);
         f.write(0, 0x80);
-        f.tick(BYTE_CYCLES);
+        byte_ready(&mut f);
         assert!(f.drq, "lifecycle change {change} retained head {position}");
     }
 }
@@ -409,7 +420,7 @@ fn all_families_rates_and_verify_values_have_separate_movement_settle_and_id_dea
                     f.write(2, 1);
                     f.write(1, head);
                     f.write(0, 0x80);
-                    f.tick(114);
+                    byte_ready(&mut f);
                     assert!(f.drq);
                     assert_eq!(f.read(3), 0xa5);
                 }
@@ -693,7 +704,7 @@ fn mount_and_eject_cancel_settling_and_verification_without_resuming() {
             f.write(4, 0);
             f.write(1, head);
             f.write(0, 0x80);
-            f.tick(114);
+            byte_ready(&mut f);
             assert!(f.drq);
         }
     }
