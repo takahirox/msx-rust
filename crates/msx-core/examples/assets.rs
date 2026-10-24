@@ -28,6 +28,11 @@ fn main() {
     )
     .unwrap();
     fs::write(
+        format!("{dir}/fh-test-cartridge.rom"),
+        msx_core::firmware::fh_test_cartridge(),
+    )
+    .unwrap();
+    fs::write(
         format!("{dir}/joystick-test-cartridge.rom"),
         msx_core::firmware::joystick_test_cartridge(),
     )

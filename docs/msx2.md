@@ -315,6 +315,114 @@ BIOS/BASIC has not been validated or distributed. None is needed for the automat
 gates, and human gameplay is not an approval requirement.
 
 
+### FH polling and line interrupts (Issue #67)
+
+FH in S#1 has two behaviors. With R0 IE1 clear, it reports only the matching
+line's right-border-to-next-left-border pulse; repeated reads leave the pulse
+high, it expires with time, and it never raises horizontal IRQ. With IE1 set,
+only a future matching edge latches horizontal IRQ. S#1 returns and acknowledges
+that latch. Clearing IE1 discards it; reenabling during or after the polling
+pulse cannot recreate it. A later matching edge can interrupt normally.
+S#0 acknowledges VBlank independently, so either source can keep IRQ asserted
+after the other is acknowledged.
+
+Direct control-port and indirect R0/R19/R23 writes share these rules. The target
+is `(R19 - R23) modulo 256` in the existing display-relative line domain: line
+zero is eligible in the initial frame and subsequent frames, line 255 is eligible,
+and line 256 does not alias zero. Retargeting uses the new target's future edge,
+without a stale queued event, a retroactive IRQ, or erasing an enabled latch.
+Disabled polling reflects the current target and horizontal settings. Reset and
+model changes clear raster phase and latches; BASIC mode initialization also
+clears the enabled latch.
+
+Horizontal phases use six VDP master clocks per CPU T-state and 1368 clocks per
+normal line (228 T-states). The selected mapping places the repository's line
+origin at upstream master clock 202, the unadjusted left-border origin; it does
+not reconstruct the physical vertical counter. In the pinned reference,
+right-border clocks are `100 + 102 + 56 + 1024 = 1282` for graphics/multicolor
+and `100 + 102 + 56 + 36 + 960 = 1254` for text. Subtracting 202 gives:
+
+| Stable mode, R18 horizontal adjust zero | Pulse in master clocks from line origin | Pulse in CPU T-states | Integer-cycle observations |
+| --- | --- | --- | --- |
+| Graphics / multicolor | [1080, 1368) | [180, 228), length 48 | High at 180–227, low at 228 |
+| 40 / 80-column text | [1052, 1368) | [175⅓, 228), length 52⅔ | Low at 175, high at 176–227, low at 228 |
+
+These lengths are respectively `59 + 27 + 100 + 102 = 288` and
+`87 + 27 + 100 + 102 = 316` master clocks. Signed R18 horizontal adjustment
+moves both edges by minus four master clocks per unit. A right-shifted pulse
+can extend into the next line. Master clocks retain fractional CPU phases;
+each tick processes crossed matching edges and line boundaries independently
+of its partition size. Ports and CPU IRQ sampling still occur at instruction
+boundaries. Existing 262/313-line frame budgets, 192/212 visible lines, S#2 timing,
+command timing and rendering remain their existing approximations. Full vertical
+counter reconstruction, interlace half-lines and VRAM arbitration remain outside
+this correction.
+
+References: [Yamaha V9938 Technical Data Book](https://www.dinoboards.com.au/assets/video-v9958/yamaha_v9938.pdf),
+printed pages 4, 9 and 146, describes the interface, acknowledgement and horizontal
+parameters. The selected polling/enable convention follows pinned openMSX
+[VDP.cc](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDP.cc)
+(`peekStatusReg`, `readStatusReg`, `execHScan`, `scheduleHScan` and IE1 writes),
+with horizontal geometry from
+[VDP.hh](https://github.com/openMSX/openMSX/blob/26e1e4945df406e250a05122889f88d40edd828b/src/video/VDP.hh).
+**Upstream still requests physical confirmation of disabling IE1 after a match.**
+This implementation adopts that convention, not a newly measured V9938 fact;
+newer V9958/turbo R vertical-counter findings are not imported. Implementation,
+fixtures and expectations are independently authored; no upstream code was copied.
+
+The original MIT [Z80 probe](../crates/msx-core/src/firmware/fh_fixture.rs), generated
+as `dist/fh-test-cartridge.rom`, performs paired disabled S#1 reads, checks expiry,
+stale enable, enabled persistence and direct-disable/indirect-reenable discard,
+then enters a real IM1 handler installed in RAM that acknowledges only S#1. Six stage
+markers at C201h–C206h become A5h; C200h counts interrupts; completion at C210h is
+A5h for success or EEh for failure. It draws original **FH PASS**/**FH FAIL** glyphs
+and a green/red bar using ordinary ports, without BIOS services or proprietary
+inputs. Native checks run both bundled C-BIOS and the diagnostic loader; compiled
+Wasm browser tests load it through the real picker and verify the complete text
+and bar at `/` and `/msx-rust/`, including Reset.
+
+[Native transition tables](../crates/msx-core/tests/vdp_fh.rs) use literal boundary
+expectations independent of production calculations. They cover all stable modes,
+PAL/NTSC, 192/212 lines, fractional text/adjust phases, repeated reads, expiry,
+acknowledgement, enable/disable before/during/after the match, direct/indirect
+retargeting, wrapping targets, frame wrap, independent IRQ sources, reset/model
+changes and bulk versus single-cycle ticks. Before changing production VDP code,
+the first seven tests gave **four failures and three passes** on the Issue's
+baseline behavior: early disabled FH, stale enable, missing initial line-zero
+match and the reset/line-zero edge assertion. The obsolete scanline-boundary IRQ
+expectations in `tests/msx2.rs` were updated to the right-border phase.
+
+Issue #67 validation on 2026-10-24, macOS arm64, Rust 1.99.0, Node.js 24.12.0,
+Playwright 1.64.1 / Chromium:
+
+| Check | Observed result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
+| `cargo test --workspace --locked` | 284 passed, including all ten new FH tests |
+| `./scripts/build.sh` | Passed with the existing documented macOS linker wrapper and pinned toolchain PATH |
+| `node scripts/check-dist.mjs` | Passed; new original probe inventory/header, pinned firmware bytes/notices, provenance and import-free Wasm checked |
+| `npm ci`; `npx playwright install chromium` | Passed |
+| Focused compiled-Wasm FH probe | Two tests passed at `/` and `/msx-rust/`, including Reset |
+| `npm test` | 184 passed in 13.9 minutes, including both FH probes and all existing regressions |
+| `git diff --check`; `git diff --cached --check`; local source links | Passed |
+| Source-Issue and full-diff review | Complete; no blocking findings |
+
+The initial build used the host's Homebrew Rust 1.94.0 and failed because its
+Wasm target was absent. Selecting installed, pinned Rust 1.99.0 exposed the
+already documented `rust-lld` / `libLLVM.dylib` loader issue; exporting the library
+path outside the build script did not fix it. The ignored local wrapper described
+in [deployment.md](deployment.md#pre-merge-validation) set that same pinned
+sysroot's library path immediately before executing its original linker. No
+compiler, dependency pin, system installation or production build setting changed.
+No mandatory check was skipped or left unperformed. The full run's subpath page
+screenshot was blank despite passing Canvas assertions. Evidence capture now saves
+the Canvas directly; both focused cases passed again after that capture-only change,
+and both saved Canvas images were inspected and show FH PASS with the green bar.
+Optional timestamped comparison against upstream and physical measurements were
+not performed. Synthetic diagnostics do not establish commercial playability.
+No required post-merge verification applies to this Issue.
+
 ### Reverse-Y and LINE completion (Issue #45)
 
 LMMV/LMMC/HMMV/HMMC stop after destination row zero; LMCM stops after source

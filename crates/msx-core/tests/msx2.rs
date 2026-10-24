@@ -243,12 +243,12 @@ fn vblank_line_irq_status_selection_and_pal() {
     reg(&mut v, 9, 0x82);
     reg(&mut v, 0, 0x16);
     reg(&mut v, 19, 10);
-    v.tick(228 * 10);
+    v.tick(228 * 10 + 180);
     assert!(v.irq());
     assert_eq!(status(&mut v, 1) & 1, 1);
     assert!(!v.irq());
     reg(&mut v, 1, 0x60);
-    v.tick(228 * 202);
+    v.tick(228 * 202 - 180);
     assert!(v.irq());
     assert_eq!(status(&mut v, 2) & 0x40, 0x40);
     assert!(v.irq());
@@ -257,12 +257,16 @@ fn vblank_line_irq_status_selection_and_pal() {
     v.tick(228 * 101);
     assert_eq!(v.frames, 1);
     assert_eq!(v.frame_cycles(), 228 * 313);
-    // Line zero is compared after the frame wraps, not at line 256.
+    // Line zero matches at its right border, once per frame, not at line 256.
     let mut v = bitmap(0x16);
     reg(&mut v, 19, 0);
-    v.tick(228 * 256);
+    v.tick(180);
+    assert_eq!(status(&mut v, 1) & 1, 1);
+    v.tick(228 * 256 - 180);
     assert!(!v.irq());
-    v.tick(228 * 6);
+    v.tick(228 * 6 + 179);
+    assert!(!v.irq());
+    v.tick(1);
     assert!(v.irq());
     assert_eq!(status(&mut v, 1) & 1, 1);
 }
