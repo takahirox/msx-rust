@@ -1,3 +1,99 @@
+# Issue 73 WZ MEMPTR and BIT HL flags
+
+Source: [Model Z80 WZ/MEMPTR state and correct BIT (HL) flags](https://github.com/takahirox/msx-rust/issues/73).
+Local validation: 2026-10-24, macOS arm64, pinned Rust 1.99.0,
+Playwright 1.64.1 / Chromium. Assigned checkpoint: `e7d937c`; the Issue's
+implementation baseline is `2142f0f628c3c71814a99d5169153fa94c3d605d`.
+The live Issue was read through the GitHub connector before implementation.
+
+The shared CPU now retains a 16-bit WZ latch, updates it at the instruction
+families specified in the [complete profile](cpu-wz.md), and uses bits 11/13 for
+BIT (HL) F3/F5. Register and indexed BIT retain operand/address sources. Reset
+initializes WZ to zero as emulator policy; cloning retains it. No instruction
+bus access, cycle count, refresh event or unrelated flag calculation changed.
+The original 2006 investigation and expanded instruction table were inspected;
+z80test correction #3 and its discussion were read through the GitHub connector
+to resolve the historical nonterminal block-I/O discrepancy. Implementation and
+vectors were independently authored; no upstream implementation or test code
+was copied.
+
+## Baseline sensitivity
+
+Before modifying `cpu.rs`, ran the first two original tests in
+`crates/msx-core/tests/memptr.rs` against the assigned baseline. Both failed:
+
+| Original sequence | Baseline F | Required F |
+| --- | --- | --- |
+| Carry set; `LD A,(27FFh); LD HL,4000h; BIT 0,(HL)` with zero memory | 55h | 7Dh |
+| WZ=2800h; BIT 0 of zero with carry clear and opposing HL bits | 54h | 7Ch |
+
+The exact same tests pass after implementation. The first reproduction checks
+both fetch policies. The expanded matrix checks all eight BIT numbers, both
+carry states, set/clear operands, sign behavior and opposing WZ/address/operand
+bits. Literal update-family vectors cover loads/stores, old-destination 16-bit
+arithmetic, EX (SP), nibble operations, indexed operations/displacement bounds,
+all conditional JP/CALL/RET conditions, taken/untaken JR/DJNZ, RST and I/O.
+Sequence probes expose low-byte carry/borrow using subsequent CPI/CPD and BIT.
+
+Repeat vectors distinguish initial/intermediate/final state, compare matches,
+exhausted counters, ignored DD/FD prefixes, ED at FFFFh and terminal input's old
+BC versus output's new BC. INIR/INDR overwrite their opcode to leave the repeat
+latch observable through BIT with different high bits from the historical BC
+rule. IM0 JP (HL) observes WZ without replacing it. NMI/IM0/IM1/IM2 interrupt
+and return sequences interrupt repeating blocks; terminal CPDR adjusts the
+return latch. Every standalone sequence checks returned cycles and `tstates`
+under both fetch policies.
+
+The shared original `tests/fixtures/wz-probe.hex` captures
+`7D 91 39 7D 75 7D 75 7D` in mapped RAM and displays these bytes as glyph pixels.
+The native Machine test checks RAM and VRAM on MSX1/MSX2, then resets and reruns.
+Four compiled-Wasm cases load generated local firmware through existing file
+controls, read the same bytes from actual Canvas pixels on both models at `/`
+and `/msx-rust/`, clear the Canvas and verify output again after Reset. No new
+Wasm debug ABI, proprietary firmware, game data or external test corpus is used.
+Fixture provenance is recorded in `firmware/ROM-LICENSE.txt`.
+
+## Mandatory checks
+
+| Check | Final result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed with pinned Rust 1.99.0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Passed with pinned Rust 1.99.0 |
+| `cargo test --workspace --locked` | Passed, 312 tests; zero failures/ignored |
+| `./scripts/build.sh` | Passed with pinned Rust and local linker workaround below |
+| `node scripts/check-dist.mjs` | Passed |
+| `npm ci` / `npx playwright install chromium` | Passed |
+| `npx playwright test tests/wz.spec.js --reporter=line` | Passed, 4 cases in 2.4 seconds |
+| `npm test` | Passed, 206 cases in 15.0 minutes; zero failures/skips |
+| Source-Issue/full-diff review and whitespace/local links | Passed; no blocking findings |
+
+Homebrew Rust 1.94.0 initially shadowed the requested compiler; the initial
+Wasm build could not find that compiler's Wasm standard library. All final
+checks select the pinned Rust 1.99.0 sysroot in PATH. The successful Wasm build
+uses the previously documented host linker workaround: the ignored
+`target/issue-73-toolchain/rust-lld` wrapper sets that same toolchain's library
+path and executes its unchanged linker, selected by
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER`. No tracked build settings or host
+files changed. During test development, a standalone JP (HL) fetch-count
+expectation, a diagnostic result-pointer clobber and explicit MSX2 local-firmware
+RAM setup/readback were corrected before the final checks.
+
+The final source-Issue review covered the complete diff, all instruction-table
+families, literal sequence expectations, both fetch policies, interrupt/repeat
+boundaries, initialization, mapped Machine execution, compiled-Wasm output,
+README/architecture accuracy notes and provenance. The full Rust/browser suites
+passed existing timing, bus-order, refresh/EI/HALT, disk-safety, SRAM, firmware/
+slot, video/audio and browser-lifecycle regressions. No blocking findings remain;
+no PR review or merge was performed by this implementation node.
+
+Optional independent-emulator/z80test runtime comparisons, physical-chip tests
+and commercial gameplay were not performed. No universal silicon reset state,
+complete CPU conformance or commercial compatibility is claimed. Q-dependent
+SCF/CCF and other block-repeat flag corrections, arbitrary IM0 expansion and
+access-phase synchronization remain separate gaps. Issue #73 requires no
+post-merge verification. This implementation node does not push, open PRs,
+comment, merge or deploy.
+
 # Issue 61 WD2793 FORCE INTERRUPT status and interrupt latching
 
 Source: [Correct WD2793 FORCE INTERRUPT status and interrupt latching](https://github.com/takahirox/msx-rust/issues/61).

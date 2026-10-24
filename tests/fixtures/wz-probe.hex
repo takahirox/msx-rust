@@ -1,0 +1,35 @@
+# Original MIT Z80 diagnostic for Issue #73; installed at 0100h in a zero-filled
+# system ROM. Each result captures F using PUSH AF / POP BC / LD A,C, stores it
+# via DE at C100h, and advances DE. Expected bytes: 7D 91 39 7D 75 7D 75 7D.
+# No proprietary firmware or debug interface; the captured bytes become glyph 0.
+# DI; SP=F000; slots F0; expanded RAM subslots FF (ordinary RAM write on
+# MSX1); (C000)=0, (C001)=FF; DE=C100.
+f3 31 00 f0 3e f0 d3 a8 3e ff 32 ff ff 21 00 c0 36 00 23 36 ff 11 00 c1
+# WZ=2800 survives immediate HL load; BIT 0 of zero with carry.
+3a ff 27 21 00 c0 37 cb 46 f5 c1 79 12 13
+# Full-word wrap gives WZ=0, opposite operand/address bits; BIT 7 of FF.
+3a ff ff 21 01 c0 37 cb 7e f5 c1 79 12 13
+# Register BIT still takes 3/5 from B, despite WZ=0.
+3a ff ff 06 ff 37 cb 58 f5 c1 79 12 13
+# Indexed displacement -128 gives address/WZ=2800, operand zero.
+dd 21 80 28 37 dd cb 80 46 f5 c1 79 12 13
+# Accumulator store wraps only low byte: 2800, then CPD borrows to 27FF.
+3e 28 32 ff 40 21 00 c0 01 02 00 37 ed a9 21 00 c0 cb 46 f5 c1 79 12 13
+# WZ=27FF, then CPI carries to 2800.
+3a fe 27 21 00 c0 01 02 00 37 ed a1 21 00 c0 cb 46 f5 c1 79 12 13
+# WZ=2800, then CPD borrows to 27FF.
+3a ff 27 21 00 c0 01 02 00 37 ed a9 21 00 c0 cb 46 f5 c1 79 12 13
+# Register-pair loads/increments, exchanges, CB RES and NOP preserve WZ.
+3a ff 27 01 34 12 03 eb d9 21 00 c0 cb 86 00 11 07 c1 37 cb 7e f5 c1 79 12 13
+# Graphics I: name table 1800, color table 2000, pattern table 0000.
+3e 00 d3 99 3e 80 d3 99
+3e 40 d3 99 3e 81 d3 99
+3e 06 d3 99 3e 82 d3 99
+3e 80 d3 99 3e 83 d3 99
+3e 00 d3 99 3e 84 d3 99
+3e 01 d3 99 3e 87 d3 99
+# Glyph 0 foreground white/background black (F1).
+3e 00 d3 99 3e 60 d3 99 3e f1 d3 98
+# Copy the eight captured bytes from RAM to glyph 0 pattern via OTIR.
+3e 00 d3 99 3e 40 d3 99 21 00 c1 01 98 08 ed b3
+76

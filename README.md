@@ -248,10 +248,12 @@ This is an initial implementation, not a claim of universal MSX software compati
 Both MSX models include one extra T-state per ordinary M1 opcode/prefix fetch
 and HALT idle fetch. Standalone `Cpu::new()` retains zero-wait Z80 timing;
 [the timing contract and tests](docs/architecture.md#cpu-fetch-timing) describe both.
+The CPU tracks [WZ/MEMPTR and its instruction-dependent BIT (HL) flags](docs/cpu-wz.md)
+using a fixed Zilog NMOS-compatible profile.
 Instruction-level timing is used; individual bus phases, analog video/overscan,
-VDP access contention, and undocumented CPU silicon quirks are not accurately
-modeled. Sprite status at raster/off-screen edges and unusual combined
-VDP modes are not compatibility guarantees. Raw disk images and the
+VDP access contention, and remaining CPU silicon quirks such as Q-dependent flags
+are not accurately modeled. Sprite status at raster/off-screen edges and unusual
+combined VDP modes are not compatibility guarantees. Raw disk images and the
 [Philips disk interface](docs/disks.md) are supported. Cassette recording and custom
 waveforms, expanded modern SCC cartridges and FM-PAC/MSX-AUDIO remain unsupported. MSX2 coverage and optional peripheral limits
 are documented separately. ASCII8, ASCII16, Konami Standard and Konami SCC banking

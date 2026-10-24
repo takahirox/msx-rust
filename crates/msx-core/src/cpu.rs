@@ -42,6 +42,9 @@ pub struct Cpu {
     pub iy: u16,
     pub sp: u16,
     pub pc: u16,
+    /// Internal address latch (MEMPTR), using the profile in docs/cpu-wz.md.
+    /// Initialized to zero by emulator policy; cloned with the CPU.
+    pub wz: u16,
     pub i: u8,
     pub refresh: u8,
     pub iff1: bool,
@@ -199,6 +202,7 @@ impl Cpu {
     }
     fn relative(&mut self, d: u8) {
         self.pc = self.pc.wrapping_add_signed(d as i8 as i16);
+        self.wz = self.pc;
     }
     fn alu(&mut self, y: u8, v: u8) {
         let a = self.a();
@@ -269,6 +273,7 @@ impl Cpu {
             self.refresh();
             self.push(bus, self.pc);
             self.pc = 0x66;
+            self.wz = self.pc;
             11
         } else if bus.irq() && self.iff1 && self.ei_delay == 0 {
             self.halted = false;
@@ -282,9 +287,11 @@ impl Cpu {
                 self.push(bus, self.pc);
                 if self.im == 2 {
                     self.pc = Self::read16(bus, u16::from_be_bytes([self.i, bus.interrupt_data()]));
+                    self.wz = self.pc;
                     19
                 } else {
                     self.pc = 0x38;
+                    self.wz = self.pc;
                     13
                 }
             }
@@ -330,7 +337,8 @@ impl Cpu {
             || (x == 0 && (4..=6).contains(&z) && y == 6);
         let address = if idx != 0 && uses_memory {
             let d = self.byte(bus) as i8;
-            self.index(idx).wrapping_add_signed(d as i16)
+            self.wz = self.index(idx).wrapping_add_signed(d as i16);
+            self.wz
         } else {
             self.index(idx)
         };
@@ -390,6 +398,7 @@ impl Cpu {
                             | ((r >> 8) as u8 & 0x28)
                             | (((a ^ v ^ r) >> 8) as u8 & H)
                             | if a as u32 + v as u32 > 65535 { C } else { 0 };
+                        self.wz = a.wrapping_add(1);
                         self.set_index(idx, r);
                         11
                     }
@@ -399,6 +408,12 @@ impl Cpu {
                         0 => self.bc(),
                         1 => self.de(),
                         _ => self.word(bus),
+                    };
+                    self.wz = if q == 0 && p != 2 {
+                        // Accumulator stores increment only the low address byte.
+                        u16::from_be_bytes([self.a(), (a as u8).wrapping_add(1)])
+                    } else {
+                        a.wrapping_add(1)
                     };
                     if q == 0 {
                         if p == 2 {
@@ -519,6 +534,7 @@ impl Cpu {
                 0 => {
                     if self.condition(y) {
                         self.pc = self.pop(bus);
+                        self.wz = self.pc;
                         11
                     } else {
                         5
@@ -533,6 +549,7 @@ impl Cpu {
                         match p {
                             0 => {
                                 self.pc = self.pop(bus);
+                                self.wz = self.pc;
                                 10
                             }
                             1 => {
@@ -554,6 +571,7 @@ impl Cpu {
                 }
                 2 => {
                     let a = self.word(bus);
+                    self.wz = a;
                     if self.condition(y) {
                         self.pc = a;
                     }
@@ -562,15 +580,18 @@ impl Cpu {
                 3 => match y {
                     0 => {
                         self.pc = self.word(bus);
+                        self.wz = self.pc;
                         10
                     }
                     2 => {
                         let port = u16::from_be_bytes([self.a(), self.byte(bus)]);
+                        self.wz = u16::from_be_bytes([self.a(), (port as u8).wrapping_add(1)]);
                         bus.output(port, self.a());
                         11
                     }
                     3 => {
                         let port = u16::from_be_bytes([self.a(), self.byte(bus)]);
+                        self.wz = port.wrapping_add(1);
                         let v = bus.input(port);
                         self.set_a(v);
                         11
@@ -582,6 +603,7 @@ impl Cpu {
                         bus.write(self.sp.wrapping_add(1), (original >> 8) as u8);
                         bus.write(self.sp, original as u8);
                         self.set_index(idx, v);
+                        self.wz = v;
                         19
                     }
                     5 => {
@@ -605,6 +627,7 @@ impl Cpu {
                 },
                 4 => {
                     let a = self.word(bus);
+                    self.wz = a;
                     if self.condition(y) {
                         self.push(bus, self.pc);
                         self.pc = a;
@@ -621,6 +644,7 @@ impl Cpu {
                         let a = self.word(bus);
                         self.push(bus, self.pc);
                         self.pc = a;
+                        self.wz = a;
                         17
                     }
                 }
@@ -632,6 +656,7 @@ impl Cpu {
                 _ => {
                     self.push(bus, self.pc);
                     self.pc = (y as u16) * 8;
+                    self.wz = self.pc;
                     11
                 }
             },
@@ -643,7 +668,8 @@ impl Cpu {
             self.hl()
         } else {
             let d = self.byte(bus) as i8;
-            self.index(idx).wrapping_add_signed(d as i16)
+            self.wz = self.index(idx).wrapping_add_signed(d as i16);
+            self.wz
         };
         let op = if idx == 0 {
             self.opcode(bus)
@@ -676,8 +702,8 @@ impl Cpu {
                     | H
                     | if zero { Z | PV } else { 0 }
                     | if y == 7 && !zero { S } else { 0 }
-                    | if idx != 0 {
-                        (address >> 8) as u8 & 0x28
+                    | if idx != 0 || z == 6 {
+                        (self.wz >> 8) as u8 & 0x28
                     } else {
                         v & 0x28
                     };
@@ -720,6 +746,7 @@ impl Cpu {
         if op >> 6 == 1 {
             match op & 7 {
                 0 => {
+                    self.wz = self.bc().wrapping_add(1);
                     let v = bus.input(self.bc());
                     if y != 6 {
                         self.r[y as usize] = v;
@@ -728,6 +755,7 @@ impl Cpu {
                     12
                 }
                 1 => {
+                    self.wz = self.bc().wrapping_add(1);
                     bus.output(self.bc(), if y == 6 { 0 } else { self.r[y as usize] });
                     12
                 }
@@ -751,11 +779,13 @@ impl Cpu {
                         } else {
                             0
                         };
+                    self.wz = a.wrapping_add(1);
                     self.set_hl(r);
                     15
                 }
                 3 => {
                     let a = self.word(bus);
+                    self.wz = a.wrapping_add(1);
                     if q == 0 {
                         Self::write16(bus, a, self.pair(p, 0, false));
                     } else {
@@ -772,6 +802,7 @@ impl Cpu {
                 }
                 5 => {
                     self.pc = self.pop(bus);
+                    self.wz = self.pc;
                     self.iff1 = self.iff2;
                     14
                 }
@@ -793,6 +824,7 @@ impl Cpu {
                             self.f = (self.f & C) | sz(v) | if self.iff2 { PV } else { 0 };
                         }
                         4 | 5 => {
+                            self.wz = self.hl().wrapping_add(1);
                             let v = bus.read(self.hl());
                             let a = self.a();
                             let (mem, acc) = if y == 4 {
@@ -835,6 +867,7 @@ impl Cpu {
                         | ((sum & 2) << 4);
                 }
                 1 => {
+                    self.wz = self.wz.wrapping_add(delta);
                     let r = self.a().wrapping_sub(v);
                     let half = (self.a() ^ v ^ r) & H;
                     let adj = r.wrapping_sub(u8::from(half != 0));
@@ -848,7 +881,13 @@ impl Cpu {
                         | ((adj & 2) << 4);
                 }
                 _ => {
+                    if kind == 2 {
+                        self.wz = self.bc().wrapping_add(delta);
+                    }
                     self.r[0] = self.r[0].wrapping_sub(1);
+                    if kind == 3 {
+                        self.wz = self.bc().wrapping_add(delta);
+                    }
                     if kind == 2 {
                         bus.write(self.hl(), v);
                     } else {
@@ -874,6 +913,8 @@ impl Cpu {
             };
             if repeat && again {
                 self.pc = self.pc.wrapping_sub(2);
+                // PC now points to ED, including after ignored DD/FD prefixes.
+                self.wz = self.pc.wrapping_add(1);
                 21
             } else {
                 16
