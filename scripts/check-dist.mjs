@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-const expected = ['music-diagnostic-firmware.rom','music-test-cartridge.rom','emu2413-LICENSE.txt','cassette-test-cartridge.rom','cassette-test.cas','joystick-test-cartridge.rom','ram-mapper-test-cartridge.rom','weave-disk-demo.dsk','weave-disk.rom','saves.js',...Array.from({length: 5}, (_, i) => `mapper-${i + 6}.rom`),'scc-test-cartridge.rom','cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
+const expected = ['fh-test-cartridge.rom','music-diagnostic-firmware.rom','music-test-cartridge.rom','emu2413-LICENSE.txt','cassette-test-cartridge.rom','cassette-test.cas','joystick-test-cartridge.rom','ram-mapper-test-cartridge.rom','weave-disk-demo.dsk','weave-disk.rom','saves.js',...Array.from({length: 5}, (_, i) => `mapper-${i + 6}.rom`),'scc-test-cartridge.rom','cbios_main_msx1.rom','cbios-msx1-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt','cbios-test-cartridge.rom','msx2-test-cartridge.rom','msx2-diagnostic-sub.rom','weave-msx2-boot.rom','LICENSE','ROM-LICENSE.txt','app.js','index.html','msx_wasm.wasm','style.css','test-cartridge.rom','weave-boot.rom'];
 assert.deepEqual((await readdir('dist')).sort(), [...expected, 'demos'].sort(), 'Unexpected deployment files; review their provenance.');
 for (const file of expected) assert((await readFile(`dist/${file}`)).length > 0, `Empty ${file}`);
 for (const [source, file] of [['LICENSE', 'LICENSE'], ['firmware/ROM-LICENSE.txt', 'ROM-LICENSE.txt']]) {
@@ -132,5 +132,10 @@ const musicCartridge = await readFile('dist/music-test-cartridge.rom');
 assert.equal(musicCartridge.length,16384);
 assert.equal(musicCartridge.subarray(0,2).toString(),'AB');
 for (const file of ['music-diagnostic-firmware.rom','music-test-cartridge.rom','emu2413-LICENSE.txt']) assert(html.includes(file));
+
+
+const fh = await readFile('dist/fh-test-cartridge.rom');
+assert.equal(fh.length, 16384);
+assert.equal(fh.subarray(0,2).toString(), 'AB');
 
 console.log('Deployment inventory, FM/cassette/disk fixtures, pinned ROM/notice hashes, provenance, subpath links and import-free Wasm verified.');

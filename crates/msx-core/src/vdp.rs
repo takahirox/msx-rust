@@ -38,6 +38,7 @@ pub struct Vdp {
     address: usize,
     latch: Option<u8>,
     buffer: u8,
+    /// Horizontal phase in 21.48 MHz master clocks (six per CPU T-state).
     cycles: u32,
     pub line: u16,
     pub frames: u64,
@@ -112,6 +113,7 @@ impl Vdp {
         self.command = None;
         self.command_cycles = 0;
         self.registers.fill(0);
+        self.statuses[1] &= !1;
         if self.msx2 {
             self.palette = default_palette();
         }
@@ -189,9 +191,13 @@ impl Vdp {
                 v
             }
             1 => {
-                let v = self.statuses[1];
-                self.statuses[1] &= !1;
-                v
+                if self.registers[0] & 0x10 != 0 {
+                    let v = self.statuses[1];
+                    self.statuses[1] &= !1;
+                    v
+                } else {
+                    self.statuses[1] | u8::from(self.fh_pulse())
+                }
             }
             2 => {
                 self.statuses[2]
@@ -200,7 +206,7 @@ impl Vdp {
                     } else {
                         0
                     }
-                    | if self.cycles >= 171 { 0x20 } else { 0 }
+                    | if self.cycles >= 171 * 6 { 0x20 } else { 0 }
                     | ((self.frames as u8 & 1) << 1)
                     | 0x0c
             }
@@ -232,11 +238,48 @@ impl Vdp {
         let physical = self.physical_address(logical);
         self.vram[physical] = value;
     }
+    /// Right border relative to our line origin (upstream's left border at
+    /// master clock 202). See docs/msx2.md: FH polling and line interrupts.
+    fn fh_start(&self) -> u32 {
+        let text = matches!(self.mode(), 0 | 9);
+        let adjust = i32::from(self.registers[18] & 15);
+        let adjust = if adjust < 8 { adjust } else { adjust - 16 };
+        ((if text { 1052 } else { 1080 }) - adjust * 4) as u32
+    }
+    fn fh_pulse(&self) -> bool {
+        let target = self.registers[19].wrapping_sub(self.registers[23]);
+        let now = u32::from(self.line) * 1368 + self.cycles;
+        let start = u32::from(target) * 1368 + self.fh_start();
+        // Unsigned subtraction also excludes times before this frame's match.
+        now.wrapping_sub(start)
+            < if matches!(self.mode(), 0 | 9) {
+                316
+            } else {
+                288
+            }
+    }
     pub fn tick(&mut self, cycles: u32) {
         self.tick_command(cycles);
-        self.cycles += cycles;
-        while self.cycles >= 228 {
-            self.cycles -= 228;
+        let mut remaining = u64::from(cycles) * 6;
+        while remaining != 0 {
+            let step = remaining.min(u64::from(1368 - self.cycles)) as u32;
+            let next = self.cycles + step;
+            // Compare only a future edge, never the level of the polling pulse.
+            // No cached event survives an R0/R19/R23 retargeting write.
+            if self.msx2
+                && self.registers[0] & 0x10 != 0
+                && self.line == u16::from(self.registers[19].wrapping_sub(self.registers[23]))
+                && self.cycles < self.fh_start()
+                && next >= self.fh_start()
+            {
+                self.statuses[1] |= 1;
+            }
+            self.cycles = next;
+            remaining -= u64::from(step);
+            if self.cycles != 1368 {
+                continue;
+            }
+            self.cycles = 0;
             if self.line < self.visible_lines() as u16 {
                 self.render_line(self.line as usize);
             }
@@ -254,12 +297,6 @@ impl Vdp {
             {
                 self.line = 0;
                 self.frames += 1;
-            }
-            if self.msx2
-                && self.line < 256
-                && ((self.line + self.registers[23] as u16) & 255) == self.registers[19] as u16
-            {
-                self.statuses[1] |= 1;
             }
         }
     }
@@ -473,6 +510,11 @@ impl Vdp {
             return;
         }
         self.registers[r] = value;
+        if r == 0 && value & 0x10 == 0 {
+            // Selected upstream convention: disabling IE1 discards the latch.
+            // Physical confirmation of this transition remains open upstream.
+            self.statuses[1] &= !1;
+        }
         if r == 14 {
             self.registers[r] &= 7;
             self.address = (self.address & 0x3fff) | ((value as usize & 7) << 14);
