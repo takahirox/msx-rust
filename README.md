@@ -696,5 +696,6 @@ ROM selection, and unlocks audible sound. Publication and these checks remain pe
 ## Contributing
 
 - [Development flow and English collaboration convention](docs/development-flow.md)
+- [Test and CI performance principles](docs/development-flow.md#test-and-ci-performance-principles)
 - [Review and merge guidelines](docs/review-guidelines.md)
 - [AI agent entry point](AGENTS.md)

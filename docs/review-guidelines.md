@@ -21,6 +21,8 @@ Verify correctness, consistency with the repository, and documentation affected 
 
 For emulator implementation changes, use the [documented Rust and browser checks](../README.md#development-and-verification). For templates and documentation, inspect Markdown syntax, Issue-template YAML front matter, links and anchors, whitespace, and consistency as described in the [validation guidance](development-flow.md#validation-in-this-repository). Do not require invented Cargo commands, new tooling, unrelated runtime suites, hardware checks, or deployed-site verification for documentation-only work.
 
+Apply the [test and CI performance principles](development-flow.md#test-and-ci-performance-principles): review the additional defect coverage, duplication and execution/maintenance cost of new or expanded checks, while preserving required regressions and integration confidence. Ask: **Does this change provide sufficient confidence with the lightest appropriate validation, without redundant execution?**
+
 ## Separate pre-merge acceptance from later verification
 
 Require all mandatory pre-merge acceptance criteria to be achievable, verifiable, and satisfied before merge. Keep optional checks separate. Human confirmation, physical-device testing, subjective evaluation, or external approval may be mandatory only when necessary for the actual Issue, with a reason and expected result.
