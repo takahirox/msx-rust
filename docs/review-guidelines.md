@@ -10,7 +10,7 @@ Read the source Issue, its completion criteria, the PR description, the full dif
 
 Check both directions:
 
-- **No missing work:** all required behavior and acceptance criteria the PR claims to resolve are implemented and appropriately validated. Do not approve a PR as closing an Issue with unresolved requirements. An intentionally partial PR must identify the remaining work and keep the Issue open.
+- **No missing work:** all required behavior and pre-merge acceptance criteria the PR claims to resolve are implemented and appropriately validated. Missing implementation or mandatory pre-merge tests, unsatisfied repository protections, and genuinely necessary pre-merge human acceptance remain blockers. An intentionally partial PR must identify the remaining work, keep the parent Issue open, and omit automatic closing references. Pending post-merge-only verification does not make a complete implementation partial.
 - **No unnecessary work:** reject unnecessary abstractions, speculative extensibility, unrelated refactoring, frameworks/subsystems, or extra policies/configuration without a demonstrated need tied to the Issue.
 
 Prefer the smallest coherent design that fully satisfies the Issue. Added complexity is not automatically beneficial. Preserve justified existing conventions; do not use simplicity to excuse omitted requirements or necessary validation.
@@ -27,7 +27,9 @@ Apply the [test and CI performance principles](development-flow.md#test-and-ci-p
 
 Require all mandatory pre-merge acceptance criteria to be achievable, verifiable, and satisfied before merge. Keep optional checks separate. Human confirmation, physical-device testing, subjective evaluation, or external approval may be mandatory only when necessary for the actual Issue, with a reason and expected result.
 
-Checks possible only after merge must not block pre-merge approval. Record genuinely necessary post-merge checks separately as pending until performed; do not add routine follow-up checks without an Issue-specific need. This distinction preserves all implementation requirements and applicable pre-merge checks.
+Checks possible only after merge must not block pre-merge approval. Preserve the normal `Closes #N` reference when implementation and applicable mandatory pre-merge acceptance are complete. Do not request removing it, keeping the source Issue open, or withholding approval solely for pending post-merge-only checks. This would undo ProjectWeave publication and cause repeated Review → Fix → Publish → Review rounds. Follow the [merge and follow-up lifecycle](development-flow.md#5-merge-and-report-any-required-follow-up).
+
+Record genuinely necessary post-merge checks separately as pending until performed; do not add routine follow-up checks without an Issue-specific need. This distinction preserves all implementation requirements and applicable pre-merge checks.
 
 For example, pre-merge builds and automated checks cannot prove a merge-triggered deployment or published site succeeded. Verify such results after merge when required. The initial collaboration templates and documentation require no post-merge verification.
 
@@ -37,4 +39,4 @@ For example, pre-merge builds and automated checks cannot prove a merge-triggere
 - **Necessary human input:** record the specific unanswered question, why human input is necessary, and the expected result. Mark the review as waiting for human input and use the workflow's wait path. If no automated wait mechanism is available, pause the affected work and report the question. Do not repeatedly request code fixes for this state or infer approval from elapsed time. Reassess after the answer arrives.
 - **Ready to merge:** approve and merge within the task's authorization when the implementation fully meets the Issue, mandatory pre-merge checks pass, and no blocking findings or necessary human decisions remain.
 
-Nonblocking suggestions and optional validation must be identified as such. Pending checks possible only after merge do not prevent approval when the merge conditions are met. After merge, report any required verification separately with actual results or a pending status; never claim deployment or publication succeeded solely from pre-merge evidence.
+Nonblocking suggestions and optional validation must be identified as such. Pending checks possible only after merge do not prevent approval when the merge conditions are met. After successful merge, close the original Issue and record any required verification in the merged PR, closed Issue, or linked validation report with actual results or an honest pending/environment-blocked status. Closure does not claim checks passed, and an unavailable environment alone does not establish a product defect. For actual defects, check for an equivalent Issue first, then link it or create a new Issue with the reproduction and revision evidence required by the development flow. Do not reopen the original Issue solely for this follow-up; older keep-open instructions are superseded without changing historical results.

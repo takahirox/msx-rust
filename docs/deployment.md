@@ -228,6 +228,8 @@ the Pages publishing source, environment rules and deployment job logs. The
 
 ## Required post-merge verification (pending)
 
+Follow the current [merge and follow-up lifecycle](development-flow.md#5-merge-and-report-any-required-follow-up): close the implemented source Issue after successful merge, then record the required deployment checks. Historical pending results below remain unverified; closure does not claim they passed. Track actual defects in linked follow-up Issues.
+
 Issue #21 additionally requires verifying Demo ROMs on the actual deployed site:
 record the Actions run and deployed commit, launch a third-party MSX1 game and
 the original MSX2 diagnostic, observe video and working input, check Reset/Eject/
