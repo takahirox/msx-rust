@@ -1,7 +1,0 @@
-{
-  "name": "msx-rust-browser-tests",
-  "private": true,
-  "type": "module",
-  "scripts": {"test": "playwright test", "test:browser": "playwright test"},
-  "devDependencies": {"@playwright/test": "1.64.1"}
-}
