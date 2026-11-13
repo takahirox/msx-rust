@@ -1159,6 +1159,13 @@ Check that Wasm and all relative assets load without errors. Pre-merge artifact 
 subpath checks do not establish that publication succeeded. Keep this pending until
 performed; do not close it based on a local build alone.
 
+> The historical keep-open instruction above is superseded by the current
+> [merge and follow-up lifecycle](development-flow.md#5-merge-and-report-any-required-follow-up).
+> Close the implemented source Issue after successful merge and pre-merge acceptance;
+> keep unperformed verification pending and record its evidence afterward. Track
+> actual defects in linked follow-up Issues rather than reopening the original.
+> The historical outcomes and unverified publication status above are unchanged.
+
 ## Issue #49: ROMless SCC-I sound cartridges (2026-10-24)
 
 Implemented explicit Snatcher and SD Snatcher 64 KiB profiles across the core,

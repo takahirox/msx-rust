@@ -18,7 +18,7 @@ Describe what should be true when the Issue is resolved.
 
 ## Context and reproduction
 
-Add relevant context, examples, logs, or related Issues. Include reproduction steps and actual versus expected results when applicable.
+Add relevant context, examples, logs, or related Issues. Include reproduction steps and actual versus expected results when applicable. For a post-merge defect, check for an equivalent Issue first and include the affected revision and links to the original Issue/PR, following the [development lifecycle](https://github.com/takahirox/msx-rust/blob/main/docs/development-flow.md#5-merge-and-report-any-required-follow-up).
 
 ## Pre-merge acceptance
 
@@ -35,3 +35,5 @@ List useful additional checks separately from mandatory acceptance, or state "No
 ## Required post-merge verification
 
 Record genuinely necessary checks possible only after merge, or state "None." Do not add routine post-merge work without a need tied to this Issue. Report required checks as pending until performed; pre-merge validation does not prove deployment or publication succeeded.
+
+Close the implemented Issue after successful merge and pre-merge acceptance, then record required verification evidence per the development lifecycle above. Pending post-merge-only checks do not make implementation partial or require keeping/reopening this Issue; track actual defects in linked follow-up Issues.
