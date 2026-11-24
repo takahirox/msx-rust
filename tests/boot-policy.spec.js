@@ -93,6 +93,54 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
   }
 }
 
+for (const model of ['0', '1']) {
+  test(`Cancel local MSX${Number(model) + 1} firmware without replacing BASIC or mounted media`, async ({ page }) => {
+    await page.addInitScript(() => {
+      const read = File.prototype.arrayBuffer;
+      File.prototype.arrayBuffer = async function () {
+        const bytes = await read.call(this);
+        if (this.size === 32768) await new Promise(resolve => { window.finishMain = resolve; });
+        return bytes;
+      };
+    });
+    await page.goto('/');
+    await expect(page.locator('#transcript')).toContainText('READY');
+    if (model === '0') await page.locator('#model').selectOption(model);
+    await enter(page, '10 PRINT "PROGRAM KEPT"');
+    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await page.locator('#tape').setInputFiles('dist/cassette-test.cas');
+    await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
+    const bios = await settingsControl(page, 'bios');
+    await bios.focus();
+    await bios.setInputFiles(model === '0' ? 'dist/cbios_main_msx1.rom' : 'dist/cbios_main_msx2.rom');
+    const fallback = model === '0' ? bios : page.locator('#apply-firmware');
+    if (model === '1') {
+      await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom');
+      await fallback.press('Enter');
+    }
+    await expect.poll(() => page.evaluate(() => typeof window.finishMain)).toBe('function');
+    const cancel = page.locator('#advanced-panel').getByRole('button', { name: 'Cancel import', exact: true });
+    await expect(cancel).toBeFocused();
+    await expect(page.locator('#reset')).toBeDisabled();
+    await page.keyboard.press('Enter');
+    await expect(cancel).toBeHidden();
+    await expect(fallback).toBeFocused();
+    await expect(page.locator('#reset')).toBeEnabled();
+
+    await page.evaluate(async () => {
+      window.finishMain();
+      await new Promise(requestAnimationFrame);
+    });
+    await expect(page.locator('#status')).toContainText('Import canceled');
+    await expect(page.locator('#firmware')).toHaveValue('auto');
+    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
+    await enter(page, 'RUN');
+    await expect(page.locator('#transcript')).toContainText('PROGRAM KEPT\nREADY');
+  });
+}
+
 test('a deferred paired firmware import cannot replace BASIC after Eject or accept a concurrent ROM',async({page})=>{
   await page.addInitScript(()=>{
     const read=File.prototype.arrayBuffer;
