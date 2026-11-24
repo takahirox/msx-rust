@@ -24,6 +24,61 @@ async function space(page) {
   await page.locator('#screen').focus(); await page.keyboard.down('Space');
   await page.waitForTimeout(300); await page.keyboard.up('Space');
 }
+test('canceling the bundled disk import preserves BASIC and Drive A', async ({ page }) => {
+  await page.addInitScript(() => {
+    const read = Response.prototype.arrayBuffer;
+    Response.prototype.arrayBuffer = async function () {
+      const bytes = await read.call(this);
+      if (!this.url.endsWith('/weave-disk-demo.dsk')) return bytes;
+      return new Promise(resolve => {
+        window.finishDiskRead = async () => {
+          resolve(bytes);
+          // Let the import handler process the delivered bytes before checking state.
+          await new Promise(nextTask => setTimeout(nextTask, 0));
+        };
+      });
+    };
+  });
+  await page.goto('/');
+  await expect(page.locator('#transcript')).toContainText('READY');
+  await page.locator('#screen').focus();
+  await page.keyboard.type('10 PRINT 73');
+  await page.keyboard.press('Enter');
+
+  const insert = page.getByRole('button', { name: 'Insert disk', exact: true });
+  const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
+  const diskStatus = page.locator('#disk-status');
+  const existingDisk = Buffer.alloc(368640, 0x5a);
+  for (const mounted of [false, true]) {
+    if (mounted) {
+      await page.locator('#disk').setInputFiles({
+        name: 'original.dsk', mimeType: 'application/octet-stream', buffer: existingDisk,
+      });
+    }
+    const expected = mounted ? 'original.dsk · 360 KiB' : 'Empty';
+    await expect(diskStatus).toContainText(expected);
+    await insert.press('Enter');
+    await page.getByRole('button', { name: 'Weave disk demo', exact: true }).press('Enter');
+    await expect.poll(() => page.evaluate(() => typeof window.finishDiskRead)).toBe('function');
+    await expect(page.locator('#disk-picker')).toBeHidden();
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(insert).toBeFocused();
+    await expect(cancel).toBeHidden();
+    await page.evaluate(async () => {
+      await window.finishDiskRead();
+      delete window.finishDiskRead;
+    });
+    await expect(page.locator('#status')).toContainText('Import canceled');
+    await expect(diskStatus).toContainText(expected);
+  }
+  expect(await exportDisk(page)).toEqual(existingDisk);
+  await page.locator('#screen').focus();
+  await page.keyboard.type('RUN');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#transcript')).toContainText('73\nREADY');
+});
+
 for (const site of sites) {
   for (const model of ['1','0']) {
     test(`real disk boot, input, protect, exact export and lifecycle MSX${Number(model)+1} ${site}`, async ({page}) => {
