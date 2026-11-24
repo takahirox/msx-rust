@@ -136,7 +136,7 @@ for(const site of sites) {
     for(const [name,bytes] of [['short.rom',Buffer.alloc(65535)],['wrong.txt',firmware],['allocation.rom',firmware]]) {
       await page.locator('#pac-rom').setInputFiles(file(name,bytes));await expect(page.locator('#status')).toContainText('FM-PAC import failed');expect(await saved(page)).toEqual(pattern);
     }
-    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await expect(page.locator('#remove-pac-rom')).toHaveText('Cancel import');await (await settingsControl(page, 'remove-pac-rom')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
+    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await settingsControl(page, 'cancel-pac-rom-import')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
     await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
     await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('msx-rust:fm-pac:v1:'));localStorage[key]='corrupted';});

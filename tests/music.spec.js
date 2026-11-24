@@ -100,7 +100,7 @@ for(const site of sites) {
       await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
     }
     await page.locator('#music-rom').setInputFiles(file('deferred.rom',firmware));
-    await expect(page.locator('#remove-music-rom')).toHaveText('Cancel import');await (await settingsControl(page, 'remove-music-rom')).click();
+    await (await settingsControl(page, 'cancel-music-rom-import')).click();
     await page.evaluate(()=>window.finishMusic());await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
     await page.locator('#music-rom').setInputFiles(file('deferred.rom',firmware));
     await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());

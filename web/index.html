@@ -36,6 +36,7 @@
           <button id="apply-firmware" disabled>Apply MSX2 firmware</button>
           <p id="firmware-selection">Select both firmware files.</p>
         </div>
+        <button id="cancel-bios-import" hidden>Cancel import</button>
         <p>Load a lawfully obtained 32 KiB main BIOS/BASIC ROM to execute it from reset. MSX2 also requires a matching 16 KiB sub-ROM: select both, then Apply MSX2 firmware. Files stay in this tab and are never uploaded or stored. Use Weave BASIC to unload local system and cartridge ROMs and restore automatic behavior.</p>
         <details class="notes">
           <summary>Firmware compatibility and credits</summary>
@@ -71,6 +72,7 @@
         <button id="open-disk-rom" disabled>Install Philips disk ROM</button>
         <input id="disk-rom" type="file" accept=".rom,.bin" aria-label="Philips NMS1200-style disk ROM (16 KiB)" hidden disabled>
         <button id="remove-disk-rom" disabled>Remove disk interface</button>
+        <button id="cancel-disk-rom-import" hidden>Cancel import</button>
         <details class="notes">
           <summary>Philips interface requirements</summary>
           <p>Install a local 16 KiB AB-header ROM for the Philips NMS1200-style single-drive external interface in slot 2.
@@ -102,6 +104,7 @@
           <button id="open-music-rom" disabled>Install MSX-MUSIC firmware</button>
           <input id="music-rom" type="file" accept=".rom,.bin" aria-label="Internal MSX-MUSIC firmware (16 KiB)" hidden disabled>
           <button id="remove-music-rom" disabled>Remove MSX-MUSIC</button>
+          <button id="cancel-music-rom-import" hidden>Cancel import</button>
           <p id="music-status" role="status">MSX-MUSIC not installed</p>
           <details class="notes">
             <summary>MSX-MUSIC firmware and diagnostic</summary>
@@ -114,6 +117,7 @@
           <button id="open-pac-rom" disabled>Install FM-PAC firmware</button>
           <input id="pac-rom" type="file" accept=".rom,.bin" aria-label="Original FM-PAC firmware (64 KiB)" hidden disabled>
           <button id="remove-pac-rom" disabled>Remove FM-PAC</button>
+          <button id="cancel-pac-rom-import" hidden>Cancel import</button>
           <p id="pac-status" role="status">FM-PAC not installed</p>
           <button id="export-pac-save" disabled>Export FM-PAC SRAM backup</button>
           <label for="import-pac-save">Import and replace FM-PAC SRAM (versioned JSON backup)</label>

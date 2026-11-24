@@ -58,6 +58,39 @@ async function greenOutput(page, model) {
     return [...data];
   }), {timeout:15000}).toEqual(model === '1' ? [36, 218, 36, 255] : [33, 200, 66, 255]);
 }
+
+test('finishing a firmware import moves keyboard focus from Cancel to Install', async ({ page }) => {
+  await observeWasm(page);
+  await page.goto('/');
+  await expect(page.locator('#transcript')).toContainText('READY');
+  const cases = [
+    ['pac-rom', 'pac-status', await readFile('dist/fm-pac-diagnostic-firmware.rom')],
+    ['music-rom', 'music-status', await readFile('dist/music-diagnostic-firmware.rom')],
+    ['disk-rom', 'disk-profile-status', diskRom],
+  ];
+  for (const [input, status, bytes] of cases) {
+    const install = await settingsControl(page, `open-${input}`);
+    const fileInput = page.locator(`#${input}`);
+    await install.focus();
+    await fileInput.setInputFiles(file('deferred.rom', bytes));
+    await expect.poll(() => page.evaluate(() => typeof window.finishPhilips)).toBe('function');
+    const cancel = page.locator('#advanced-panel').getByRole('button', { name: 'Cancel import', exact: true });
+    await cancel.focus();
+    await expect(cancel).toBeFocused();
+    await page.evaluate(() => {
+      window.finishPhilips();
+      delete window.finishPhilips;
+    });
+    await expect(page.locator(`#${status}`)).toContainText('deferred.rom');
+    await expect(cancel).toBeHidden();
+    await expect(install).toBeFocused();
+    // Dismiss the picker so the test can check the firmware after Enter.
+    await fileInput.evaluate(element => element.addEventListener('click', event => event.preventDefault(), { once: true }));
+    await page.keyboard.press('Enter');
+    await expect(page.locator(`#${status}`)).toContainText('deferred.rom');
+  }
+});
+
 for (const site of sites) {
   for (const model of ['0', '1']) {
     for (const size of [368640, 737280]) {
@@ -367,7 +400,7 @@ for (const site of sites) {
     await page.locator('#disk-rom').setInputFiles(file('deferred.rom', diskRom));
     await expect.poll(() => page.evaluate(() => typeof window.finishPhilips)).toBe('function');
     await expect(page.locator('#open-rom')).toBeDisabled();
-    await (await settingsControl(page, 'remove-disk-rom')).click();
+    await (await settingsControl(page, 'cancel-disk-rom-import')).click();
     await page.evaluate(() => window.finishPhilips());
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#screen').focus(); await page.keyboard.type('RUN'); await page.keyboard.press('Enter');

@@ -33,6 +33,7 @@ const pacSaves = { status: 'pac-save-status', prefix: fmPacSavePrefix, pointer: 
 let importGeneration = 0;
 let pendingImport;
 const mediaSlots = ['cartridge', 'disk', 'cassette'];
+const settingsImports = ['bios', 'disk-rom', 'music-rom', 'pac-rom'];
 let catalogLoading = false;
 let previousTime;
 let accumulator = 0;
@@ -83,6 +84,15 @@ function updateControls() {
     const focused = document.activeElement === cancel;
     cancel.hidden = !isImporting(slot);
     if (cancel.hidden && focused) $(`insert-${slot}`).focus();
+  }
+  for (const target of settingsImports) {
+    const cancel = $(`cancel-${target}-import`);
+    const focused = document.activeElement === cancel;
+    cancel.hidden = !isImporting(target);
+    if (cancel.hidden && focused) {
+      const fallback = target === 'bios' ? (model ? 'apply-firmware' : 'bios') : `open-${target}`;
+      $(fallback).focus();
+    }
   }
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
@@ -164,11 +174,16 @@ function beginMediaImport(slot) {
   if (trigger && (focused === trigger || focused === document.body)) $(`cancel-${slot}-import`).focus();
   return generation;
 }
-function retainSettingsFocus(fallback, canceledControl) {
+function beginSettingsImport(target) {
+  const generation = beginImport(target);
+  retainSettingsFocus(`cancel-${target}-import`);
+  return generation;
+}
+function retainSettingsFocus(fallback) {
   const panel = $('advanced-panel');
   if (!panel.matches(':popover-open')) return false;
   const focused = document.activeElement;
-  if (focused !== $('settings') && (!panel.contains(focused) || focused.matches(':disabled') || focused.id === canceledControl)) $(fallback).focus();
+  if (focused !== $('settings') && (!panel.contains(focused) || focused.matches(':disabled'))) $(fallback).focus();
   return true;
 }
 
@@ -330,7 +345,7 @@ function restart(action, settingsFallback) {
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
   const mapper = Number($('mapper').value);
-  const generation = isSystem ? beginImport('bios') : beginMediaImport('cartridge');
+  const generation = isSystem ? beginSettingsImport('bios') : beginMediaImport('cartridge');
   status(`Loading ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name)) throw new Error('Select a .rom or .bin ROM image.');
@@ -357,10 +372,9 @@ async function load(file, isSystem) {
     wasm.msx_cancel_upload();
     const message = error instanceof RangeError ? 'Not enough browser/Wasm memory to import this image. Close other tabs or try a smaller image.' : `ROM import failed: ${error.message}`;
     status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', isSystem ? undefined : 'cartridge');
-    $(isSystem ? 'bios' : 'cartridge').value = '';
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    $(isSystem ? 'bios' : 'cartridge').value = '';
+    if (!isSystem) $('cartridge').value = '';
   }
 }
 const soundProfileNames = ['', 'Snatcher', 'SD Snatcher'];
@@ -395,7 +409,7 @@ function updateTape() {
   const text = flags & 1 ? `${tapeName} · ${wasm.msx_tape_rate()} baud · ${flags & 4 ? 'end of tape' : paused ? 'paused' : flags & 2 ? 'playing' : 'stopped'} · motor ${flags & 2 ? 'on' : 'off'} · ${Math.floor(wasm.msx_tape_position())} s` : 'Empty';
   if ($('tape-status').textContent !== text) $('tape-status').textContent = text;
 }
-function cancelMediaImport() {
+function cancelImport() {
   importGeneration++;
   loading = false;
   wasm.msx_cancel_upload();
@@ -404,15 +418,23 @@ for (const slot of mediaSlots) {
   const cancel = $(`cancel-${slot}-import`);
   cancel.addEventListener('click', () => {
     if (cancel.hidden) return;
-    cancelMediaImport();
+    cancelImport();
     updateControls();
     status(slot === 'cassette' ? 'Import canceled. Session and tape unchanged.' : 'Import canceled. Session and media unchanged.');
+  });
+}
+for (const target of settingsImports) {
+  $(`cancel-${target}-import`).addEventListener('click', () => {
+    if (!isImporting(target)) return;
+    cancelImport();
+    updateControls();
+    status('Import canceled. Session, firmware and media unchanged.');
   });
 }
 $('open-cas').addEventListener('click', () => $('tape').click());
 $('tape').addEventListener('cancel', () => {
   if (loading && !isImporting('cassette')) return;
-  cancelMediaImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
+  cancelImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
 });
 $('tape').addEventListener('change', async event => {
   const file = event.target.files[0];
@@ -441,12 +463,12 @@ $('tape').addEventListener('change', async event => {
   }
 });
 $('rewind-tape').addEventListener('click', () => {
-  cancelMediaImport(); wasm.msx_rewind_tape(); updateControls();
+  cancelImport(); wasm.msx_rewind_tape(); updateControls();
   status('Tape rewound. Execution unchanged.');
 });
 $('eject-tape').addEventListener('click', () => {
   if ($('eject-tape').disabled) return;
-  cancelMediaImport(); wasm.msx_eject_tape(); tapeName = '';
+  cancelImport(); wasm.msx_eject_tape(); tapeName = '';
   updateControls(); status('Tape ejected. Execution unchanged.');
   $('insert-cassette').focus();
 });
@@ -454,10 +476,8 @@ $('eject-tape').addEventListener('click', () => {
 // Internal FM firmware shares the transactional local-media staging boundary.
 function updateMusic() {
   const installed = ready && wasm.msx_music_profile() === 1;
-  const importing = isImporting('music-rom');
   for (const id of ['music-profile', 'open-music-rom', 'music-rom']) $(id).disabled = !ready || loading;
-  $('remove-music-rom').disabled = !ready || (loading ? !importing : !installed);
-  $('remove-music-rom').textContent = importing ? 'Cancel import' : 'Remove MSX-MUSIC';
+  $('remove-music-rom').disabled = !ready || loading || !installed;
   $('music-status').textContent = installed ? `MSX-MUSIC · ${musicRomName} · slot 3-1 · ${model ? 'active' : 'inactive on MSX1'}` : 'MSX-MUSIC not installed';
 }
 $('open-music-rom').addEventListener('click', () => $('music-rom').click());
@@ -465,7 +485,7 @@ $('music-rom').addEventListener('change', async event => {
   const file = event.target.files[0];
   if (!file || !ready || loading) { event.target.value = ''; return; }
   const profile = Number($('music-profile').value);
-  const generation = beginImport('music-rom');
+  const generation = beginSettingsImport('music-rom');
   status(`Loading MSX-MUSIC firmware ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a separate 16 KiB internal-profile .rom or .bin firmware image.');
@@ -489,12 +509,6 @@ $('music-rom').addEventListener('change', async event => {
 });
 $('remove-music-rom').addEventListener('click', () => {
   if ($('remove-music-rom').disabled) return;
-  if (loading) {
-    cancelMediaImport(); updateControls();
-    status('Import canceled. Session and installation unchanged.');
-    retainSettingsFocus('open-music-rom', 'remove-music-rom');
-    return;
-  }
   persistSave();
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; }, 'open-music-rom');
 });
@@ -502,10 +516,8 @@ $('remove-music-rom').addEventListener('click', () => {
 // The external accessory has its own firmware identity and shared battery save.
 function updatePac() {
   const installed = ready && wasm.msx_fm_pac_profile() === 1;
-  const importing = isImporting('pac-rom');
   for (const id of ['open-pac-rom', 'pac-rom']) $(id).disabled = !ready || loading;
-  $('remove-pac-rom').disabled = !ready || (loading ? !importing : !installed);
-  $('remove-pac-rom').textContent = importing ? 'Cancel import' : 'Remove FM-PAC';
+  $('remove-pac-rom').disabled = !ready || loading || !installed;
   $('pac-status').textContent = installed ? `FM-PAC · ${pacRomName} · slot 2-1 · active` : 'FM-PAC not installed';
   for (const id of ['export-pac-save', 'import-pac-save']) $(id).disabled = !ready || loading || !pacSaves.active;
 }
@@ -513,7 +525,7 @@ $('open-pac-rom').addEventListener('click', () => $('pac-rom').click());
 $('pac-rom').addEventListener('change', async event => {
   const file = event.target.files[0];
   if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = beginImport('pac-rom');
+  const generation = beginSettingsImport('pac-rom');
   status(`Loading FM-PAC firmware ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 65536) throw new Error('Select a separate 64 KiB original FM-PAC .rom or .bin firmware image.');
@@ -539,12 +551,6 @@ $('pac-rom').addEventListener('change', async event => {
 });
 $('remove-pac-rom').addEventListener('click', () => {
   if ($('remove-pac-rom').disabled) return;
-  if (loading) {
-    cancelMediaImport(); updateControls();
-    status('Import canceled. Session and installation unchanged.');
-    retainSettingsFocus('open-pac-rom', 'remove-pac-rom');
-    return;
-  }
   persistSave(); detachSave(pacSaves);
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; }, 'open-pac-rom');
 });
@@ -552,12 +558,10 @@ $('remove-pac-rom').addEventListener('click', () => {
 // Disk media and interface imports share the ROM generation token and staging allocation.
 function updateDisk() {
   const philips = ready && wasm.msx_disk_profile() === 1;
-  const importing = isImporting('disk-rom');
   const profile = philips ? `Philips NMS1200-style · ${diskRomName} · slot 2 · selected system firmware` : 'Weave disk/demo boot option · no external interface installed';
   if ($('disk-profile-status').textContent !== profile) $('disk-profile-status').textContent = profile;
   for (const id of ['open-disk-rom', 'disk-rom']) $(id).disabled = !ready || loading;
-  $('remove-disk-rom').disabled = !ready || (loading ? !importing : !philips);
-  $('remove-disk-rom').textContent = importing ? 'Cancel import' : 'Remove disk interface';
+  $('remove-disk-rom').disabled = !ready || loading || !philips;
   const flags = ready ? wasm.msx_disk_flags() : 0;
   const mounted = Boolean(flags & 1);
   for (const id of ['insert-disk', 'open-dsk', 'disk', 'mount-disk-demo', 'mount-disk-protected']) $(id).disabled = !ready || loading;
@@ -577,7 +581,7 @@ $('open-disk-rom').addEventListener('click', () => $('disk-rom').click());
 $('disk-rom').addEventListener('change', async event => {
   const file = event.target.files[0];
   if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = beginImport('disk-rom');
+  const generation = beginSettingsImport('disk-rom');
   status(`Loading Philips disk ROM ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a 16 KiB AB-header .rom or .bin disk ROM.');
@@ -601,12 +605,6 @@ $('disk-rom').addEventListener('change', async event => {
 });
 $('remove-disk-rom').addEventListener('click', () => {
   if ($('remove-disk-rom').disabled) return;
-  if (loading) {
-    cancelMediaImport(); updateControls();
-    status('Import canceled. Session, interface and media unchanged.');
-    retainSettingsFocus('open-disk-rom', 'remove-disk-rom');
-    return;
-  }
   persistSave();
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; }, 'open-disk-rom');
 });
@@ -983,18 +981,22 @@ $('cartridge').addEventListener('change', event => {
   load(event.target.files[0], false);
 });
 $('bios').addEventListener('change', event => {
-  if (!model) load(event.target.files[0], true);
+  if (!model) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    load(file, true);
+  }
   else { mainFile = event.target.files[0]; updateFirmwareSelection(); }
 });
 $('subrom').addEventListener('change', event => { subFile = event.target.files[0]; updateFirmwareSelection(); });
 $('apply-firmware').addEventListener('click', async () => {
   if (!ready || loading) return;
-  const generation = ++importGeneration;
+  let generation = importGeneration;
   try {
     if (!mainFile || !subFile) throw new Error('Select both the 32 KiB main BIOS/BASIC and the 16 KiB sub-ROM.');
     if (mainFile.size !== 32768 || subFile.size !== 16384) throw new Error('MSX2 requires a 32 KiB main BIOS/BASIC and a separate 16 KiB sub-ROM.');
     if (![mainFile, subFile].every(file => /\.(rom|bin)$/i.test(file.name))) throw new Error('Select .rom or .bin firmware images.');
-    loading = true; updateControls();
+    generation = beginSettingsImport('bios');
     const [main, sub] = await Promise.all([mainFile.arrayBuffer(), subFile.arrayBuffer()]);
     if (generation !== importGeneration) return;
     const pointer = wasm.msx_upload(49152);
