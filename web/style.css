@@ -72,6 +72,13 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12
 .computer:fullscreen, .computer.focus-view { display: flex; flex-direction: column; width: 100%; height: 100dvh; border: 0; border-radius: 0; background: #1c1f24; overflow: auto; }
 .computer.focus-view { position: fixed; inset: 0; z-index: 10; }
 body.focus-view-active { overflow: hidden; }
+/* Showing the fallback status must not resize a height-limited display. */
+.computer:fullscreen #display-status, .computer.focus-view #display-status {
+  position: static;
+  block-size: 1lh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
 .computer:fullscreen .screen-frame, .computer.focus-view .screen-frame { flex: 1; min-height: 80px; container-type: size; }
 .computer:fullscreen .screen-surface, .computer.focus-view .screen-surface { width: min(100cqw, calc(100cqh * 4 / 3)); }
 .computer:fullscreen > :not(.screen-frame), .computer.focus-view > :not(.screen-frame) { flex-shrink: 0; }
@@ -118,6 +125,7 @@ select { max-width: 100%; margin-bottom: 14px; padding: 10px; border: 1px solid 
 /* Keep a useful display height in landscape fullscreen; controls remain
    keyboard reachable in one horizontally scrolling media strip. */
 @media (max-height: 500px) {
+  .computer:fullscreen .machine-state, .computer.focus-view .machine-state { padding-block: 4px; row-gap: 2px; }
   .computer:fullscreen .media-controls, .computer.focus-view .media-controls { display: flex; overflow-x: auto; border-bottom: 1px solid var(--border); }
   .computer:fullscreen .disk-controls, .computer.focus-view .disk-controls { flex: 0 0 auto; flex-wrap: nowrap; overflow: visible; padding: 4px 10px; border-bottom: 0; }
   .computer:fullscreen .disk-controls > *, .computer.focus-view .disk-controls > * { flex-shrink: 0; }

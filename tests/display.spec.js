@@ -278,16 +278,24 @@ test('unavailable WebGL2 and blocked storage leave a usable Clean display', asyn
   expect(await sample(page, [[630, 470]])).toEqual(before);
 });
 
-test('a smaller output recovers visible CRT after an allocation failure while paused', async ({ page }) => {
+test('paused fullscreen allocation failure stays Clean until resized smaller', async ({ page }) => {
   await watchWasm(page);
   await page.addInitScript(() => {
+    // The CSS fullscreen view lets Playwright resize the browser in place.
+    Element.prototype.requestFullscreen = undefined;
     const prototype = WebGL2RenderingContext.prototype;
     const { get } = Object.getOwnPropertyDescriptor(prototype, 'drawingBufferWidth');
+    window.outputLimit = Infinity;
+    window.outputAttempts = [];
     Object.defineProperty(prototype, 'drawingBufferWidth', {
-      get() { return Math.min(get.call(this), 800); },
+      get() {
+        const width = get.call(this);
+        window.outputAttempts.push(width);
+        return Math.min(width, window.outputLimit);
+      },
     });
   });
-  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.setViewportSize({ width: 1280, height: 820 });
   await boot(page);
   await paste(page, 'COLOR 15,15:CLS\n');
   await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
@@ -295,22 +303,42 @@ test('a smaller output recovers visible CRT after an allocation failure while pa
   await expect(page.locator('#audio-state')).toHaveText('Audio on');
   await page.locator('#pause').click();
   const paused = await page.evaluate(() => window.displayCalls);
-  const before = await sample(page, chroma);
-  expect(before).not.toEqual(chroma.map(() => white));
   await expect(crt(page)).toHaveAttribute('width', '640');
 
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
-  await expect(crt(page)).toHaveAttribute('width', '960');
+  await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
+  await expect.poll(() => crt(page).evaluate(canvas => canvas.width)).toBeGreaterThan(640);
+  const width = await crt(page).evaluate(canvas => canvas.width);
+  expect(width).toBeLessThan(940);
+  const before = await sample(page, chroma);
+  expect(before).not.toEqual(chroma.map(() => white));
+
+  // The 8 px height increase crosses the simulated limit, but is smaller
+  // than the height a status row would take if it appeared in the layout.
+  await page.evaluate(width => {
+    window.outputLimit = width;
+    window.outputAttempts.length = 0;
+  }, width);
+  await page.setViewportSize({ width: 1280, height: 828 });
+  await expect.poll(() => page.evaluate(() => window.outputAttempts[0])).toBeGreaterThan(width);
+  const attempts = await page.evaluate(async () => {
+    for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
+    return window.outputAttempts;
+  });
+  expect(attempts).toEqual([expect.any(Number)]);
   await expect(status(page)).toHaveText('Clean active · WebGL2 output allocation failed.');
+  await expect(status(page)).toBeVisible();
   await expect(crt(page)).toBeHidden();
+  expect(await screen(page).evaluate(canvas => Math.round(canvas.getBoundingClientRect().width))).toBe(attempts[0]);
   await expect(select(page)).toHaveValue('crt');
   expect(await sample(page, chroma)).toEqual(chroma.map(() => white));
 
-  await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
-  await expect(crt(page)).toHaveAttribute('width', '640');
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await expect(crt(page)).toHaveAttribute('width', String(width));
   await expect(crt(page)).toBeVisible();
   await expect(status(page)).toBeEmpty();
   expect(await sample(page, chroma)).toEqual(before);
+  expect(await page.evaluate(() => window.outputAttempts)).toEqual([...attempts, width]);
   await expect(page.locator('#status')).toContainText('Paused');
   expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
 });
