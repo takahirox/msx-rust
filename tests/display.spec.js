@@ -77,11 +77,17 @@ const chroma = [60, 61, 62].map(x => [x, 49]);
 const rows = Array.from({ length: 15 }, (_, i) => [60, 48 + i]);
 
 test('default CRT softens and modulates the visible MSX2 image, with exact Clean and a saved choice', async ({ page }) => {
+  await page.setViewportSize({ width: 1105, height: 1100 });
   await watchWasm(page);
   await boot(page);
-  // The samples below target fixed compositor coordinates across the color
-  // boundary. Hold this one output at 640×480 regardless of the page layout.
-  await surface(page).evaluate(element => { element.style.width = '640px'; });
+  // Playwright rounds fractional bounds outward. Keep the 640×480 surface
+  // on whole CSS pixels so the samples hit the intended compositor pixels.
+  await surface(page).evaluate(element => {
+    element.style.width = '640px';
+    const { x, y } = element.getBoundingClientRect();
+    element.style.left = `${Math.round(x) - x}px`;
+    element.style.top = `${Math.round(y) - y}px`;
+  });
   await expect(crt(page)).toHaveAttribute('width', '640');
   await expect(crt(page)).toBeVisible();
   const textPixels = Array.from({ length: 90 * 24 }, (_, i) => [i % 90 * 3, Math.floor(i / 90) * 3]);
@@ -145,7 +151,9 @@ test('default CRT softens and modulates the visible MSX2 image, with exact Clean
   await expect(page.locator('#status')).toContainText('Paused');
   expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
 
-  await surface(page).evaluate(element => { element.style.width = ''; });
+  await surface(page).evaluate(element => {
+    Object.assign(element.style, { width: '', left: '', top: '' });
+  });
   await page.setViewportSize({ width: 370, height: 800 });
   const mobileWidth = Math.round((await surface(page).boundingBox()).width);
   const mobileHeight = Math.round((await surface(page).boundingBox()).height);
