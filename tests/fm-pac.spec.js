@@ -88,6 +88,7 @@ for(const site of sites) {
   });
   test(`FM-PAC separate shared save roundtrip/reload, exact validation, conflicts and recovery ${site}`,async({page})=>{
     await boot(page,site);await (await settingsControl(page, 'mapper')).selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await expect(page.locator('#cartridge-status')).toContainText('mapper-6.rom');
     await install(page);
     await page.evaluate(pattern=>{const w=window.musicWasm;new Uint8Array(w.memory.buffer,w.msx_fm_pac_sram(),8190).set(pattern);new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);},pattern);
     const container=await backup(page);expect(container.size).toBe(8190);expect(container.mapper).toBe('original-fm-pac');
