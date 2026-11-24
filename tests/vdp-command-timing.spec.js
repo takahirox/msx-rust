@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
 const disk = await readFile('dist/weave-disk-demo.dsk');

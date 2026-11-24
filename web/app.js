@@ -1,8 +1,8 @@
 // Browser transport only: Canvas, files, keyboard, pacing, and Web Audio.
 import { savePrefix, romIdentity, encodeSave, decodeSave, fmPacSavePrefix, encodeFmPacSave, decodeFmPacSave } from './saves.js';
+import { createDisplay } from './display.js';
 const $ = id => document.getElementById(id);
 const screen = $('screen');
-const context = screen.getContext('2d', { alpha: false });
 const decoder = new TextDecoder();
 let wasm;
 let ready = false;
@@ -117,12 +117,14 @@ document.addEventListener('keydown', event => {
 }, true);
 function readString(pointer, length) { return decoder.decode(new Uint8Array(wasm.memory.buffer, pointer, length)); }
 function flushAudio() { for (const source of activeSources) source.stop(); activeSources.clear(); nextAudio = 0; }
-function render() {
+const display = createDisplay(screen, $('crt-screen'), $('display'), $('display-status'), () => {
   // Recreate views after Wasm calls: growing linear memory invalidates old views.
   const width = wasm.msx_width(), height = wasm.msx_height();
-  if (screen.width !== width || screen.height !== height) { screen.width = width; screen.height = height; }
   const pixels = new Uint8ClampedArray(wasm.memory.buffer, wasm.msx_pixels(), width * height * 4);
-  context.putImageData(new ImageData(pixels, width, height), 0, 0);
+  return { width, height, pixels };
+});
+function render() {
+  display.present();
   updateDisk();
   updateTape();
   const text = readString(wasm.msx_transcript(), wasm.msx_transcript_len());
@@ -149,10 +151,10 @@ function frame(time) {
   if (previousTime === undefined) previousTime = time;
   const elapsed = Math.min(time - previousTime, 100);
   previousTime = time;
+  let count = 0;
   if (!paused && !document.hidden) {
     accumulator += elapsed;
-    let count = 0;
-    while (accumulator >= frameMilliseconds() && count++ < 5) {
+    while (accumulator >= frameMilliseconds() && count < 5) {
       // Charge the budget used on entry. The CPU may fix a new R9 timing
       // during this call; charging its new budget would lose or duplicate time.
       const elapsedFrame = frameMilliseconds();
@@ -160,9 +162,11 @@ function frame(time) {
       wasm.msx_frame();
       enqueueAudio();
       accumulator -= elapsedFrame;
+      count++;
     }
-    render();
   } else accumulator = 0;
+  if (count) render();
+  else display.refreshScale();
   requestAnimationFrame(frame);
 }
 async function enableAudio() {

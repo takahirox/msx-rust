@@ -1,10 +1,6 @@
-import { test, expect } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { test, expect } from './fixtures/clean-display.js';
+import { installInterlaceProbe } from './fixtures/interlace.js';
 
-// Original CPU port/status program, also timestamped independently in native tests.
-const code = (await readFile('tests/fixtures/interlace-probe.hex', 'utf8'))
-  .split('\n').flatMap(line => line.split('#')[0].trim().split(/\s+/).filter(Boolean))
-  .map(byte => parseInt(byte, 16));
 const expectedBudget = n => n === 1 ? 59736 : [59850, 71250, 71364, 59736][Math.floor((n - 2) / 8) % 4];
 
 for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
@@ -44,13 +40,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#model').selectOption('1');
-    await page.locator('#advanced-panel').evaluate(el => { el.open = true; });
-    const main = Buffer.alloc(32768);
-    main.set([0xc3, 0, 1]); main[0x2d] = 1; main.set(code, 0x100);
-    const sub = Buffer.alloc(16384); sub.set([0x43, 0x44]);
-    await page.locator('#bios').setInputFiles({ name: 'original-interlace-probe.rom', mimeType: 'application/octet-stream', buffer: main });
-    await page.locator('#subrom').setInputFiles({ name: 'original-empty-sub.rom', mimeType: 'application/octet-stream', buffer: sub });
-    await page.locator('#apply-firmware').click();
+    await installInterlaceProbe(page);
     await expect(page.locator('#status')).toContainText('user BIOS');
     await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
     await expect(page.locator('#audio-state')).toContainText('Audio on');

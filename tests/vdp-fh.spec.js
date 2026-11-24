@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
 // Independent Canvas expectations use the repository's original font, rather

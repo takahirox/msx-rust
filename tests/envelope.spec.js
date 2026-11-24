@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
 // Shared, original MIT Z80 bytes; no commercial firmware or recorded audio.

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const demo = await readFile('dist/weave-disk-demo.dsk');
 const sites = ['http://127.0.0.1:41873/', 'http://127.0.0.1:41874/msx-rust/'];

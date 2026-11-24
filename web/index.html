@@ -52,13 +52,21 @@
     <div class="machine-state">
       <span id="status" role="status" aria-live="polite">Loading WebAssembly…</span>
       <span id="audio-state">Audio off · enable to hear sound</span>
+      <span id="display-status" role="status"></span>
     </div>
     <div class="screen-frame">
-      <canvas id="screen" width="256" height="192" tabindex="0" aria-label="MSX display. Click or tap to focus, then type with a physical keyboard. Escape breaks a program." aria-describedby="input-help"></canvas>
+      <div class="screen-surface">
+        <canvas id="screen" width="256" height="192" tabindex="0" aria-label="MSX display. Click or tap to focus, then type with a physical keyboard. Escape breaks a program." aria-describedby="input-help"></canvas>
+        <canvas id="crt-screen" width="1" height="1" aria-hidden="true" hidden></canvas>
+      </div>
     </div>
     <div class="focus-bar">
       <button id="focus-screen" disabled>Click / tap to type</button>
       <span id="input-help">Physical keyboard required · Esc stops BASIC</span>
+      <div class="control-group">
+        <label for="display" class="machine-label">Display</label>
+        <select id="display" aria-describedby="display-status"><option value="crt">Retro CRT</option><option value="clean">Clean</option></select>
+      </div>
     </div>
   </section>
   <section class="disk-help" aria-label="Cassette help">
@@ -136,6 +144,7 @@
 50 LINE (32,32)-(63,55),6,BF
 60 END</pre>
         <p>Reset clears the program and restarts selected ROMs. Pause / Resume stops and starts emulation. Enable audio after a click; if the browser suspends sound, choose Resume audio. Sound demo plays a sustained tone; Stop tone silences it.</p>
+        <p>Display defaults to Retro CRT, an aesthetic WebGL2 effect with subtle scanlines, a fine color mask and softened pixels. Choose Clean for sharp, unfiltered pixels or to reduce GPU use. Both work while paused. Your choice is saved in this browser. If Retro CRT is unavailable, the emulator uses Clean.</p>
         <p>The starters run in built-in Weave BASIC. They resume paused emulation and enter commands into the current session. Use Reset for a fresh program. <a href="https://github.com/takahirox/msx-rust#weave-basic-and-firmware">Full BASIC reference ↗</a></p>
       </div>
     </details>

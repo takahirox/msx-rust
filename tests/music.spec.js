@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const sites=['/','http://127.0.0.1:41874/msx-rust/'];
 const file=(name,buffer)=>({name,buffer,mimeType:'application/octet-stream'});

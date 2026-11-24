@@ -1,3 +1,63 @@
+# Issue 83 Retro CRT display
+
+Local validation on 2026-11-24 used the assigned checkpoint `f367096`,
+based on `e9cefc7`, on macOS 27.2.1 arm64 (Apple M4 Max). The build used
+Rust 1.99.0. Chromium 156.0.8078.4 ran under Playwright 1.64.1.
+[Issue #83](https://github.com/takahirox/msx-rust/issues/83)
+
+Five display cases sampled composited screenshots through real Chromium WebGL2
+with ANGLE/SwiftShader. They cover fresh MSX2 BASIC, scanlines, color mask,
+bounded edge softness, exact Clean pixels, live and paused switching,
+preference persistence, resize and device pixel ratio, 512-wide SCREEN 7,
+distinct 424-line interlaced field colors, native fullscreen, input, failed
+storage, unavailable WebGL2, shader and draw errors, and context recovery.
+The Pages subpath case also booted the MSX1 plustaker demo and checked its
+visible HUD and joystick delivery. Existing exact-pixel tests use Clean.
+
+### Configured checks
+
+| Check | Local result |
+| --- | --- |
+| `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings` | Passed in 0.23 s and 1.05 s with Rust 1.99.0 |
+| `cargo test --workspace --locked` | 333 passed in 2m 11s |
+| `./scripts/build.sh` and `node scripts/check-dist.mjs` | Passed. The incremental build and inventory check took 0.20 s and 0.13 s |
+| Focused Chromium run | 16 passed in 20.8 s |
+| `npm test` | 223 of 225 passed in 15m 23s. The two C-BIOS checks flagged the new display module in their exact request allowlist |
+| `npm test -- --last-failed` | Both C-BIOS checks passed in 26.9 s after the allowlist was updated for the relative module at both local roots |
+| `git diff --check` | Passed |
+
+The Wasm build used an ignored linker wrapper to locate the pinned toolchain's
+`libLLVM.dylib` on this macOS host.
+
+### Gameplay and audio measurement
+
+The bundled plustaker cartridge ran under the release Wasm build in fresh
+browser contexts on the same machine. Each trial used a 640×480 display at DPR 1,
+a 3.2-second warm-up after enabling audio, and eight seconds with Space held.
+Two rounds used forced SwiftShader with reversed mode order and four trials per
+mode in total. Instrumentation counted actual Wasm frame calls, renderer draws,
+animation callback intervals and scheduled Web Audio buffers.
+
+| Mode | Emulated frames/s | Draws/s | 95th-percentile animation interval | Completed audio buffers per trial | Gaps over 1 ms and longest gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Clean | 59.99–60.12 | 59.11–60.12 | 16.7–16.8 ms | 478–480 | 1, 14.83 ms |
+| Retro CRT | 59.99–60.08 | 56.49–60.08 | 16.7–33.2 ms | 478–479 | 2, 6.15 ms |
+
+The slowest CRT trial had a 50.1 ms maximum animation interval. The slowest
+Clean trial had a 66.7 ms maximum. Both modes kept emulation near 60 frames/s
+and produced 35–36 nonzero audio buffers per trial with the audio context
+running. The presentation and audio stalls varied across trials on the shared
+host. The reversed-order repeat had no audio gaps in either mode. A final
+four-trial round with Chromium's default launch settings also selected
+SwiftShader and delivered 59.99 frames and draws per second in both modes,
+with no scheduled audio gaps. The local comparison covers one workload and
+viewport with software WebGL2. Audio coverage comes from browser scheduling
+and buffer completion.
+
+Published Pages verification is pending. After merge and deployment, check the
+visible CRT default on fresh MSX2 BASIC, live switching, and a representative
+demo. Record the deployed revision, Actions run, browser and results.
+
 # Issue 73 WZ MEMPTR and BIT HL flags
 
 Source: [Model Z80 WZ/MEMPTR state and correct BIT (HL) flags](https://github.com/takahirox/msx-rust/issues/73).
