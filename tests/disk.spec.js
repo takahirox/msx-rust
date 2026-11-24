@@ -24,7 +24,7 @@ async function space(page) {
   await page.locator('#screen').focus(); await page.keyboard.down('Space');
   await page.waitForTimeout(300); await page.keyboard.up('Space');
 }
-test('canceling the bundled disk import preserves BASIC and Drive A', async ({ page }) => {
+test('only Drive A can cancel a pending disk import with a cassette mounted', async ({ page }) => {
   await page.addInitScript(() => {
     const read = Response.prototype.arrayBuffer;
     Response.prototype.arrayBuffer = async function () {
@@ -41,12 +41,15 @@ test('canceling the bundled disk import preserves BASIC and Drive A', async ({ p
   });
   await page.goto('/');
   await expect(page.locator('#transcript')).toContainText('READY');
+  await page.locator('#tape').setInputFiles('dist/cassette-test.cas');
+  await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
   await page.locator('#screen').focus();
   await page.keyboard.type('10 PRINT 73');
   await page.keyboard.press('Enter');
 
   const insert = page.getByRole('button', { name: 'Insert disk', exact: true });
   const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
+  const ejectTape = page.getByRole('button', { name: 'Eject tape', exact: true });
   const diskStatus = page.locator('#disk-status');
   const existingDisk = Buffer.alloc(368640, 0x5a);
   for (const mounted of [false, true]) {
@@ -61,6 +64,8 @@ test('canceling the bundled disk import preserves BASIC and Drive A', async ({ p
     await page.getByRole('button', { name: 'Weave disk demo', exact: true }).press('Enter');
     await expect.poll(() => page.evaluate(() => typeof window.finishDiskRead)).toBe('function');
     await expect(page.locator('#disk-picker')).toBeHidden();
+    await expect(cancel).toHaveCount(1);
+    await expect(ejectTape).toBeDisabled();
     await expect(cancel).toBeFocused();
     await page.keyboard.press('Space');
     await expect(insert).toBeFocused();
@@ -71,12 +76,53 @@ test('canceling the bundled disk import preserves BASIC and Drive A', async ({ p
     });
     await expect(page.locator('#status')).toContainText('Import canceled');
     await expect(diskStatus).toContainText(expected);
+    await expect(ejectTape).toBeEnabled();
+    await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
   }
   expect(await exportDisk(page)).toEqual(existingDisk);
   await page.locator('#screen').focus();
   await page.keyboard.type('RUN');
   await page.keyboard.press('Enter');
   await expect(page.locator('#transcript')).toContainText('73\nREADY');
+});
+
+test('the disk picker shows and applies protection for the incoming disk', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#transcript')).toContainText('READY');
+  const insert = page.getByRole('button', { name: 'Insert disk', exact: true });
+  const picker = page.getByRole('region', { name: 'Insert disk', exact: true });
+  const mountReadOnly = picker.getByRole('checkbox', { name: 'Mount as read-only', exact: true });
+  const demoButton = picker.getByRole('button', { name: 'Weave disk demo', exact: true });
+  const mountedReadOnly = page.getByRole('checkbox', { name: 'Read-only', exact: true });
+  const diskStatus = page.locator('#disk-status');
+
+  await insert.click();
+  await demoButton.click();
+  await expect(diskStatus).toContainText('weave-disk-demo.dsk · 720 KiB · read-only');
+  await mountedReadOnly.uncheck();
+  await expect(diskStatus).toContainText('writable');
+  await page.getByRole('button', { name: 'Eject disk', exact: true }).click();
+  await expect(diskStatus).toHaveText('Empty');
+
+  await insert.click();
+  await expect(mountReadOnly).toBeVisible();
+  await expect(mountReadOnly).toBeChecked();
+  const fileChooser = page.waitForEvent('filechooser');
+  await picker.getByRole('button', { name: 'Open local DSK…', exact: true }).click();
+  await (await fileChooser).setFiles({
+    name: 'incoming.dsk', mimeType: 'application/octet-stream', buffer: Buffer.alloc(368640),
+  });
+  await expect(diskStatus).toContainText('incoming.dsk · 360 KiB · read-only');
+  await expect(mountedReadOnly).toBeChecked();
+
+  await insert.click();
+  await mountReadOnly.uncheck();
+  await expect(mountedReadOnly).toBeChecked();
+  await demoButton.click();
+  await expect(diskStatus).toContainText('weave-disk-demo.dsk · 720 KiB · writable');
+  await expect(mountedReadOnly).not.toBeChecked();
+  await insert.click();
+  await expect(mountReadOnly).toBeChecked();
 });
 
 for (const site of sites) {

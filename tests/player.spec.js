@@ -204,7 +204,7 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
 
   await page.getByRole('button', { name: 'Boot disk' }).click();
   await expect(status(page)).toContainText('Weave disk firmware');
-  await page.getByLabel('Read-only').uncheck();
+  await page.getByLabel('Read-only', { exact: true }).uncheck();
   await display(page).focus();
   await page.keyboard.down('Space');
   await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');

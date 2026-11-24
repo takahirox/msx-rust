@@ -394,8 +394,8 @@ function updateTape() {
   $('rewind-tape').hidden = !(flags & 1);
   $('eject-tape').hidden = !(flags & 1) && !mounting;
   $('rewind-tape').disabled = !(flags & 1) || loading;
-  $('eject-tape').disabled = !ready || (!(flags & 1) && !loading);
-  $('eject-tape').textContent = loading ? 'Cancel import' : 'Eject tape';
+  $('eject-tape').disabled = !ready || (loading ? !mounting : !(flags & 1));
+  $('eject-tape').textContent = mounting ? 'Cancel import' : 'Eject tape';
   const text = flags & 1 ? `${tapeName} · ${wasm.msx_tape_rate()} baud · ${flags & 4 ? 'end of tape' : paused ? 'paused' : flags & 2 ? 'playing' : 'stopped'} · motor ${flags & 2 ? 'on' : 'off'} · ${Math.floor(wasm.msx_tape_position())} s` : 'Empty';
   if ($('tape-status').textContent !== text) $('tape-status').textContent = text;
 }
@@ -450,6 +450,7 @@ $('rewind-tape').addEventListener('click', () => {
   status('Tape rewound. Execution unchanged.');
 });
 $('eject-tape').addEventListener('click', () => {
+  if ($('eject-tape').disabled) return;
   const canceled = loading;
   cancelMediaImport();
   if (!canceled) { wasm.msx_eject_tape(); tapeName = ''; }
@@ -562,7 +563,7 @@ function updateDisk() {
   $('remove-disk-rom').textContent = loading ? 'Cancel import' : 'Remove disk interface';
   const flags = ready ? wasm.msx_disk_flags() : 0;
   const mounted = Boolean(flags & 1);
-  for (const id of ['insert-disk', 'open-dsk', 'disk', 'mount-disk-demo']) $(id).disabled = !ready || loading;
+  for (const id of ['insert-disk', 'open-dsk', 'disk', 'mount-disk-demo', 'mount-disk-protected']) $(id).disabled = !ready || loading;
   $('disk-actions').hidden = $('eject-disk').hidden = !mounted;
   for (const id of ['boot-disk', 'export-disk', 'disk-protected']) $(id).disabled = !ready || loading || !mounted;
   // Eject is also a cancellation boundary, like cartridge Eject.
@@ -626,7 +627,8 @@ $('mount-disk-demo').addEventListener('click', () => {
 });
 async function mountDisk(name, readBytes) {
   if (!ready || loading) return;
-  const protectedDisk = $('disk-protected').checked;
+  const protection = $('mount-disk-protected');
+  const protectedDisk = protection.checked;
   const generation = beginImport('disk');
   status(`Loading DSK ${name}…`);
   try {
@@ -637,6 +639,7 @@ async function mountDisk(name, readBytes) {
     new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
     if (!wasm.msx_mount_disk(bytes.length, protectedDisk ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     diskName = name;
+    protection.checked = true;
     status(wasm.msx_disk_profile() === 1 ? 'Disk mounted in drive A:. Boot disk restarts the selected system firmware with the Philips interface.' : 'Disk mounted in drive A:. Choose Boot disk to restart with original disk firmware.');
   } catch (error) {
     if (generation !== importGeneration) return;
