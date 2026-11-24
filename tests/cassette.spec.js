@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const cas = await readFile('dist/cassette-test.cas');
 // Hand specified bytes: no parser/encoding helper or ROM readback supplies expected data.

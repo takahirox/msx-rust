@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
 // The independent disk demo stores the original glyphs as a contiguous font.

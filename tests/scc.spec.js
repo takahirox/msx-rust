@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 
 // Observe the real compiled Wasm and scheduled native Web Audio buffers. No
 // substitute synthesizer, commercial ROM, recorded music or debug ABI is used.

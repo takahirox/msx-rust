@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 
 // Observe only the cartridge's actual Canvas pixels. No emulated RAM getter or
 // JavaScript input stub can make these pass without Z80/PSG/C-BIOS/VDP execution.

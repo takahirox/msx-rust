@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const manifest = JSON.parse(await readFile('demos/manifest.json'));

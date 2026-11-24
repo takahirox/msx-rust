@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
 // Independently authored MIT fixtures shared with native tests. Observe real

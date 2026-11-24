@@ -48,6 +48,22 @@ fullscreen** or Escape returns to the page. Browsers without fullscreen support 
 focused view with the same controls and exit options. BASIC programs and ROM
 images are not stored. Supported ASCII cartridge SRAM is saved locally; see [cartridge saves](docs/cartridge-sram.md#browser-saving-and-recovery).
 
+Use **Display** below the screen to switch between **Retro CRT** and **Clean**,
+even while paused.
+Retro CRT is the default on browsers with usable WebGL2. It adds subtle scanlines,
+a fine color mask and mild softness. Clean shows the exact framebuffer with
+nearest-neighbor scaling and avoids the shader's GPU cost. The emulator shows
+Clean with a status message if WebGL2 is unavailable or fails, and resumes the
+requested effect if the graphics context returns. Your explicit choice is stored
+in this browser separately from cartridge saves.
+
+Retro CRT is an aesthetic effect. It uses one shader pass on the current frame
+and scales its drawing buffer with display size and device pixel ratio up to
+960×720 pixels. The shader softens its fine detail at smaller sizes and adapts
+to the VDP's woven interlaced rows. The independently written shader and browser
+integration are part of this project's MIT-licensed code. The WonderSwan Retro CRT
+mode served as a behavioral reference. [WonderSwan README](https://github.com/takahirox/wonderswan-rust/blob/bb6f672a1ec40dd688d01a1f6b312b28ad8e7359/README.md)
+
 Try **BASIC example**, **Graphics demo**, or **Sound demo** beneath the display.
 The starters enter commands into the current built-in BASIC session, resume paused
 emulation, and restore keyboard focus. Graphics draws a sine curve using the
@@ -649,7 +665,7 @@ Stop the manual server first: browser tests start their own servers on 41873/418
 intentionally refuse to reuse an unrelated service. On Linux CI, use
 `npx playwright install --with-deps chromium` to install browser system libraries.
 The browser suite types through keyboard events, verifies BASIC digits directly in
-Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
+Clean Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
 waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
 AudioContext, and uses real file inputs for ROMs.
 The suite also checks starter actions, scoped keyboard focus, loading/failure
@@ -658,6 +674,8 @@ help/BIOS/transcript controls, and desktop/tablet/mobile layouts (including 320p
 width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
 details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
 Automated audio checks verify the browser signal path, not physical speakers.
+The display tests use real WebGL2 in Chromium with SwiftShader and sample
+composited screenshots to verify the visible CRT effect, geometry and fallback.
 
 The browser tests run automatic BASIC/cartridge transitions for both models at both
 site roots, verify real standard-BIOS cartridge pixels, keyboard input and

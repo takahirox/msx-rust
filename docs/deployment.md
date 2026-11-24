@@ -37,9 +37,9 @@ The build script compiles `msx-wasm` in release mode with `--locked`, recreates
 original firmware, cartridge, disk and CAS fixtures from Rust source. It also
 copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
 It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **45 files**:
+The complete deployable inventory is **46 files**:
 
-- `index.html`, `style.css`, `app.js`, `saves.js`
+- `index.html`, `style.css`, `app.js`, `display.js`, `saves.js`
 - `msx_wasm.wasm`
 - `weave-boot.rom`, `test-cartridge.rom`
 - `fm-pac-diagnostic-firmware.rom`, `fm-pac-test-cartridge.rom` (original MIT external accessory diagnostics; [provenance](fm-pac.md#behavioral-references-and-provenance))
@@ -81,8 +81,9 @@ No C-BIOS logo, BASIC, music or disk ROM is needed or distributed. The app links
 and downloadable independent service-test cartridge under advanced options.
 `scripts/check-dist.mjs` rejects missing, empty or unexpected output files and checks
 Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes, unchanged
-license/provenance records and relative HTML links. It also validates the exact
-demo inventory, ROM hashes/sizes and byte-identical license/provenance files, plus
+license/provenance records, relative HTML links and the relative display-module
+import. It also validates the exact demo inventory, ROM hashes/sizes and
+byte-identical license/provenance files, plus
 required source attribution. Missing, extra or modified assets fail the check.
 Only `dist/` is uploaded by the Pages workflow.
 
