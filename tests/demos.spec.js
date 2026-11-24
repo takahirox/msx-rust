@@ -238,17 +238,37 @@ test('missing/invalid catalogs can be retried, and core validation failures do n
   await basicCommand(page,'10 PRINT 84');
   await page.unroute('**/demos/manifest.json');
   const unsupported=structuredClone(manifest);unsupported.demos[0].mapper='Unsupported';
-  await page.route('**/demos/manifest.json',r=>r.fulfill({json:unsupported}));
+  const retry=page.getByRole('button',{name:'Retry demos'});
+  const message=page.locator('#demo-message');
+  const pending=Promise.withResolvers();
+  await page.route('**/demos/manifest.json',async r=>{
+    await pending.promise;
+    await r.fulfill({json:unsupported});
+  });
   await (await mediaControl(page, 'insert-cartridge')).click();
-  await page.locator('#retry-demos').click();await expect(page.locator('#demo-message')).toContainText('Invalid demo metadata');
+  await retry.focus();
+  await page.keyboard.press('Enter');
+  try {
+    await expect(message).toHaveText('Loading demos…');
+    await expect(retry).toBeDisabled();
+    await expect(retry).toBeFocused();
+  } finally { pending.resolve(); }
+  await expect(message).toContainText('Invalid demo metadata');
+  await expect(retry).toBeEnabled();
+  await expect(retry).toBeFocused();
   await page.unroute('**/demos/manifest.json');
   // A hash-valid but malformed MSX1 cartridge must leave the default MSX2 unchanged.
   const invalid=Buffer.alloc(16384), changed=structuredClone(manifest);
   changed.demos[0].sha256=createHash('sha256').update(invalid).digest('hex');
   await page.route('**/demos/manifest.json',r=>r.fulfill({json:changed}));
   await page.route('**/demos/plustakermsx.rom',r=>r.fulfill({body:invalid}));
-  await page.locator('#retry-demos').click();await expect(page.locator('#demo-plustaker')).toBeEnabled();
-  await page.locator('#demo-plustaker').click();await expect(page.locator('#status')).toContainText('Demo load failed');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#demo-plustaker')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('plustaker controls and credits')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#status')).toContainText('Demo load failed');
   await expect(page.locator('#model')).toHaveValue('1');
   await basicCommand(page,'LIST');await expect(page.locator('#transcript')).toContainText('10 PRINT 84');
 });
