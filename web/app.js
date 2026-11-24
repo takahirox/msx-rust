@@ -342,6 +342,12 @@ function restart(action, settingsFallback) {
   updateStatus();
   if (!settingsFallback || !retainSettingsFocus(settingsFallback)) screen.focus();
 }
+function takeFile(input) {
+  const file = input.files[0];
+  // Allow selecting the same file again even while a canceled read is pending.
+  input.value = '';
+  return file;
+}
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
   const mapper = Number($('mapper').value);
@@ -374,7 +380,6 @@ async function load(file, isSystem) {
     status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', isSystem ? undefined : 'cartridge');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    if (!isSystem) $('cartridge').value = '';
   }
 }
 const soundProfileNames = ['', 'Snatcher', 'SD Snatcher'];
@@ -437,7 +442,7 @@ $('tape').addEventListener('cancel', () => {
   cancelImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
 });
 $('tape').addEventListener('change', async event => {
-  const file = event.target.files[0];
+  const file = takeFile(event.target);
   if (!file || !ready) return;
   const rate = Number($('tape-rate').value);
   const generation = beginMediaImport('cassette');
@@ -459,7 +464,6 @@ $('tape').addEventListener('change', async event => {
     status(`CAS import failed: ${error.message} Session and previous tape unchanged.`, 'error', 'tape');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('rewind-tape').addEventListener('click', () => {
@@ -482,8 +486,8 @@ function updateMusic() {
 }
 $('open-music-rom').addEventListener('click', () => $('music-rom').click());
 $('music-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
   const profile = Number($('music-profile').value);
   const generation = beginSettingsImport('music-rom');
   status(`Loading MSX-MUSIC firmware ${file.name}…`);
@@ -504,7 +508,6 @@ $('music-rom').addEventListener('change', async event => {
     status(`MSX-MUSIC import failed: ${error.message} Session and installation unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-music-rom').addEventListener('click', () => {
@@ -523,8 +526,8 @@ function updatePac() {
 }
 $('open-pac-rom').addEventListener('click', () => $('pac-rom').click());
 $('pac-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
   const generation = beginSettingsImport('pac-rom');
   status(`Loading FM-PAC firmware ${file.name}…`);
   try {
@@ -546,7 +549,6 @@ $('pac-rom').addEventListener('change', async event => {
     status(`FM-PAC import failed: ${error.message} Session and installation unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-pac-rom').addEventListener('click', () => {
@@ -579,8 +581,8 @@ function updateDisk() {
 }
 $('open-disk-rom').addEventListener('click', () => $('disk-rom').click());
 $('disk-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
   const generation = beginSettingsImport('disk-rom');
   status(`Loading Philips disk ROM ${file.name}…`);
   try {
@@ -600,7 +602,6 @@ $('disk-rom').addEventListener('change', async event => {
     status(`Disk ROM import failed: ${error.message} Session, interface and media unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-disk-rom').addEventListener('click', () => {
@@ -609,13 +610,12 @@ $('remove-disk-rom').addEventListener('click', () => {
   restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; }, 'open-disk-rom');
 });
 $('open-dsk').addEventListener('click', () => $('disk').click());
-$('disk').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (file) await mountDisk(file.name, async () => {
+$('disk').addEventListener('change', event => {
+  const file = takeFile(event.target);
+  if (file) mountDisk(file.name, async () => {
     if (!/\.dsk$/i.test(file.name) || ![368640, 737280].includes(file.size)) throw new Error('Use a raw .dsk of exactly 360 or 720 KiB (80 tracks, 1/2 sides, 9 sectors of 512 bytes). DMK/FDI and truncated images are unsupported.');
     return file.arrayBuffer();
   });
-  event.target.value = '';
 });
 $('mount-disk-demo').addEventListener('click', () => {
   mountDisk('weave-disk-demo.dsk', async () => (await staticAsset('weave-disk-demo.dsk')).arrayBuffer());
@@ -977,8 +977,7 @@ $('model').addEventListener('change', () => {
   restart(() => wasm.msx_model(model));
 });
 $('cartridge').addEventListener('change', event => {
-  if (loading) { event.target.value = ''; return; }
-  load(event.target.files[0], false);
+  load(takeFile(event.target), false);
 });
 $('bios').addEventListener('change', event => {
   if (!model) {

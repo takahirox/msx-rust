@@ -122,6 +122,55 @@ test('keyboard dismissal, demo and local ROM share the Pages cartridge picker', 
   await expect(page.locator('#transcript')).toContainText('1\n2\n3\n4\n5\nREADY');
 });
 
+test('a canceled import can retry the same file while its original read is pending', async ({ page }) => {
+  await page.addInitScript(() => {
+    const read = File.prototype.arrayBuffer;
+    window.pendingFileReads = [];
+    File.prototype.arrayBuffer = async function () {
+      const bytes = await read.call(this);
+      return new Promise(resolve => window.pendingFileReads.push(() => resolve(bytes)));
+    };
+  });
+  await boot(page);
+  const cases = [
+    ['insert-cartridge', 'open-rom', 'cartridge', 'cartridge-status', 'cbios-test-cartridge.rom'],
+    ['insert-disk', 'open-dsk', 'disk', 'disk-status', 'weave-disk-demo.dsk'],
+    ['insert-cassette', 'open-cas', 'cassette', 'tape-status', 'cassette-test.cas'],
+    ['settings', 'open-disk-rom', 'disk-rom', 'disk-profile-status', 'weave-disk.rom'],
+    ['settings', 'open-music-rom', 'music-rom', 'music-status', 'music-diagnostic-firmware.rom'],
+    ['settings', 'open-pac-rom', 'pac-rom', 'pac-status', 'fm-pac-diagnostic-firmware.rom'],
+  ];
+  for (const [trigger, open, target, slot, filename] of cases) {
+    await test.step(target, async () => {
+      const slotStatus = page.locator(`#${slot}`);
+      const initial = await slotStatus.textContent();
+      const cancel = page.locator(`#cancel-${target}-import`);
+      const selectFile = async () => {
+        const openFile = page.locator(`#${open}`);
+        if (!await openFile.isVisible()) await page.locator(`#${trigger}`).click();
+        // A repeated filesystem path exercises Chromium's native same-file behavior.
+        await chooseFile(page, openFile, `dist/${filename}`);
+      };
+      await selectFile();
+      const pendingReads = () => page.evaluate(() => window.pendingFileReads.length);
+      await expect.poll(pendingReads).toBe(1);
+      await cancel.click();
+      await expect(status(page)).toContainText('Import canceled');
+      await expect(slotStatus).toHaveText(initial);
+
+      await selectFile();
+      await expect.poll(pendingReads).toBe(2);
+      await page.evaluate(() => window.pendingFileReads.shift()());
+      await expect(cancel).toBeVisible();
+      await expect(slotStatus).toHaveText(initial);
+
+      await page.evaluate(() => window.pendingFileReads.shift()());
+      await expect(slotStatus).toContainText(filename);
+      await expect(cancel).toBeHidden();
+    });
+  }
+});
+
 test('mobile media, scale and browser output gain preserve the paused machine', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.addInitScript(() => {
