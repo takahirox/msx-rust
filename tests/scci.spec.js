@@ -135,8 +135,9 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     expect(await state(page)).toEqual(before);
     await page.evaluate(()=>{window.failScci=false;});
     await page.locator('#cartridge').setInputFiles(file('deferred.rom',await readFile('dist/test-cartridge.rom')));
-    await expect(page.locator('#remove-sound-cartridge')).toHaveText('Cancel import');
-    await (await settingsControl(page, 'remove-sound-cartridge')).click();
+    await expect(page.locator('#remove-sound-cartridge')).toHaveText('Remove sound cartridge');
+    await expect(page.locator('#remove-sound-cartridge')).toBeDisabled();
+    await (await mediaControl(page, 'cancel-cartridge-import')).click();
     await page.evaluate(()=>window.finishScciImport());
     await page.waitForTimeout(100); expect(await state(page)).toEqual(before);
     await green(page,model);

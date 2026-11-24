@@ -67,6 +67,24 @@ test('only Drive A can cancel a pending disk import with a cassette mounted', as
     await expect(cancel).toHaveCount(1);
     await expect(ejectTape).toBeDisabled();
     await expect(cancel).toBeFocused();
+    if (mounted) {
+      const pacRemove = await settingsControl(page, 'remove-pac-rom');
+      await pacRemove.evaluate(button => button.click());
+      await expect(page.locator('#status')).toContainText('Loading DSK');
+      for (const [id, label] of [
+        ['remove-sound-cartridge', 'Remove sound cartridge'],
+        ['remove-disk-rom', 'Remove disk interface'],
+        ['remove-music-rom', 'Remove MSX-MUSIC'],
+        ['remove-pac-rom', 'Remove FM-PAC'],
+      ]) {
+        const remove = page.locator(`#${id}`);
+        await expect(remove).toHaveText(label);
+        await expect(remove).toBeDisabled();
+      }
+      await expect(cancel).toHaveCount(1);
+      await page.getByRole('button', { name: 'Close Settings' }).click();
+      await cancel.focus();
+    }
     await page.keyboard.press('Space');
     await expect(insert).toBeFocused();
     await expect(cancel).toBeHidden();

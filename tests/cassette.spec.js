@@ -21,8 +21,15 @@ test.beforeEach(async ({page}) => {
     const read = File.prototype.arrayBuffer;
     File.prototype.arrayBuffer = async function(){
       if(this.name === 'read-error.cas') throw new RangeError('Synthetic file allocation failure');
-      if(this.name === 'deferred.cas') await new Promise(resolve => window.finishTape = resolve);
-      return read.call(this);
+      const bytes = await read.call(this);
+      if (this.name !== 'deferred.cas') return bytes;
+      return new Promise(resolve => {
+        window.finishTape = async () => {
+          resolve(bytes);
+          // Let the import handler process the delivered bytes before checking state.
+          await new Promise(nextTask => setTimeout(nextTask, 0));
+        };
+      });
     };
   });
 });
@@ -146,20 +153,35 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
   });
   test(`stale CAS completion cannot replace tape or a newer session at ${site}`,async({page}) => {
     await boot(page,site);
+    const deferredTape = {name:'deferred.cas',mimeType:'application/octet-stream',buffer:cas};
     const defer = async () => {
       await page.evaluate(()=>delete window.finishTape);
-      await page.locator('#tape').setInputFiles({name:'deferred.cas',mimeType:'application/octet-stream',buffer:cas});
+      await page.locator('#tape').setInputFiles(deferredTape);
       await expect.poll(()=>page.evaluate(()=>typeof window.finishTape)).toBe('function');
     };
     const finish = async () => {await page.evaluate(()=>window.finishTape());await expect(page.locator('#open-cas')).toBeEnabled();};
+    const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
     await defer();
-    await page.getByRole('button', { name: 'Cancel import', exact: true }).click();
+    await cancel.click();
     await finish();
     await expect(page.locator('#tape-status')).toHaveText('Empty');
     await openTape(page);
-    await defer();await page.locator('#eject-tape').click();await finish();
+    await page.evaluate(() => delete window.finishTape);
+    const insert = page.getByRole('button', { name: 'Insert cassette', exact: true });
+    await insert.press('Enter');
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Open local CAS…', exact: true }).press('Enter');
+    await (await chooser).setFiles(deferredTape);
+    await expect.poll(() => page.evaluate(() => typeof window.finishTape)).toBe('function');
+    await cancel.focus();
+    await page.keyboard.down('Enter');
+    const focusAfterCancel = await page.evaluate(() => document.activeElement.id);
+    await page.keyboard.down('Enter');
+    await page.keyboard.up('Enter');
+    await finish();
     await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
     await expect(page.locator('#status')).toContainText('Import canceled');
+    expect(focusAfterCancel).toBe('insert-cassette');
     await defer();
     // A programmatic second file-input event exercises stale completion even
     // though ordinary concurrent user selection is disabled during imports.
