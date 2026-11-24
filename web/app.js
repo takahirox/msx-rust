@@ -42,8 +42,15 @@ const activeSources = new Set();
 function status(message, kind = 'info', media) {
   $('status').textContent = message;
   $('status').dataset.kind = kind;
-  $('settings-message').hidden = kind !== 'error';
-  $('settings-message').textContent = kind === 'error' ? message : '';
+  const settingsMessage = $('settings-message');
+  settingsMessage.hidden = kind !== 'error';
+  settingsMessage.textContent = settingsMessage.hidden ? '' : message;
+  const settings = $('advanced-panel');
+  if (!settingsMessage.hidden && settings.matches(':popover-open') &&
+      (settings.contains(document.activeElement) || document.activeElement === document.body)) {
+    settingsMessage.focus({ preventScroll: true });
+    settingsMessage.scrollIntoView({ block: 'start' });
+  }
   for (const slot of ['cartridge', 'disk', 'tape']) {
     const notice = $(`${slot}-message`);
     notice.hidden = kind !== 'error' || media !== slot;
@@ -173,6 +180,11 @@ document.addEventListener('keydown', event => {
   else fallbackView(false);
   $('fullscreen').focus();
 }, true);
+const toolbar = document.querySelector('.toolbar');
+const toolbarResize = new ResizeObserver(([entry]) => {
+  $('emulator').style.setProperty('--toolbar-height', `${entry.borderBoxSize[0].blockSize}px`);
+});
+toolbarResize.observe(toolbar, { box: 'border-box' });
 $('scale').value = '3';
 $('scale').addEventListener('change', () => {
   $('emulator').style.setProperty('--display-width', `${256 * Number($('scale').value)}px`);
@@ -298,8 +310,10 @@ async function load(file, isSystem) {
     if (generation !== importGeneration) return;
     uploadRom(bytes, isSystem ? 1 : 0, mapper);
     if (!isSystem) attachSave(identity, wasm.msx_detected_mapper());
-    if (isSystem) localName = file.name;
-    else {
+    if (isSystem) {
+      localName = file.name;
+      closePanel('advanced-panel');
+    } else {
       const selected = wasm.msx_detected_mapper();
       const name = mapperNames[selected];
       cartridge = `${file.name} (${mapper === 0 ? `Auto: ${name}${wasm.msx_detection_confidence() === 4 ? ', estimate' : ', recognized format'}` : name})`;
@@ -879,13 +893,10 @@ function restoreFirmware(selected = 'auto') {
   detachSave();
   localName = '';
   clearRomSelections();
+  closePanel('advanced-panel');
   restart(() => {});
 }
-$('builtin').addEventListener('click', () => {
-  if (!ready || loading) return;
-  closePanel('advanced-panel');
-  restoreFirmware();
-});
+$('builtin').addEventListener('click', () => restoreFirmware());
 $('firmware').addEventListener('change', () => restoreFirmware($('firmware').value));
 $('eject').addEventListener('click', () => { persistSave(); detachSave(); cartridge = ''; $('cartridge').value = ''; restart(() => wasm.msx_eject()); });
 $('open-rom').addEventListener('click', () => $('cartridge').click());
@@ -948,6 +959,7 @@ $('apply-firmware').addEventListener('click', async () => {
     if (!wasm.msx_load(49152, 2, 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     localName = `${mainFile.name} + ${subFile.name}`;
     firmware = 'local'; $('firmware').value = firmware;
+    closePanel('advanced-panel');
     restart(() => {});
   } catch (error) {
     if (generation === importGeneration) { wasm.msx_cancel_upload(); status(`ROM import failed: ${error.message} Active firmware is unchanged: ${system}.`, 'error'); }

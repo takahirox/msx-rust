@@ -211,6 +211,7 @@ for (const site of sites) {
     await page.locator('#model').selectOption('0');
     await page.locator('#settings').click();
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx1.rom');
+    await expect(page.locator('#firmware')).toHaveValue('local');
     await choose(page,'plustaker');
     await expect(page.locator('#firmware')).toHaveValue('local');
     await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-msx2-diagnostic').click();

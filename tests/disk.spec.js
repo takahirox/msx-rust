@@ -99,6 +99,7 @@ for (const site of sites) {
     await expect(page.locator('#firmware')).toHaveValue('cbios');
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx2.rom');
     await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom'); await (await settingsControl(page, 'apply-firmware')).click();
+    await expect(page.locator('#firmware')).toHaveValue('local');
     await (await mediaControl(page, 'boot-disk')).click(); await expect(page.locator('#status')).toContainText('explicit firmware override');
     await expect(page.locator('#firmware')).toHaveValue('local');
     await (await settingsControl(page, 'builtin')).click(); await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);

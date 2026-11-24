@@ -686,7 +686,7 @@ async function expectPanelFits(page, id) {
   expect(y + height).toBeLessThanOrEqual(viewport.height);
 }
 
-for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [812, 375], [320, 640]]) {
+for (const [width, height] of [[1280, 800], [1024, 600], [768, 1024], [375, 812], [812, 375], [320, 640]]) {
   test(`screen, playback and media fit at ${width}×${height}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height });
     await boot(page);
@@ -736,6 +736,59 @@ for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [812, 375],
     await page.screenshot({ path: `test-results/details-${width}.png`, fullPage: true });
   });
 }
+
+test('a long firmware error leaves keyboard recovery controls visible', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 480 });
+  await boot(page);
+  const settings = page.getByRole('button', { name: 'Settings', exact: true });
+  const panel = page.getByRole('region', { name: 'Settings' });
+  const upload = (name, buffer) => ({ name, mimeType: 'application/octet-stream', buffer });
+  const main = `main-${'long-name-'.repeat(18)}.rom`;
+  const sub = `sub-${'long-name-'.repeat(18)}.rom`;
+  await settings.click();
+  await page.locator('#bios').setInputFiles(upload(main, await readFile('dist/cbios_main_msx2.rom')));
+  await page.locator('#subrom').setInputFiles(upload(sub, await readFile('dist/cbios_sub.rom')));
+  const apply = page.getByRole('button', { name: 'Apply MSX2 firmware' });
+  await apply.click();
+  await expect(page.locator('#status')).toContainText(`user BIOS · ${main} + ${sub}`);
+
+  await expect(panel).toBeHidden();
+  await settings.click();
+  await page.locator('#subrom').setInputFiles(upload('short.rom', Buffer.alloc(17)));
+  await apply.focus();
+  await page.keyboard.press('Enter');
+  const error = panel.locator('#settings-message');
+  await expect(error).toHaveText(`ROM import failed: MSX2 requires a 32 KiB main BIOS/BASIC and a separate 16 KiB sub-ROM. Active firmware is unchanged: user BIOS · ${main} + ${sub}.`);
+  await expect(error).toBeInViewport({ ratio: 1 });
+  await expect(error).toBeFocused();
+
+  for (const id of ['builtin', 'firmware', 'bios', 'subrom', 'apply-firmware']) {
+    await page.keyboard.press('Tab');
+    const control = page.locator(`#${id}`);
+    await expect(control).toBeFocused();
+    await expect(control).toBeInViewport({ ratio: 1 });
+    expect(await control.evaluate(el => {
+      const { left, right, top, bottom } = el.getBoundingClientRect();
+      return [top + 1, bottom - 1].every(y => el.contains(document.elementFromPoint((left + right) / 2, y)));
+    })).toBe(true);
+  }
+});
+
+test('switching firmware in phone Settings returns focus to the unobstructed display', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await boot(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Settings' });
+  await expect(panel).toBeVisible();
+  const firmware = panel.getByLabel('Firmware policy');
+  await firmware.focus();
+  await firmware.selectOption('cbios');
+  await expect(page.locator('#status')).toContainText('MSX2 C-BIOS');
+  await expect(panel).toBeHidden();
+  const screen = page.locator('#screen');
+  await expect(screen).toBeFocused();
+  await expect(screen).toBeInViewport({ ratio: 1 });
+});
 
 test('focus is visible, Tab leaves the display, and samples resume paused BASIC', async ({ page }) => {
   await boot(page);

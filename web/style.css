@@ -76,7 +76,7 @@ label { font-size: 13px; }
 }
 .screen-surface {
   position: relative;
-  width: min(100%, var(--display-width, 768px), max(240px, calc((100svh - 176px) * 4 / 3)));
+  width: min(100%, var(--display-width, 768px), max(240px, calc((100svh - var(--playback-reserve, 176px)) * 4 / 3)));
   aspect-ratio: 4 / 3;
 }
 .screen-surface canvas { display: block; width: 100%; height: 100%; }
@@ -165,7 +165,7 @@ label { font-size: 13px; }
 .reference-panel label { display: block; margin: 8px 0 4px; }
 .reference-panel p { color: var(--muted); }
 .reference-panel .error { color: #8e331a; }
-#settings-message { position: sticky; top: 57px; z-index: 1; margin: 0; padding: 8px 0; background: var(--paper); }
+#settings-message { margin: 8px 0; }
 .settings-section button { margin-block: 4px; }
 .sound-option + .sound-option { margin-top: 12px; }
 .notes, .demo-details { margin: 5px 0; }
@@ -211,6 +211,10 @@ body.focus-view-active { overflow: hidden; }
 .computer:is(:fullscreen, .focus-view) .machine-state { display: block; flex: none; height: 24px; overflow: auto; text-align: center; color: #c8dbd2; }
 .computer:is(:fullscreen, .focus-view) #status[data-kind="error"] { color: #ffbfaa; }
 
+@media (width > 900px) {
+  /* Reserve space for the header, frame padding, and the toolbar's actual rows. */
+  .computer { --playback-reserve: calc(118px + var(--toolbar-height, 58px)); }
+}
 @media (max-width: 900px) {
   main { grid-template-columns: minmax(0, 1fr); max-width: 780px; }
   .reference-panel { right: max(var(--gutter), env(safe-area-inset-right), calc((100vw - 720px) / 2)); }
