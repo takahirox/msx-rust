@@ -19,6 +19,53 @@ async function chooseFile(page, button, files) {
   await (await chooser).setFiles(files);
 }
 
+test('tabbing out of Help on a phone reveals the next page controls', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await boot(page);
+  const help = page.getByRole('button', { name: 'Help', exact: true });
+  const panel = page.getByRole('region', { name: 'Help' });
+  await help.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await expect(panel.getByRole('button', { name: 'Close Help' })).toBeFocused();
+
+  const lastLink = panel.getByRole('link', { name: 'Documentation' });
+  await lastLink.focus();
+  await page.keyboard.press('Tab');
+  await expect(panel).toBeHidden();
+  await expect(page.getByRole('link', { name: 'GitHub' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(display(page)).toBeFocused();
+  await expect(display(page)).toBeInViewport({ ratio: 1 });
+});
+
+test('sound cartridge changes keep keyboard focus in phone Settings', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await boot(page);
+  const settings = page.getByRole('button', { name: 'Settings', exact: true });
+  const panel = page.getByRole('region', { name: 'Settings' });
+  await settings.click();
+  const install = panel.getByRole('button', { name: 'Install sound cartridge' });
+  const remove = panel.getByRole('button', { name: 'Remove sound cartridge' });
+  await install.focus();
+  await page.keyboard.press('Enter');
+  await expect(status(page)).toContainText('Snatcher sound cartridge');
+  await expect(panel).toBeVisible();
+  await expect(install).toBeFocused();
+  await expect(install).toBeInViewport({ ratio: 1 });
+
+  await page.keyboard.press('Tab');
+  await expect(remove).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(status(page)).toHaveText('Running · MSX2 · Weave BASIC');
+  await expect(remove).toBeDisabled();
+  await expect(install).toBeFocused();
+  await expect(install).toBeInViewport({ ratio: 1 });
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(settings).toBeFocused();
+});
+
 test('keyboard dismissal, demo and local ROM share the Pages cartridge picker', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await boot(page, 'http://127.0.0.1:41874/msx-rust/');

@@ -421,7 +421,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     const replacementMapper = mapper === '3' ? '2' : '3';
     await (await settingsControl(page, 'mapper')).selectOption(replacementMapper);
     await page.locator('#cartridge').setInputFiles(megaRom(128, replacementMapper));
-    await expect(page.locator('#status')).toContainText(`authored-128-${replacementMapper}.rom`);
+    await expect(page.locator('#cartridge-status')).toContainText(`authored-128-${replacementMapper}.rom`);
     await backdrop(page, '212,193,84');
     await (await settingsControl(page, 'mapper')).selectOption('0');
     await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');

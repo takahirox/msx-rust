@@ -126,6 +126,11 @@ for (const panel of document.querySelectorAll('[popover]')) {
     if (event.newState === 'open') releaseKeys();
   });
 }
+document.addEventListener('focusin', event => {
+  const panel = document.querySelector('[popover]:popover-open');
+  // Let the invoker toggle the popover itself when clicked.
+  if (panel && !panel.contains(event.target) && event.target !== panelTrigger(panel)) panel.hidePopover();
+});
 function closePanel(id) {
   const panel = $(id);
   if (!panel.matches(':popover-open')) return;
@@ -134,6 +139,13 @@ function closePanel(id) {
 }
 function restorePickerFocus(trigger) {
   if (document.activeElement === document.body) trigger?.focus();
+}
+function retainSettingsFocus(fallback) {
+  const panel = $('advanced-panel');
+  if (!panel.matches(':popover-open')) return false;
+  const focused = document.activeElement;
+  if (focused !== $('settings') && (!panel.contains(focused) || focused.matches(':disabled'))) $(fallback).focus();
+  return true;
 }
 
 // Keep the toolbar available in both native fullscreen and the CSS fallback.
@@ -277,7 +289,7 @@ function updateStatus() {
   updateControls();
   status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}${wasm.msx_sound_cartridge_profile() ? ` · ${soundProfileNames[wasm.msx_sound_cartridge_profile()]} sound cartridge` : ''}`);
 }
-function restart(action) {
+function restart(action, settingsFallback) {
   importGeneration++;
   loading = false;
   releaseKeys();
@@ -289,7 +301,7 @@ function restart(action) {
   wasm.msx_frame();
   render();
   updateStatus();
-  screen.focus();
+  if (!settingsFallback || !retainSettingsFocus(settingsFallback)) screen.focus();
 }
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
@@ -345,14 +357,16 @@ $('install-sound-cartridge').addEventListener('click', () => {
     status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return;
   }
   detachSave(); cartridge = ''; $('cartridge').value = '';
-  restart(() => wasm.msx_cancel_upload());
+  restart(() => wasm.msx_cancel_upload(), 'install-sound-cartridge');
 });
 $('remove-sound-cartridge').addEventListener('click', () => {
   if (loading) {
     importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session, sound cartridge and media unchanged.'); return;
+    status('Import canceled. Session, sound cartridge and media unchanged.');
+    retainSettingsFocus('install-sound-cartridge');
+    return;
   }
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); }, 'install-sound-cartridge');
 });
 
 // Tape uses the same generation/staging boundary as other local media imports.
@@ -443,7 +457,7 @@ $('music-rom').addEventListener('change', async event => {
     persistSave();
     if (!wasm.msx_install_music_rom(bytes.length, profile)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     musicRomName = file.name;
-    restart(() => {});
+    restart(() => {}, 'open-music-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
@@ -457,10 +471,11 @@ $('remove-music-rom').addEventListener('click', () => {
   if (loading) {
     importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
     status('Import canceled. Session and installation unchanged.');
+    retainSettingsFocus('open-music-rom');
     return;
   }
   persistSave();
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; }, 'open-music-rom');
 });
 
 // The external accessory has its own firmware identity and shared battery save.
@@ -490,7 +505,7 @@ $('pac-rom').addEventListener('change', async event => {
     if (!wasm.msx_install_fm_pac(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     pacRomName = file.name;
     attachSave(identity, 'original-fm-pac', pacSaves);
-    restart(() => {});
+    restart(() => {}, 'open-pac-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
@@ -503,10 +518,12 @@ $('pac-rom').addEventListener('change', async event => {
 $('remove-pac-rom').addEventListener('click', () => {
   if (loading) {
     importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session and installation unchanged.'); return;
+    status('Import canceled. Session and installation unchanged.');
+    retainSettingsFocus('open-pac-rom');
+    return;
   }
   persistSave(); detachSave(pacSaves);
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; }, 'open-pac-rom');
 });
 
 // Disk media and interface imports share the ROM generation token and staging allocation.
@@ -549,7 +566,7 @@ $('disk-rom').addEventListener('change', async event => {
     persistSave();
     if (!wasm.msx_install_disk_rom(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     diskRomName = file.name;
-    restart(() => {});
+    restart(() => {}, 'open-disk-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
@@ -563,10 +580,11 @@ $('remove-disk-rom').addEventListener('click', () => {
   if (loading) {
     importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
     status('Import canceled. Session, interface and media unchanged.');
+    retainSettingsFocus('open-disk-rom');
     return;
   }
   persistSave();
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; }, 'open-disk-rom');
 });
 $('open-dsk').addEventListener('click', () => $('disk').click());
 $('disk').addEventListener('change', async event => {
