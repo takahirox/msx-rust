@@ -31,6 +31,7 @@ let pacRomName = '';
 const gameSaves = { status: 'save-status', prefix: savePrefix, pointer: () => wasm.msx_sram(), size: () => wasm.msx_sram_len(), sizes: [2048, 8192], encode: encodeSave, decode: decodeSave };
 const pacSaves = { status: 'pac-save-status', prefix: fmPacSavePrefix, pointer: () => wasm.msx_fm_pac_sram(), size: () => wasm.msx_fm_pac_sram_len(), sizes: [8190], encode: encodeFmPacSave, decode: decodeFmPacSave };
 let importGeneration = 0;
+let mediaImport;
 let tapeImportGeneration;
 let catalogLoading = false;
 let previousTime;
@@ -77,6 +78,12 @@ function updateControls() {
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !gameSaves.active;
   updateDisk();
   updateTape();
+  for (const slot of ['cartridge', 'disk']) {
+    const cancel = $(`cancel-${slot}-import`);
+    const focused = document.activeElement === cancel;
+    cancel.hidden = !loading || mediaImport?.generation !== importGeneration || mediaImport.slot !== slot;
+    if (cancel.hidden && focused) $(`insert-${slot}`).focus();
+  }
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
@@ -142,6 +149,16 @@ function closePanel(id) {
 }
 function restorePickerFocus(trigger) {
   if (document.activeElement === document.body) trigger?.focus();
+}
+function beginImport(slot) {
+  const trigger = slot && closePanel(`${slot}-picker`);
+  const focused = document.activeElement;
+  const generation = ++importGeneration;
+  mediaImport = slot ? { slot, generation } : undefined;
+  loading = true;
+  updateControls();
+  if (trigger && (focused === trigger || focused === document.body)) $(`cancel-${slot}-import`).focus();
+  return generation;
 }
 function retainSettingsFocus(fallback) {
   const panel = $('advanced-panel');
@@ -308,11 +325,8 @@ function restart(action, settingsFallback) {
 }
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
-  const trigger = isSystem ? undefined : closePanel('cartridge-picker');
-  const generation = ++importGeneration;
   const mapper = Number($('mapper').value);
-  loading = true;
-  updateControls();
+  const generation = beginImport(isSystem ? undefined : 'cartridge');
   status(`Loading ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name)) throw new Error('Select a .rom or .bin ROM image.');
@@ -341,7 +355,7 @@ async function load(file, isSystem) {
     status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', isSystem ? undefined : 'cartridge');
     $(isSystem ? 'bios' : 'cartridge').value = '';
   } finally {
-    if (generation === importGeneration) { loading = false; updateControls(); restorePickerFocus(trigger); }
+    if (generation === importGeneration) { loading = false; updateControls(); }
     $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
@@ -389,6 +403,15 @@ function cancelMediaImport() {
   importGeneration++;
   loading = false;
   wasm.msx_cancel_upload();
+}
+for (const slot of ['cartridge', 'disk']) {
+  const cancel = $(`cancel-${slot}-import`);
+  cancel.addEventListener('click', () => {
+    if (cancel.hidden) return;
+    cancelMediaImport();
+    updateControls();
+    status('Import canceled. Session and media unchanged.');
+  });
 }
 $('open-cas').addEventListener('click', () => $('tape').click());
 $('tape').addEventListener('cancel', () => {
@@ -603,10 +626,8 @@ $('mount-disk-demo').addEventListener('click', () => {
 });
 async function mountDisk(name, readBytes) {
   if (!ready || loading) return;
-  const trigger = closePanel('disk-picker');
-  const generation = ++importGeneration;
   const protectedDisk = $('disk-protected').checked;
-  loading = true; updateControls();
+  const generation = beginImport('disk');
   status(`Loading DSK ${name}…`);
   try {
     const bytes = new Uint8Array(await readBytes());
@@ -622,7 +643,7 @@ async function mountDisk(name, readBytes) {
     wasm.msx_cancel_upload();
     status(`DSK import failed: ${error.message} Session and previous disk unchanged.`, 'error', 'disk');
   } finally {
-    if (generation === importGeneration) { loading = false; updateControls(); restorePickerFocus(trigger); }
+    if (generation === importGeneration) { loading = false; updateControls(); }
   }
 }
 $('boot-disk').addEventListener('click', () => {
@@ -820,9 +841,7 @@ async function loadCatalog() {
 $('retry-demos').addEventListener('click', loadCatalog);
 async function playDemo(demo) {
   if (!ready || loading || catalogLoading) return;
-  const trigger = closePanel('cartridge-picker');
-  const generation = ++importGeneration;
-  loading = true; updateControls();
+  const generation = beginImport('cartridge');
   status(`Loading ${demo.title}…`);
   try {
     const bytes = new Uint8Array(await (await staticAsset(demo.file)).arrayBuffer());
@@ -849,7 +868,7 @@ async function playDemo(demo) {
     wasm.msx_cancel_upload();
     status(`Demo load failed: ${error.message} Session unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', 'cartridge');
   } finally {
-    if (generation === importGeneration) { loading = false; updateControls(); restorePickerFocus(trigger); }
+    if (generation === importGeneration) { loading = false; updateControls(); }
   }
 }
 // International MSX keyboard matrix (US key placement). Matrix keys continue

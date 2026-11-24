@@ -643,6 +643,31 @@ test('resource failures and canceled asynchronous reads preserve the active cart
     await expect(page.locator('#firmware')).toHaveValue('auto');
     await enter(page, 'RUN'); await expect(page.locator('#transcript')).toContainText('86\nREADY');
   }
+  // A first ROM import can be canceled from the empty cartridge slot.
+  await enter(page, '20 PRINT 64');
+  await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+  const insert = await mediaControl(page, 'insert-cartridge');
+  await insert.press('Enter');
+  await page.evaluate(() => { window.deferFileRead = true; });
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('#open-rom').press('Enter');
+  await (await chooser).setFiles(megaRom(64, '2'));
+  await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
+  const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
+  await expect(page.locator('#cartridge-picker')).toBeHidden();
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(insert).toBeFocused();
+  await expect(cancel).toBeHidden();
+  await page.evaluate(() => window.finishFileRead());
+  // The file input is cleared when the late read has been handled.
+  await expect(page.locator('#cartridge')).toHaveValue('');
+  await expect(page.locator('#status')).toContainText('Import canceled');
+  await expect(page.locator('#cartridge-status')).toHaveText('Empty');
+  await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+  await enter(page, 'RUN');
+  await expect(page.locator('#transcript')).toContainText('86\n64\nREADY');
+
   await page.locator('#cartridge').setInputFiles(megaRom(64, '2'));
   await backdrop(page, '212,193,84');
   for (const flag of ['failReservation', 'failFileRead']) {
@@ -656,7 +681,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
     await backdrop(page, '212,193,84');
   }
   // Eject while File.arrayBuffer is pending: its later completion cannot reload it.
-  await page.evaluate(() => { window.deferFileRead = true; });
+  await page.evaluate(() => { delete window.finishFileRead; window.deferFileRead = true; });
   await page.locator('#cartridge').setInputFiles(megaRom(128, '2'));
   await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
   await (await mediaControl(page, 'eject')).click();
