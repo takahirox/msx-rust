@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -56,8 +57,8 @@ async function playerSprite(page) {
   });
 }
 async function choose(page, id) {
-  await page.locator('#demo').selectOption(id);
-  await page.locator('#play-demo').click();
+  await (await mediaControl(page, 'insert-cartridge')).click();
+  await page.locator(`#demo-${id}`).click();
   const demo = manifest.demos.find(d=>d.id===id);
   await expect(page.locator('#status')).toContainText(`${demo.title} (${demo.mapper})`);
   await expect(page.locator('#model')).toHaveValue(demo.model==='MSX2'?'1':'0');
@@ -133,7 +134,7 @@ for (const site of sites) {
       await expect.poll(async()=>{const after=await playerSprite(page);return after && Math.abs(after.y-before.y)<3;}).toBe(true);
     }
     await page.evaluate(()=>{window.manualFrames=false;});
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
     await choose(page,'plustaker');
     await choose(page,'msx2-diagnostic');
@@ -145,17 +146,17 @@ for (const site of sites) {
     await page.screenshot({path:`test-results/demo-msx2-${prefix}.png`,fullPage:true});
     await page.locator('#reset').click();await expect(page.locator('#screen')).toHaveAttribute('width','512');
     await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
     await basicCommand(page,'PRINT 73');await expect(page.locator('#transcript')).toContainText('73\nREADY');
     await choose(page,'plustaker');
-    await page.locator('#advanced-panel > summary').click();await page.locator('#builtin').click();
+    await page.locator('#settings').click();await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
     // Manual cartridges still use their chosen mapper and ordinary file picker.
-    await page.locator('#mapper').selectOption('1');
+    await (await settingsControl(page, 'mapper')).selectOption('1');
     await page.locator('#cartridge').setInputFiles('dist/cbios-msx1-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('cbios-msx1-test-cartridge.rom (Plain)');
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     for(const demo of manifest.demos) for(const file of [demo.file,...demo.notices]) expect((await page.request.get(new URL(file,site).href)).ok()).toBe(true);
     expect(requests.every(r=>r.method==='GET'&&!r.body&&r.url.startsWith(site))).toBe(true);
     expect(errors).toEqual([]);
@@ -166,10 +167,10 @@ for (const site of sites) {
 
   test(`failed and superseded demo fetches preserve the running session at ${prefix}`,async({page})=>{
     test.setTimeout(60000);
-    await page.goto(site);await expect(page.locator('#demo')).toBeEnabled();
+    await page.goto(site);await expect(page.locator('#demo-plustaker')).toBeEnabled();
     await basicCommand(page,'10 PRINT 91');
     await page.route('**/demos/yokosht.rom',r=>r.fulfill({status:404,body:'Missing'}));
-    await page.locator('#demo').selectOption('yoko');await page.locator('#play-demo').click();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-yoko').click();
     await expect(page.locator('#status')).toContainText('HTTP 404');
     await expect(page.locator('#model')).toHaveValue('1');await expect(page.locator('#firmware')).toHaveValue('auto');
     await basicCommand(page,'LIST');await expect(page.locator('#transcript')).toContainText('10 PRINT 91');
@@ -179,12 +180,12 @@ for (const site of sites) {
     // Same-size corruption must fail SHA-256 validation before changing MSX2.
     const corrupt=Buffer.from(await readFile('demos/plustakermsx.rom'));corrupt[32]^=1;
     await page.route('**/demos/plustakermsx.rom',r=>r.fulfill({body:corrupt,contentType:'application/octet-stream'}));
-    await page.locator('#demo').selectOption('plustaker');await page.locator('#play-demo').click();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-plustaker').click();
     await expect(page.locator('#status')).toContainText('integrity check failed');
     await expect(page.locator('#model')).toHaveValue('1');await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
     await page.unroute('**/demos/plustakermsx.rom');
     await page.route('**/demos/plustakermsx.rom',r=>r.abort('failed'));
-    await page.locator('#play-demo').click();await expect(page.locator('#status')).toContainText('Demo load failed');
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-plustaker').click();await expect(page.locator('#status')).toContainText('Demo load failed');
     await expect(page.locator('#model')).toHaveValue('1');await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
     await page.unroute('**/demos/plustakermsx.rom');
     let finish;
@@ -192,12 +193,12 @@ for (const site of sites) {
     let requested=false, resolveHandled;
     const handled=new Promise(resolve=>{resolveHandled=resolve;});
     await page.route('**/demos/plustakermsx.rom',async r=>{requested=true;await pending;await r.fulfill({body:await readFile('demos/plustakermsx.rom')});resolveHandled();});
-    await page.locator('#play-demo').click();await expect.poll(()=>requested).toBe(true);
-    await expect(page.locator('#play-demo')).toBeDisabled();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-plustaker').click();await expect.poll(()=>requested).toBe(true);
+    await expect(page.locator('#demo-plustaker')).toBeDisabled();
     // Synthetic repeated clicks and local imports cannot race the active upload.
-    await page.locator('#play-demo').dispatchEvent('click');
+    await page.locator('#demo-plustaker').dispatchEvent('click');
     await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     await choose(page,'yoko');
     finish();await handled;await page.unroute('**/demos/plustakermsx.rom');
     await gameReady(page,'yoko');
@@ -206,24 +207,27 @@ for (const site of sites) {
   });
 
   test(`explicit firmware remains authoritative for demos at ${prefix}`,async({page})=>{
-    await page.goto(site);await expect(page.locator('#demo')).toBeEnabled();
+    await page.goto(site);await expect(page.locator('#demo-plustaker')).toBeEnabled();
     await page.locator('#model').selectOption('0');
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx1.rom');
     await choose(page,'plustaker');
     await expect(page.locator('#firmware')).toHaveValue('local');
-    await page.locator('#demo').selectOption('msx2-diagnostic');await page.locator('#play-demo').click();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-msx2-diagnostic').click();
     await expect(page.locator('#status')).toContainText('override');
     await expect(page.locator('#model')).toHaveValue('0');await expect(page.locator('#firmware')).toHaveValue('local');
-    await page.locator('#builtin').click();await page.locator('#firmware').selectOption('cbios');
+    await page.locator('#settings').click();
+    await (await settingsControl(page, 'builtin')).click();await (await settingsControl(page, 'firmware')).selectOption('cbios');
     await choose(page,'msx2-diagnostic');await expect(page.locator('#firmware')).toHaveValue('cbios');
-    await page.locator('#eject').click();await expect(page.locator('#firmware')).toHaveValue('cbios');
-    await page.locator('#firmware').selectOption('diagnostic');
+    await (await mediaControl(page, 'eject')).click();await expect(page.locator('#firmware')).toHaveValue('cbios');
+    await page.locator('#settings').click();
+    await (await settingsControl(page, 'firmware')).selectOption('diagnostic');
     await choose(page,'msx2-diagnostic');await expect(page.locator('#firmware')).toHaveValue('diagnostic');
-    await page.locator('#demo').selectOption('yoko');await page.locator('#play-demo').click();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-yoko').click();
     await expect(page.locator('#status')).toContainText('override');
     await expect(page.locator('#model')).toHaveValue('1');await expect(page.locator('#firmware')).toHaveValue('diagnostic');
-    await page.locator('#builtin').click();await choose(page,'yoko');
+    await page.locator('#settings').click();
+    await (await settingsControl(page, 'builtin')).click();await choose(page,'yoko');
   });
 }
 
@@ -234,15 +238,16 @@ test('missing/invalid catalogs can be retried, and core validation failures do n
   await page.unroute('**/demos/manifest.json');
   const unsupported=structuredClone(manifest);unsupported.demos[0].mapper='Unsupported';
   await page.route('**/demos/manifest.json',r=>r.fulfill({json:unsupported}));
-  await page.locator('#play-demo').click();await expect(page.locator('#demo-message')).toContainText('Invalid demo metadata');
+  await (await mediaControl(page, 'insert-cartridge')).click();
+  await page.locator('#retry-demos').click();await expect(page.locator('#demo-message')).toContainText('Invalid demo metadata');
   await page.unroute('**/demos/manifest.json');
   // A hash-valid but malformed MSX1 cartridge must leave the default MSX2 unchanged.
   const invalid=Buffer.alloc(16384), changed=structuredClone(manifest);
   changed.demos[0].sha256=createHash('sha256').update(invalid).digest('hex');
   await page.route('**/demos/manifest.json',r=>r.fulfill({json:changed}));
   await page.route('**/demos/plustakermsx.rom',r=>r.fulfill({body:invalid}));
-  await page.locator('#play-demo').click();await expect(page.locator('#demo')).toBeEnabled();
-  await page.locator('#play-demo').click();await expect(page.locator('#status')).toContainText('Demo load failed');
+  await page.locator('#retry-demos').click();await expect(page.locator('#demo-plustaker')).toBeEnabled();
+  await page.locator('#demo-plustaker').click();await expect(page.locator('#status')).toContainText('Demo load failed');
   await expect(page.locator('#model')).toHaveValue('1');
   await basicCommand(page,'LIST');await expect(page.locator('#transcript')).toContainText('10 PRINT 84');
 });

@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const demo = await readFile('dist/weave-disk-demo.dsk');
@@ -16,7 +17,7 @@ async function textOnScreen(page, text, row) {
 }
 async function exportDisk(page) {
   const download = page.waitForEvent('download');
-  await page.locator('#export-disk').click();
+  await (await mediaControl(page, 'export-disk')).click();
   return readFile(await (await download).path());
 }
 async function space(page) {
@@ -31,31 +32,32 @@ for (const site of sites) {
       await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
       await expect(page.locator('#model')).toHaveValue('1');
       if (model==='0') await page.locator('#model').selectOption('0');
+      await (await mediaControl(page, 'insert-disk')).click();
       const picker=page.waitForEvent('filechooser'); await page.locator('#open-dsk').click();
       await (await picker).setFiles('dist/weave-disk-demo.dsk');
       await expect(page.locator('#disk-status')).toContainText('720 KiB · read-only');
       await expect(page.locator('#transcript')).toContainText('READY');
-      await page.locator('#boot-disk').click();
+      await (await mediaControl(page, 'boot-disk')).click();
       await expect(page.locator('#status')).toContainText('Weave disk firmware');
       await textOnScreen(page,'WEAVE DISK BOOT',4);
       await textOnScreen(page,'Z80 LOADED FROM DRIVE A',7);
       await expect(page.locator('#transcript')).toHaveText('');
       await space(page); await textOnScreen(page,'WRITE PROTECTED',16);
       expect(await exportDisk(page)).toEqual(demo);
-      await page.locator('#disk-protected').uncheck();
+      await (await mediaControl(page, 'disk-protected')).uncheck();
       await space(page); await textOnScreen(page,'SAVED',16);
       await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
       await page.screenshot({path:`test-results/disk-msx${Number(model)+1}-${site.includes('41874')?'pages':'root'}.png`});
       // Modified media cannot be discarded by Eject or a replacement upload.
-      await page.locator('#eject-disk').click(); await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
+      await (await mediaControl(page, 'eject-disk')).click(); await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
       await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
       await expect(page.locator('#status')).toContainText('before replacing');
       await page.locator('#reset').click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
       await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
       const expected=Buffer.from(demo); expected[9216]=1;
       expect(await exportDisk(page)).toEqual(expected);
-      await page.locator('#eject-disk').click(); await expect(page.locator('#transcript')).toContainText('READY');
-      await expect(page.locator('#disk-status')).toHaveText('Drive A: empty');
+      await (await mediaControl(page, 'eject-disk')).click(); await expect(page.locator('#transcript')).toContainText('READY');
+      await expect(page.locator('#disk-status')).toHaveText('Empty');
       await expect(page.locator('#model')).toHaveValue(model);
       expect(requests.every(r=>r.method==='GET' && r.url.startsWith(site))).toBe(true);
       expect(errors).toEqual([]);
@@ -92,27 +94,27 @@ for (const site of sites) {
     expect(raw).toEqual([0,0,737280,3]);
     await page.locator('#screen').focus(); await page.keyboard.type('RUN'); await page.keyboard.press('Enter');
     await expect(page.locator('#transcript')).toContainText('73\nREADY');
-    await page.locator('#advanced-panel > summary').click(); await page.locator('#firmware').selectOption('cbios');
-    await page.locator('#boot-disk').click(); await expect(page.locator('#status')).toContainText('explicit firmware override');
+    await page.locator('#settings').click(); await (await settingsControl(page, 'firmware')).selectOption('cbios');
+    await (await mediaControl(page, 'boot-disk')).click(); await expect(page.locator('#status')).toContainText('explicit firmware override');
     await expect(page.locator('#firmware')).toHaveValue('cbios');
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx2.rom');
-    await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom'); await page.locator('#apply-firmware').click();
-    await page.locator('#boot-disk').click(); await expect(page.locator('#status')).toContainText('explicit firmware override');
+    await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom'); await (await settingsControl(page, 'apply-firmware')).click();
+    await (await mediaControl(page, 'boot-disk')).click(); await expect(page.locator('#status')).toContainText('explicit firmware override');
     await expect(page.locator('#firmware')).toHaveValue('local');
-    await page.locator('#builtin').click(); await page.locator('#boot-disk').click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
+    await (await settingsControl(page, 'builtin')).click(); await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
     // A cartridge deliberately takes priority, retaining mounted media and normal C-BIOS policy.
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('MSX2 C-BIOS'); await expect(page.locator('#disk-status')).toContainText('720 KiB');
-    await page.locator('#boot-disk').click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
-    await page.locator('#builtin').click(); await expect(page.locator('#transcript')).toContainText('READY');
+    await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
+    await (await settingsControl(page, 'builtin')).click(); await expect(page.locator('#transcript')).toContainText('READY');
     await expect(page.locator('#disk-status')).toContainText('720 KiB');
     await page.locator('#model').selectOption('0'); await expect(page.locator('#disk-status')).toContainText('720 KiB');
     await expect(page.locator('#transcript')).toContainText('READY');
     // A standard 360 KiB raw image can be mounted and exported without reinterpretation.
     await page.locator('#disk').setInputFiles({name:'single-sided.dsk',mimeType:'application/octet-stream',buffer:Buffer.alloc(368640,0x5a)});
     await expect(page.locator('#disk-status')).toContainText('360 KiB'); expect(await exportDisk(page)).toEqual(Buffer.alloc(368640,0x5a));
-    await page.locator('#boot-disk').click(); await expect(page.locator('#disk-status')).toContainText('requires a WV boot sector');
-    await page.locator('#eject-disk').click(); await expect(page.locator('#transcript')).toContainText('READY');
+    await (await mediaControl(page, 'boot-disk')).click(); await expect(page.locator('#disk-status')).toContainText('requires a WV boot sector');
+    await (await mediaControl(page, 'eject-disk')).click(); await expect(page.locator('#transcript')).toContainText('READY');
   });
   test(`stale and concurrent disk imports cannot replace the session ${site}`,async({page})=>{
     await page.addInitScript(()=>{
@@ -129,11 +131,11 @@ for (const site of sites) {
     await expect.poll(()=>page.evaluate(()=>typeof window.finishDisk)).toBe('function');
     await expect(page.locator('#open-rom')).toBeDisabled();
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
-    await page.locator('#eject-disk').click(); await page.evaluate(()=>window.finishDisk());
-    await expect(page.locator('#disk-status')).toHaveText('Drive A: empty');
+    await (await mediaControl(page, 'eject-disk')).click(); await page.evaluate(()=>window.finishDisk());
+    await expect(page.locator('#disk-status')).toHaveText('Empty');
     await expect(page.locator('#transcript')).toContainText('READY');
     await expect(page.locator('#firmware')).toHaveValue('auto');
     await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
-    await page.locator('#boot-disk').click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
+    await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
   });
 }

@@ -6,7 +6,7 @@ const code = (await readFile(new URL('interlace-probe.hex', import.meta.url), 'u
   .map(byte => parseInt(byte, 16));
 
 export async function installInterlaceProbe(page) {
-  await page.locator('#advanced-panel').evaluate(el => { el.open = true; });
+  await page.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
   const main = Buffer.alloc(32768);
   main.set([0xc3, 0, 1]); main[0x2d] = 1; main.set(code, 0x100);
   const sub = Buffer.alloc(16384); sub.set([0x43, 0x44]);

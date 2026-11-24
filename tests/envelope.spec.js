@@ -1,3 +1,4 @@
+import { settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -45,7 +46,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await page.goto(site);
       await expect(page.locator('#transcript')).toContainText('READY');
       await page.locator('#model').selectOption(model);
-      await page.locator('#advanced-panel').evaluate(el => { el.open = true; });
+      await page.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
       const main = Buffer.alloc(32768);
       main.set([0xc3, 0, 1]); // JP 0100h; generation byte remains outside code.
       main.set(code, 0x100);
@@ -55,7 +56,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         const sub = Buffer.alloc(16384);
         sub.set([0x43, 0x44]);
         await page.locator('#subrom').setInputFiles({ name: 'original-empty-sub.rom', mimeType: 'application/octet-stream', buffer: sub });
-        await page.locator('#apply-firmware').click();
+        await (await settingsControl(page, 'apply-firmware')).click();
       }
       await expect(page.locator('#status')).toContainText('user BIOS');
       const result = await page.evaluate(() => {

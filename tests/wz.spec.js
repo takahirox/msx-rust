@@ -1,3 +1,4 @@
+import { settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -28,7 +29,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await page.goto(site);
       await expect(page.locator('#transcript')).toContainText('READY');
       await page.locator('#model').selectOption(model);
-      await page.locator('#advanced-panel').evaluate(el => { el.open = true; });
+      await page.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
       const main = Buffer.alloc(32768);
       main.set([0xc3, 0, 1]);
       main[0x2d] = Number(model);
@@ -38,7 +39,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         const sub = Buffer.alloc(16384);
         sub.set([0x43, 0x44]);
         await page.locator('#subrom').setInputFiles({ name: 'original-wz-sub.rom', mimeType: 'application/octet-stream', buffer: sub });
-        await page.locator('#apply-firmware').click();
+        await (await settingsControl(page, 'apply-firmware')).click();
       }
       await expect(page.locator('#status')).toContainText('user BIOS');
       const expected = [0x7d, 0x91, 0x39, 0x7d, 0x75, 0x7d, 0x75, 0x7d];

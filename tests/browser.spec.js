@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -87,7 +88,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       expect(first).toMatchObject({ model: 1, selected: '1', firmware: 0, policy: 0 });
       expect(first.text).toContain('WEAVE BASIC');
       expect(first.text).toContain('READY');
-      await target.locator('#advanced-panel').evaluate(el => { el.open = true; });
+      await target.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
       await expect(target.locator('#msx2-firmware')).toBeVisible();
       await expect(target.locator('#firmware option[value=diagnostic]')).toBeEnabled();
     };
@@ -109,7 +110,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#model')).toHaveValue('0');
     await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
     await expect(page.locator('#transcript')).not.toContainText('PRINT 42');
-    await page.locator('#builtin').click();
+    await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#model')).toHaveValue('0');
     await page.locator('#model').selectOption('1');
     await startup(page);
@@ -247,18 +248,19 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   const requests = [];
   page.on('request', request => requests.push({ method: request.method(), url: request.url() }));
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Open ROM', exact: true }).click();
+  await (await mediaControl(page, 'insert-cartridge')).click();
+  await page.locator('#open-rom').click();
   await (await chooser).setFiles('dist/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('test-cartridge.rom');
   await expect(page.locator('#example')).toBeDisabled();
-  await expect(page.locator('#starter-help')).toContainText('Use Weave BASIC');
+  await expect(page.locator('#starters')).toBeHidden();
   await expect(page.locator('#eject')).toBeEnabled();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(20);
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
   // Select an invalid ROM and ensure the running cartridge survives.
   await page.locator('#cartridge').setInputFiles({ name: 'invalid.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(17) });
   await expect(page.locator('#status')).toContainText('Select its documented mapper');
-  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await (await mediaControl(page, 'eject')).click();
   await expect(page.locator('#transcript')).toContainText('READY');
   await expect(page.locator('#example')).toBeEnabled();
   await expect(page.locator('#screen')).toBeFocused();
@@ -266,13 +268,13 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   // Its OUT F1 is deliberately ignored: native services must be disabled.
   const bios = Buffer.alloc(32768);
   bios.set([0x3e,0x0a,0xd3,0x99,0x3e,0x87,0xd3,0x99,0xaf,0xd3,0xf1,0x76]);
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
   await page.locator('#bios').setInputFiles({ name: 'authored-system.rom', mimeType: 'application/octet-stream', buffer: bios });
   await expect(page.locator('#status')).toContainText('authored-system.rom');
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBe(256*192);
   expect(requests.filter(r => r.method !== 'GET')).toEqual([]);
   expect(requests.filter(r => !r.url.startsWith('http://127.0.0.1:41873/'))).toEqual([]);
-  await page.getByRole('button', { name: 'Use Weave BASIC', exact: true }).click();
+  await (await settingsControl(page, 'builtin')).click();
   await enter(page, 'PRINT "BACK"');
   await expect(page.locator('#transcript')).toContainText('BACK\nREADY');
   expect(errors).toEqual([]);
@@ -332,8 +334,8 @@ test('boots with all assets beneath a GitHub Pages project prefix', async ({ pag
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect((await colors(page))['255,255,255']).toBeGreaterThan(300);
   for (const file of ['app.js', 'style.css', 'msx_wasm.wasm']) expect(requests).toContain(`/msx-rust/${file}`);
-  await page.locator('#advanced-panel > summary').click();
-  await page.locator('#mapper').selectOption('3');
+  await page.locator('#settings').click();
+  await (await settingsControl(page, 'mapper')).selectOption('3');
   await page.locator('#cartridge').setInputFiles(megaRom(128, '3'));
   await backdrop(page, '212,193,84');
   expect(requests.every(path => path.startsWith('/msx-rust/'))).toBe(true);
@@ -375,7 +377,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     const requests = [];
     page.on('request', r => requests.push({ method: r.method(), url: r.url() }));
     const fixture = megaRom(size, mapper);
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     // The default Auto path reaches and executes code in the last mapper bank.
     await expect(page.locator('#mapper')).toHaveValue('0');
     await page.locator('#cartridge').setInputFiles(fixture);
@@ -408,7 +410,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     }
     // Manual controls remain available after failures and bypass ambiguous heuristic choice.
     await expect(page.locator('#mapper')).toHaveValue('0');
-    await page.locator('#mapper').selectOption(mapper);
+    await (await settingsControl(page, 'mapper')).selectOption(mapper);
     await page.locator('#cartridge').setInputFiles(fixture);
     await expect(page.locator('#status')).toContainText(`(${name})`);
     await backdrop(page, '212,193,84');
@@ -417,22 +419,22 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     await backdrop(page, '212,193,84');
     // Replace with a different bank-switched mapping, then a plain image.
     const replacementMapper = mapper === '3' ? '2' : '3';
-    await page.locator('#mapper').selectOption(replacementMapper);
+    await (await settingsControl(page, 'mapper')).selectOption(replacementMapper);
     await page.locator('#cartridge').setInputFiles(megaRom(128, replacementMapper));
     await expect(page.locator('#status')).toContainText(`authored-128-${replacementMapper}.rom`);
     await backdrop(page, '212,193,84');
-    await page.locator('#mapper').selectOption('0');
+    await (await settingsControl(page, 'mapper')).selectOption('0');
     await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('test-cartridge.rom');
     await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeLessThan(256 * 192);
-    await page.getByRole('button', { name: 'Eject cartridge' }).click();
+    await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#transcript')).toContainText('READY');
     await enter(page, 'PRINT 42');
     await expect(page.locator('#transcript')).toContainText('42\nREADY');
-    await page.locator('#mapper').selectOption(mapper);
+    await (await settingsControl(page, 'mapper')).selectOption(mapper);
     await page.locator('#cartridge').setInputFiles(fixture);
     await backdrop(page, '212,193,84');
-    await page.getByRole('button', { name: 'Use Weave BASIC', exact: true }).click();
+    await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#transcript')).toContainText('READY');
     expect(requests.every(r => r.method === 'GET' && r.url.startsWith('http://127.0.0.1:41873/'))).toBe(true);
     expect(errors).toEqual([]);
@@ -463,12 +465,12 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
 
 test('ambiguous Auto import can be retried with the same file and an explicit mapper', async ({ page }) => {
   await boot(page);
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
   const file = ambiguousRom();
   await page.locator('#cartridge').setInputFiles(file);
   await expect(page.locator('#status')).toContainText('Ambiguous mapper evidence');
   await expect(page.locator('#status')).toContainText('same file again');
-  await page.locator('#mapper').selectOption('3');
+  await (await settingsControl(page, 'mapper')).selectOption('3');
   await page.locator('#cartridge').setInputFiles(file);
   await expect(page.locator('#status')).toContainText(`${file.name} (ASCII16)`);
 });
@@ -576,8 +578,8 @@ test('a reserved 2 MiB cartridge installs and resets without extra memory', asyn
   }, bounded.toString('base64'));
   const errors = await boot(page, '/', '0');
   const pixels = await page.evaluate(() => window.memoryTestWasm.msx_pixels());
-  await page.locator('#advanced-panel > summary').click();
-  await page.locator('#mapper').selectOption('2');
+  await page.locator('#settings').click();
+  await (await settingsControl(page, 'mapper')).selectOption('2');
   const fixture = megaRom(2048, '2');
   await page.locator('#cartridge').setInputFiles(fixture);
   await expect.poll(() => page.evaluate(() => window.lastUpload)).toEqual({ length: 2 * 1024 * 1024, reserved: true });
@@ -598,7 +600,7 @@ test('a reserved 2 MiB cartridge installs and resets without extra memory', asyn
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
   expect(await page.evaluate(() => window.memoryTestWasm.msx_pixels())).toBe(pixels);
   await backdrop(page, '212,193,84');
-  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await (await mediaControl(page, 'eject')).click();
   await enter(page, 'PRINT 42');
   await expect(page.locator('#transcript')).toContainText('42\nREADY');
   expect(errors).toEqual([]);
@@ -630,8 +632,8 @@ test('resource failures and canceled asynchronous reads preserve the active cart
     };
   }, bounded.toString('base64'));
   const errors = await boot(page, '/', '0');
-  await page.locator('#advanced-panel > summary').click();
-  await page.locator('#mapper').selectOption('2');
+  await page.locator('#settings').click();
+  await (await settingsControl(page, 'mapper')).selectOption('2');
   await enter(page, '10 PRINT 86');
   // A failed transfer for a cartridge or local firmware must retain BASIC too.
   for (const [input, file] of [['cartridge', megaRom(64, '2')], ['bios', 'dist/cbios_main_msx1.rom']]) {
@@ -657,7 +659,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   await page.evaluate(() => { window.deferFileRead = true; });
   await page.locator('#cartridge').setInputFiles(megaRom(128, '2'));
   await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
-  await page.getByRole('button', { name: 'Eject cartridge' }).click();
+  await (await mediaControl(page, 'eject')).click();
   await page.evaluate(() => window.finishFileRead());
   await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
   await enter(page, 'PRINT 42');
@@ -675,15 +677,33 @@ async function expectScreenFits(page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [320, 640]]) {
-  test(`screen, toolbar and disclosures fit at ${width}×${height}`, async ({ page }, testInfo) => {
+async function expectPanelFits(page, id) {
+  const { x, y, width, height } = await page.locator(`#${id}`).boundingBox();
+  const viewport = page.viewportSize();
+  expect(x).toBeGreaterThanOrEqual(0);
+  expect(y).toBeGreaterThanOrEqual(0);
+  expect(x + width).toBeLessThanOrEqual(viewport.width);
+  expect(y + height).toBeLessThanOrEqual(viewport.height);
+}
+
+for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [812, 375], [320, 640]]) {
+  test(`screen, playback and media fit at ${width}×${height}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height });
     await boot(page);
     await expectScreenFits(page);
     const bounds = await page.locator('#screen').boundingBox();
     expect(bounds.y + bounds.height).toBeLessThan(height);
     await expect(page.locator('#cartridge')).toBeHidden();
-    if (width >= 768) expect((await page.locator('.toolbar').boundingBox()).height).toBeLessThanOrEqual(70);
+    const toolbar = await page.locator('.toolbar').boundingBox();
+    const media = await page.locator('#machine-media').boundingBox();
+    expect(toolbar.y).toBeGreaterThan(bounds.y + bounds.height);
+    if (width > 900) {
+      expect(media.x).toBeGreaterThan(bounds.x + bounds.width);
+      expect(media.y).toBeLessThan(toolbar.y);
+      expect(toolbar.y + toolbar.height).toBeLessThan(height);
+    } else {
+      expect(media.y).toBeGreaterThan(toolbar.y + toolbar.height);
+    }
     const controls = await page.locator('.toolbar button, .toolbar select').all();
     const boxes = [];
     for (const control of controls) {
@@ -697,18 +717,21 @@ for (const [width, height] of [[1280, 800], [768, 1024], [375, 812], [320, 640]]
       }
       boxes.push(box);
     }
-    for (const id of ['help-panel', 'advanced-panel', 'transcript-panel']) {
-      await expect(page.locator(`#${id}`)).not.toHaveAttribute('open');
+    for (const id of ['help-panel', 'advanced-panel', 'transcript-panel', 'eject', 'boot-disk', 'rewind-tape']) {
+      await expect(page.locator(`#${id}`)).toBeHidden();
     }
     await page.screenshot({ path: `test-results/ui-${width}.png`, fullPage: true });
     await testInfo.attach(`emulator-${width}`, { path: `test-results/ui-${width}.png`, contentType: 'image/png' });
-    await page.locator('#help-panel > summary').click();
+    await page.locator('#help').click();
     await expect(page.getByText('Touch typing and an on-screen keyboard are not supported.', { exact: false })).toBeVisible();
-    await page.locator('#advanced-panel > summary').click();
-    await expect(page.getByLabel('Local system ROM (32 KiB)')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Use Weave BASIC', exact: true })).toBeVisible();
+    await expectPanelFits(page, 'help-panel');
     await page.locator('#transcript-panel > summary').click();
     await expect(page.locator('#transcript')).toBeVisible();
+    await page.locator('#settings').click();
+    await expect(page.locator('#help-panel')).toBeHidden();
+    await expect(page.getByLabel('Local system ROM (32 KiB)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use Weave BASIC', exact: true })).toBeVisible();
+    await expectPanelFits(page, 'advanced-panel');
     await expectScreenFits(page);
     await page.screenshot({ path: `test-results/details-${width}.png`, fullPage: true });
   });
@@ -747,7 +770,11 @@ for (const mode of ['native', 'unavailable', 'rejected']) {
     if (mode === 'native') expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('emulator');
     else await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
     await expectScreenFits(page);
-    for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 812 }, { width: 812, height: 375 }]) {
+    const landscape = { width: 812, height: 375 };
+    const viewports = mode === 'native' ? [
+      { width: 1280, height: 800 }, { width: 768, height: 1024 }, { width: 375, height: 812 }, landscape,
+    ] : [landscape];
+    for (const viewport of viewports) {
       // Chromium cannot resize a window while it is in native fullscreen.
       if (mode === 'native') await page.locator('#fullscreen').click();
       await page.setViewportSize(viewport);
@@ -761,8 +788,8 @@ for (const mode of ['native', 'unavailable', 'rejected']) {
       expect(screen.y + screen.height).toBeLessThanOrEqual(viewport.height);
       expect(exit.y).toBeGreaterThanOrEqual(0);
       expect(exit.y + exit.height).toBeLessThanOrEqual(viewport.height);
+      await page.screenshot({ path: `test-results/fullscreen-${mode}-${viewport.width}.png` });
     }
-    await page.screenshot({ path: `test-results/fullscreen-${mode}.png` });
     await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
     await expect(page.locator('#fullscreen')).toHaveText('Fullscreen');
     await expect(page.locator('#screen')).toBeFocused();
@@ -811,12 +838,12 @@ test('unrecognized ROMs keep the selected machine and explain how to recover', a
   await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await expect(page.locator('#eject')).toBeDisabled();
   await expect(page.locator('#example')).toBeEnabled();
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
   await page.locator('#bios').setInputFiles('dist/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('32 KiB');
   await expect(page.locator('#status')).toContainText('Selected ROMs are unchanged');
   await expect(page.locator('#example')).toBeEnabled();
-  await page.locator('#builtin').click();
+  await (await settingsControl(page, 'builtin')).click();
   await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
 });
 
