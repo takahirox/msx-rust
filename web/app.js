@@ -63,7 +63,10 @@ function updateControls() {
   $('starters').hidden = !native;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
   for (const button of $('demo-list').querySelectorAll('button')) button.disabled = !ready || loading;
-  $('retry-demos').disabled = !ready || loading || catalogLoading;
+  const retry = $('retry-demos');
+  retry.disabled = !ready || loading;
+  // Keep focus on Retry while the catalog request is pending.
+  retry.setAttribute('aria-disabled', String(retry.disabled || catalogLoading));
   const sound = ready && wasm.msx_sound_cartridge_profile();
   const name = cartridge || (sound ? `${soundProfileNames[sound]} sound cartridge` : '');
   $('cartridge-status').textContent = name || 'Empty';
@@ -789,6 +792,7 @@ function demoChoice(demo) {
 }
 async function loadCatalog() {
   if (!ready || loading || catalogLoading) return;
+  const retry = $('retry-demos');
   catalogLoading = true; updateControls();
   $('demo-message').textContent = 'Loading demos…';
   try {
@@ -801,12 +805,16 @@ async function loadCatalog() {
           || ![demo.id, demo.title, demo.creator, demo.description, demo.controls, demo.license].every(value => typeof value === 'string' && value.length)
           || !demo.source?.startsWith('https://github.com/')) throw new Error('Invalid demo metadata.');
     }
-    $('demo-list').replaceChildren(...manifest.demos.map(demoChoice));
+    const demoList = $('demo-list');
+    demoList.replaceChildren(...manifest.demos.map(demoChoice));
+    if (document.activeElement === retry && $('cartridge-picker').matches(':popover-open')) {
+      demoList.querySelector('button').focus();
+    }
     $('demo-message').textContent = '';
-    $('retry-demos').hidden = true;
+    retry.hidden = true;
   } catch (error) {
     $('demo-message').textContent = `Demos unavailable: ${error.message} Your session is unchanged. Retry to reload the catalog.`;
-    $('retry-demos').hidden = false;
+    retry.hidden = false;
   } finally { catalogLoading = false; updateControls(); }
 }
 $('retry-demos').addEventListener('click', loadCatalog);
