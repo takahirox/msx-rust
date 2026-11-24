@@ -48,6 +48,14 @@ void main() {
 const maxOutputWidth = 960;
 const maxOutputHeight = 720;
 
+class OutputAllocationError extends Error {
+  constructor(width, height) {
+    super('WebGL2 output allocation failed');
+    this.width = width;
+    this.height = height;
+  }
+}
+
 function compileShader(gl, type, source) {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('WebGL2 shader allocation failed');
@@ -99,14 +107,11 @@ function createCrt(canvas) {
     if (fragment) gl.deleteShader(fragment);
   }
   return {
-    resize(cssWidth, cssHeight, pixelRatio) {
-      const scale = Math.min(pixelRatio, maxOutputWidth / cssWidth, maxOutputHeight / cssHeight);
-      const w = Math.max(1, Math.round(cssWidth * scale));
-      const h = Math.max(1, Math.round(cssHeight * scale));
+    resize({ width: w, height: h }) {
       if (outputWidth === w && outputHeight === h) return false;
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
-      if (gl.drawingBufferWidth !== w || gl.drawingBufferHeight !== h) throw new Error('WebGL2 output allocation failed');
+      if (gl.drawingBufferWidth !== w || gl.drawingBufferHeight !== h) throw new OutputAllocationError(w, h);
       gl.viewport(0, 0, w, h);
       gl.uniform2f(outputSize, w, h);
       outputWidth = w;
@@ -152,26 +157,39 @@ export function createDisplay(screen, canvas, select, status, readFrame) {
     if (screen.height !== frame.height) screen.height = frame.height;
     context.putImageData(new ImageData(frame.pixels, frame.width, frame.height), 0, 0);
     if (!canvas.hidden) canvas.hidden = true;
-    showStatus(requested === 'crt' && failure ? `Clean active · ${failure}.` : '');
+    showStatus(requested === 'crt' && failure ? `Clean active · ${failure.message}.` : '');
   }
-  function fallback(reason, frame) {
+  function fallback(error, frame) {
     renderer?.dispose();
     renderer = undefined;
-    failure = reason;
+    failure = error;
     if (hasFrame) showClean(frame ?? readFrame());
   }
-  function resize() {
+  function measureOutput() {
     const { width, height } = screen.getBoundingClientRect();
     pixelRatio = devicePixelRatio;
-    return renderer.resize(width, height, pixelRatio);
+    const scale = Math.min(pixelRatio, maxOutputWidth / width, maxOutputHeight / height);
+    return {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    };
+  }
+  function retrySmallerOutput() {
+    if (!(failure instanceof OutputAllocationError)) return false;
+    const { width, height } = measureOutput();
+    if (width > failure.width || height > failure.height) return false;
+    if (width === failure.width && height === failure.height) return false;
+    failure = undefined;
+    return true;
   }
   function present() {
     const frame = readFrame();
     hasFrame = true;
+    if (failure && requested === 'crt' && pixelRatio !== devicePixelRatio) retrySmallerOutput();
     if (requested === 'crt' && !failure) {
       try {
         if (!renderer) renderer = createCrt(canvas);
-        if (canvas.hidden || pixelRatio !== devicePixelRatio) resize();
+        if (canvas.hidden || pixelRatio !== devicePixelRatio) renderer.resize(measureOutput());
         renderer.upload(frame);
         renderer.draw();
         if (canvas.hidden) {
@@ -179,18 +197,22 @@ export function createDisplay(screen, canvas, select, status, readFrame) {
           showStatus('');
         }
       } catch (error) {
-        fallback(error.message, frame);
+        fallback(error, frame);
       }
     } else {
       showClean(frame);
     }
   }
   function redraw() {
-    if (requested !== 'crt' || !renderer) return;
+    if (requested !== 'crt') return;
+    if (!renderer) {
+      if (retrySmallerOutput()) present();
+      return;
+    }
     try {
-      if (resize()) renderer.draw();
+      if (renderer.resize(measureOutput())) renderer.draw();
     } catch (error) {
-      fallback(error.message);
+      fallback(error);
     }
   }
   select.addEventListener('change', () => {
@@ -201,7 +223,7 @@ export function createDisplay(screen, canvas, select, status, readFrame) {
   });
   canvas.addEventListener('webglcontextlost', event => {
     event.preventDefault();
-    fallback('WebGL2 context lost');
+    fallback(new Error('WebGL2 context lost'));
   });
   canvas.addEventListener('webglcontextrestored', () => {
     failure = undefined;
@@ -212,7 +234,8 @@ export function createDisplay(screen, canvas, select, status, readFrame) {
     present,
     refreshScale() {
       // A density-only change can leave the observed CSS size unchanged.
-      if (requested === 'crt' && renderer && pixelRatio !== devicePixelRatio) redraw();
+      if (requested === 'crt' && (renderer || failure instanceof OutputAllocationError)
+          && pixelRatio !== devicePixelRatio) redraw();
     },
   };
 }

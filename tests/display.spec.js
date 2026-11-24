@@ -278,6 +278,43 @@ test('unavailable WebGL2 and blocked storage leave a usable Clean display', asyn
   expect(await sample(page, [[630, 470]])).toEqual(before);
 });
 
+test('a smaller output recovers visible CRT after an allocation failure while paused', async ({ page }) => {
+  await watchWasm(page);
+  await page.addInitScript(() => {
+    const prototype = WebGL2RenderingContext.prototype;
+    const { get } = Object.getOwnPropertyDescriptor(prototype, 'drawingBufferWidth');
+    Object.defineProperty(prototype, 'drawingBufferWidth', {
+      get() { return Math.min(get.call(this), 800); },
+    });
+  });
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await boot(page);
+  await paste(page, 'COLOR 15,15:CLS\n');
+  await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
+  await page.locator('#audio').click();
+  await expect(page.locator('#audio-state')).toHaveText('Audio on');
+  await page.locator('#pause').click();
+  const paused = await page.evaluate(() => window.displayCalls);
+  const before = await sample(page, chroma);
+  expect(before).not.toEqual(chroma.map(() => white));
+  await expect(crt(page)).toHaveAttribute('width', '640');
+
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await expect(crt(page)).toHaveAttribute('width', '960');
+  await expect(status(page)).toHaveText('Clean active · WebGL2 output allocation failed.');
+  await expect(crt(page)).toBeHidden();
+  await expect(select(page)).toHaveValue('crt');
+  expect(await sample(page, chroma)).toEqual(chroma.map(() => white));
+
+  await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+  await expect(crt(page)).toHaveAttribute('width', '640');
+  await expect(crt(page)).toBeVisible();
+  await expect(status(page)).toBeEmpty();
+  expect(await sample(page, chroma)).toEqual(before);
+  await expect(page.locator('#status')).toContainText('Paused');
+  expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
+});
+
 test('shader and draw failures fall back, then real context loss and restoration recover CRT', async ({ page }) => {
   await page.addInitScript(key => {
     localStorage.setItem(key, 'invalid preference');
