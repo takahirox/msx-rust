@@ -653,6 +653,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   await page.locator('#open-rom').press('Enter');
   await (await chooser).setFiles(megaRom(64, '2'));
   await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
+  await expect(page.locator('#cartridge')).toHaveValue('');
   const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
   await expect(page.locator('#cartridge-picker')).toBeHidden();
   await expect(cancel).toBeFocused();
@@ -660,8 +661,6 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   await expect(insert).toBeFocused();
   await expect(cancel).toBeHidden();
   await page.evaluate(() => window.finishFileRead());
-  // The file input is cleared when the late read has been handled.
-  await expect(page.locator('#cartridge')).toHaveValue('');
   await expect(page.locator('#status')).toContainText('Import canceled');
   await expect(page.locator('#cartridge-status')).toHaveText('Empty');
   await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
