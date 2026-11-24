@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -24,7 +25,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     const chooser=page.waitForEvent('filechooser');
-    await page.locator('#open-rom').click();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#open-rom').click();
     await (await chooser).setFiles('dist/ram-mapper-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await expect(page.locator('#status')).toContainText('Auto: Plain');
@@ -37,16 +38,16 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#status')).toContainText('unchanged');
     await result(page, 'RAM MAPPER PASS', [36,218,36]);
     // Authored firmware loaded through the paired local inputs initializes itself.
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     await page.locator('#bios').setInputFiles('dist/weave-msx2-boot.rom');
     await page.locator('#subrom').setInputFiles('dist/msx2-diagnostic-sub.rom');
-    await page.locator('#apply-firmware').click();
+    await (await settingsControl(page, 'apply-firmware')).click();
     await expect(page.locator('#firmware')).toHaveValue('local');
     await result(page, 'RAM MAPPER PASS', [36,218,36]);
     await page.locator('#screen').evaluate(canvas => canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height));
     await page.locator('#reset').click();
     await result(page, 'RAM MAPPER PASS', [36,218,36]);
-    await page.locator('#builtin').click();
+    await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#model').selectOption('0');
     await page.locator('#cartridge').setInputFiles('dist/ram-mapper-test-cartridge.rom');

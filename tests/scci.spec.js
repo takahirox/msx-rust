@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -22,13 +23,13 @@ async function green(page, model) {
     .toEqual(model ? [36,218,36,255] : [33,200,66,255]);
 }
 async function install(page, profile) {
-  await page.locator('#sound-cartridge').selectOption(String(profile));
-  await page.locator('#install-sound-cartridge').click();
+  await (await settingsControl(page, 'sound-cartridge')).selectOption(String(profile));
+  await (await settingsControl(page, 'install-sound-cartridge')).click();
   await expect(page.locator('#sound-cartridge-status')).toHaveText(`${names[profile]} · 64 KiB RAM · SCC-I · slot 1`);
   await expect(page.locator('#status')).toContainText(`${names[profile]} sound cartridge`);
 }
 async function exported(page) {
-  const promise = page.waitForEvent('download'); await page.locator('#export-disk').click();
+  const promise = page.waitForEvent('download'); await (await mediaControl(page, 'export-disk')).click();
   return readFile(await (await promise).path());
 }
 async function state(page) {
@@ -76,9 +77,9 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     page.on('request',r=>requests.push(r)); page.on('pageerror',e=>errors.push(e.message));
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
     if (!model) await page.locator('#model').selectOption('0');
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     // Replacing ordinary SRAM hardware runs the existing outgoing save safeguard.
-    await page.locator('#mapper').selectOption('6');
+    await (await settingsControl(page, 'mapper')).selectOption('6');
     await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
     await expect(page.locator('#export-save')).toBeEnabled();
     await page.evaluate(()=>{const w=window.scciWasm;new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);});
@@ -92,7 +93,7 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     if (model) {
       const sub=Buffer.alloc(16384);sub.write('CD');sub[0x100]=0x7b;
       await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));
-      await page.locator('#apply-firmware').click();
+      await (await settingsControl(page, 'apply-firmware')).click();
     }
     await expect(page.locator('#firmware')).toHaveValue('local');
     expect((await state(page)).slice(0,3)).toEqual([profile,3,1]);
@@ -100,7 +101,7 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     const expected=Buffer.from(disk);expected.fill(0x6c,8*512,9*512);
     await page.locator('#disk').setInputFiles(file('original-scci.dsk',disk));
     await expect(page.locator('#disk-status')).toContainText('original-scci.dsk');
-    await page.locator('#disk-protected').uncheck();
+    await (await mediaControl(page, 'disk-protected')).uncheck();
     await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',diskRom));
     await green(page,model); // CPU checked RAM, fifth readbacks, disk write; red on failure
     await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
@@ -130,12 +131,13 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     expect(await state(page)).toEqual(before);
     expect(await page.evaluate(()=>window.scciWasm.msx_install_sound_cartridge(99))).toBe(0);
     await page.evaluate(()=>{window.failScci=true;});
-    await page.locator('#install-sound-cartridge').click();
+    await (await settingsControl(page, 'install-sound-cartridge')).click();
     expect(await state(page)).toEqual(before);
     await page.evaluate(()=>{window.failScci=false;});
     await page.locator('#cartridge').setInputFiles(file('deferred.rom',await readFile('dist/test-cartridge.rom')));
-    await expect(page.locator('#remove-sound-cartridge')).toHaveText('Cancel import');
-    await page.locator('#remove-sound-cartridge').click();
+    await expect(page.locator('#remove-sound-cartridge')).toHaveText('Remove sound cartridge');
+    await expect(page.locator('#remove-sound-cartridge')).toBeDisabled();
+    await (await mediaControl(page, 'cancel-cartridge-import')).click();
     await page.evaluate(()=>window.finishScciImport());
     await page.waitForTimeout(100); expect(await state(page)).toEqual(before);
     await green(page,model);
@@ -146,19 +148,19 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     // Replacement/removal retain the selected local firmware and exact dirty disk.
     await install(page,profile===1 ? 2 : 1);
     expect((await state(page)).slice(1)).toEqual(before.slice(1));
-    await page.locator('#remove-sound-cartridge').click();
+    await (await settingsControl(page, 'remove-sound-cartridge')).click();
     expect(await state(page)).toEqual([0,...before.slice(1)]);
     await expect(page.locator('#sound-cartridge-status')).toHaveText('No sound cartridge installed');
     expect(await exported(page)).toEqual(expected);
     // Ordinary ROM replaces the accessory; bundled/model clearing remains explicit.
     await install(page,profile);
-    await page.locator('#mapper').selectOption('1');
+    await (await settingsControl(page, 'mapper')).selectOption('1');
     await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('test-cartridge.rom (Plain)');
     expect((await state(page))[0]).toBe(0);
-    await install(page,profile); await page.locator('#builtin').click();
+    await install(page,profile); await (await settingsControl(page, 'builtin')).click();
     expect((await state(page))[0]).toBe(0);
-    await install(page,profile); await page.locator('#firmware').selectOption('cbios');
+    await install(page,profile); await (await settingsControl(page, 'firmware')).selectOption('cbios');
     expect((await state(page))[0]).toBe(0);
     await install(page,profile); await page.locator('#model').selectOption(String(1-model));
     expect((await state(page))[0]).toBe(0);

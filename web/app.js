@@ -10,6 +10,7 @@ let loading = false;
 let audioEnabled = false;
 let paused = false;
 let audioContext;
+let outputGain;
 let nextAudio = 0;
 let tone = false;
 let system = 'Weave BASIC';
@@ -30,7 +31,9 @@ let pacRomName = '';
 const gameSaves = { status: 'save-status', prefix: savePrefix, pointer: () => wasm.msx_sram(), size: () => wasm.msx_sram_len(), sizes: [2048, 8192], encode: encodeSave, decode: decodeSave };
 const pacSaves = { status: 'pac-save-status', prefix: fmPacSavePrefix, pointer: () => wasm.msx_fm_pac_sram(), size: () => wasm.msx_fm_pac_sram_len(), sizes: [8190], encode: encodeFmPacSave, decode: decodeFmPacSave };
 let importGeneration = 0;
-let demos;
+let pendingImport;
+const mediaSlots = ['cartridge', 'disk', 'cassette'];
+const settingsImports = ['bios', 'disk-rom', 'music-rom', 'pac-rom'];
 let catalogLoading = false;
 let previousTime;
 let accumulator = 0;
@@ -38,33 +41,67 @@ function frameMilliseconds() { return 1000 * wasm.msx_frame_cycles() / 3579545; 
 const held = new Set();
 let pendingText = [];
 const activeSources = new Set();
-function status(message, kind = 'info') {
+function status(message, kind = 'info', media) {
   $('status').textContent = message;
   $('status').dataset.kind = kind;
+  const settingsMessage = $('settings-message');
+  settingsMessage.hidden = kind !== 'error';
+  settingsMessage.textContent = settingsMessage.hidden ? '' : message;
+  const settings = $('advanced-panel');
+  if (!settingsMessage.hidden && settings.matches(':popover-open') &&
+      (settings.contains(document.activeElement) || document.activeElement === document.body)) {
+    settingsMessage.focus({ preventScroll: true });
+    settingsMessage.scrollIntoView({ block: 'start' });
+  }
+  for (const slot of ['cartridge', 'disk', 'tape']) {
+    const notice = $(`${slot}-message`);
+    notice.hidden = kind !== 'error' || media !== slot;
+    notice.textContent = notice.hidden ? '' : message;
+  }
 }
 function updateControls() {
   const native = ready && wasm.msx_firmware() === 0;
-  for (const id of ['pause', 'reset', 'audio', 'builtin', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware', 'firmware']) $(id).disabled = !ready || loading;
+  for (const id of ['pause', 'reset', 'audio', 'builtin', 'insert-cartridge', 'open-rom', 'cartridge', 'bios', 'mapper', 'focus-screen', 'model', 'subrom', 'apply-firmware', 'firmware']) $(id).disabled = !ready || loading;
+  $('starters').hidden = !native;
   for (const id of ['example', 'graphics', 'tone']) $(id).disabled = !ready || loading || !native;
-  $('demo').disabled = !ready || loading || !demos;
-  $('play-demo').disabled = !ready || loading || catalogLoading;
-  $('eject').disabled = !ready || (!cartridge && !wasm.msx_sound_cartridge_profile());
+  for (const button of $('demo-list').querySelectorAll('button')) button.disabled = !ready || loading;
+  const retry = $('retry-demos');
+  retry.disabled = !ready || loading;
+  // Keep focus on Retry while the catalog request is pending.
+  retry.setAttribute('aria-disabled', String(retry.disabled || catalogLoading));
+  const sound = ready && wasm.msx_sound_cartridge_profile();
+  const name = cartridge || (sound ? `${soundProfileNames[sound]} sound cartridge` : '');
+  $('cartridge-status').textContent = name || 'Empty';
+  $('eject').disabled = $('eject').hidden = !name;
   updateSoundCartridge();
   updateMusic();
   updatePac();
   for (const id of ['export-save', 'import-save']) $(id).disabled = !ready || loading || !gameSaves.active;
   updateDisk();
   updateTape();
+  for (const slot of mediaSlots) {
+    const cancel = $(`cancel-${slot}-import`);
+    const focused = document.activeElement === cancel;
+    cancel.hidden = !isImporting(slot);
+    if (cancel.hidden && focused) $(`insert-${slot}`).focus();
+  }
+  for (const target of settingsImports) {
+    const cancel = $(`cancel-${target}-import`);
+    const focused = document.activeElement === cancel;
+    cancel.hidden = !isImporting(target);
+    if (cancel.hidden && focused) {
+      const fallback = target === 'bios' ? (model ? 'apply-firmware' : 'bios') : `open-${target}`;
+      $(fallback).focus();
+    }
+  }
   $('emulator').setAttribute('aria-busy', String(!ready || loading));
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('tone').textContent = tone ? 'Stop tone' : 'Sound demo';
   $('tone').setAttribute('aria-pressed', String(tone));
-  $('starter-help').textContent = native ? 'One click, then make it your own.' : 'Choose Use Weave BASIC in ROMs & advanced system options to try these on either machine.';
 }
 function updateAudioState() {
   const running = audioEnabled && audioContext?.state === 'running';
   $('audio').textContent = running ? 'Mute audio' : audioEnabled ? 'Resume audio' : 'Enable audio';
-  $('audio').setAttribute('aria-pressed', String(running));
   $('audio-state').textContent = running ? 'Audio on' : audioEnabled ? 'Audio suspended · resume to hear sound' : 'Audio off · enable to hear sound';
 }
 function resume() {
@@ -81,6 +118,75 @@ screen.addEventListener('focus', updateFocus);
 screen.addEventListener('blur', updateFocus);
 screen.addEventListener('click', () => screen.focus());
 
+function panelTrigger(panel) { return document.querySelector(`button[popovertarget="${panel.id}"]`); }
+function positionPicker(panel) {
+  const anchor = panelTrigger(panel).getBoundingClientRect();
+  const { clientWidth, clientHeight } = document.documentElement;
+  const { width, height } = panel.getBoundingClientRect();
+  const left = Math.max(12, Math.min(anchor.left, clientWidth - width - 12));
+  const below = anchor.bottom + 6;
+  const above = anchor.top - height - 6;
+  const maxTop = clientHeight - height - 12;
+  const top = Math.max(12, Math.min(below <= maxTop ? below : above, maxTop));
+  panel.style.setProperty('--picker-left', `${left}px`);
+  panel.style.setProperty('--picker-top', `${top}px`);
+}
+function positionOpenPicker() {
+  const panel = document.querySelector('.media-picker:popover-open');
+  if (panel) positionPicker(panel);
+}
+const pickerResize = new ResizeObserver(entries => {
+  for (const { target } of entries) if (target.matches(':popover-open')) positionPicker(target);
+});
+for (const panel of document.querySelectorAll('.media-picker')) pickerResize.observe(panel);
+window.addEventListener('resize', positionOpenPicker);
+window.addEventListener('scroll', positionOpenPicker);
+for (const panel of document.querySelectorAll('[popover]')) {
+  panel.addEventListener('beforetoggle', event => {
+    if (event.newState === 'open') releaseKeys();
+  });
+}
+document.addEventListener('focusin', event => {
+  const panel = document.querySelector('[popover]:popover-open');
+  // Let the invoker toggle the popover itself when clicked.
+  if (panel && !panel.contains(event.target) && event.target !== panelTrigger(panel)) panel.hidePopover();
+});
+function closePanel(id) {
+  const panel = $(id);
+  if (!panel.matches(':popover-open')) return;
+  panel.hidePopover();
+  return panelTrigger(panel);
+}
+function isImporting(target) {
+  return loading && pendingImport?.generation === importGeneration && pendingImport.target === target;
+}
+function beginImport(target) {
+  const generation = ++importGeneration;
+  pendingImport = { target, generation };
+  loading = true;
+  updateControls();
+  return generation;
+}
+function beginMediaImport(slot) {
+  const trigger = closePanel(`${slot}-picker`);
+  const focused = document.activeElement;
+  const generation = beginImport(slot);
+  if (trigger && (focused === trigger || focused === document.body)) $(`cancel-${slot}-import`).focus();
+  return generation;
+}
+function beginSettingsImport(target) {
+  const generation = beginImport(target);
+  retainSettingsFocus(`cancel-${target}-import`);
+  return generation;
+}
+function retainSettingsFocus(fallback) {
+  const panel = $('advanced-panel');
+  if (!panel.matches(':popover-open')) return false;
+  const focused = document.activeElement;
+  if (focused !== $('settings') && (!panel.contains(focused) || focused.matches(':disabled'))) $(fallback).focus();
+  return true;
+}
+
 // Keep the toolbar available in both native fullscreen and the CSS fallback.
 function expanded() { return document.fullscreenElement === $('emulator') || $('emulator').classList.contains('focus-view'); }
 function updateView() {
@@ -95,6 +201,8 @@ function fallbackView(active) {
   updateView();
 }
 $('fullscreen').addEventListener('click', async () => {
+  releaseKeys();
+  document.querySelector('[popover]:popover-open')?.hidePopover();
   if (document.fullscreenElement === $('emulator')) await document.exitFullscreen();
   else if (expanded()) fallbackView(false);
   else {
@@ -106,15 +214,32 @@ $('fullscreen').addEventListener('click', async () => {
   updateView();
   screen.focus();
 });
-document.addEventListener('fullscreenchange', updateView);
+document.addEventListener('fullscreenchange', () => { releaseKeys(); updateView(); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && $('emulator').classList.contains('focus-view')) {
-    event.preventDefault();
-    event.stopPropagation();
-    fallbackView(false);
-    screen.focus();
+  if (event.key !== 'Escape') return;
+  const panel = document.querySelector('[popover]:popover-open');
+  if (!panel && !expanded()) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (panel) {
+    panel.hidePopover();
+    panelTrigger(panel).focus();
+    return;
   }
+  releaseKeys();
+  if (document.fullscreenElement === $('emulator')) document.exitFullscreen();
+  else fallbackView(false);
+  $('fullscreen').focus();
 }, true);
+const toolbar = document.querySelector('.toolbar');
+const toolbarResize = new ResizeObserver(([entry]) => {
+  $('emulator').style.setProperty('--toolbar-height', `${entry.borderBoxSize[0].blockSize}px`);
+});
+toolbarResize.observe(toolbar, { box: 'border-box' });
+$('scale').value = '3';
+$('scale').addEventListener('change', () => {
+  $('emulator').style.setProperty('--display-width', `${256 * Number($('scale').value)}px`);
+});
 function readString(pointer, length) { return decoder.decode(new Uint8Array(wasm.memory.buffer, pointer, length)); }
 function flushAudio() { for (const source of activeSources) source.stop(); activeSources.clear(); nextAudio = 0; }
 const display = createDisplay(screen, $('crt-screen'), $('display'), $('display-status'), () => {
@@ -138,10 +263,10 @@ function enqueueAudio() {
   buffer.copyToChannel(new Float32Array(wasm.memory.buffer, wasm.msx_audio(), n), 0);
   const source = audioContext.createBufferSource();
   source.buffer = buffer;
-  source.connect(audioContext.destination);
   nextAudio = Math.max(audioContext.currentTime + 0.025, nextAudio);
   // Limit scheduling latency after a background tab or debugger pause.
   if (nextAudio > audioContext.currentTime + 0.15) return;
+  source.connect(outputGain);
   source.start(nextAudio);
   nextAudio += n / 44100;
   activeSources.add(source);
@@ -172,6 +297,9 @@ function frame(time) {
 async function enableAudio() {
   if (!audioContext) {
     audioContext = new AudioContext({ sampleRate: 44100 });
+    outputGain = audioContext.createGain();
+    outputGain.gain.value = Number($('volume').value) / 100;
+    outputGain.connect(audioContext.destination);
     audioContext.addEventListener('statechange', updateAudioState);
   }
   await audioContext.resume();
@@ -180,6 +308,10 @@ async function enableAudio() {
   screen.focus();
   return audioContext;
 }
+$('volume').value = $('volume').defaultValue;
+$('volume').addEventListener('input', () => {
+  if (outputGain) outputGain.gain.setTargetAtTime(Number($('volume').value) / 100, audioContext.currentTime, 0.015);
+});
 function command(text) {
   if (!ready || wasm.msx_firmware() !== 0) return;
   if (pendingText.length + text.length > 16384) { status('Paste is too large (maximum 16 KiB).', 'error'); return; }
@@ -196,7 +328,7 @@ function updateStatus() {
   updateControls();
   status(`${paused ? 'Paused' : 'Running'} · ${model && active !== 1 ? 'MSX2 · ' : ''}${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}${active === 4 ? ' (parked)' : ''}` : ''}${wasm.msx_sound_cartridge_profile() ? ` · ${soundProfileNames[wasm.msx_sound_cartridge_profile()]} sound cartridge` : ''}`);
 }
-function restart(action) {
+function restart(action, settingsFallback) {
   importGeneration++;
   loading = false;
   releaseKeys();
@@ -208,14 +340,18 @@ function restart(action) {
   wasm.msx_frame();
   render();
   updateStatus();
-  screen.focus();
+  if (!settingsFallback || !retainSettingsFocus(settingsFallback)) screen.focus();
+}
+function takeFile(input) {
+  const file = input.files[0];
+  // Allow selecting the same file again even while a canceled read is pending.
+  input.value = '';
+  return file;
 }
 async function load(file, isSystem) {
   if (!file || !ready || loading) return;
-  const generation = ++importGeneration;
   const mapper = Number($('mapper').value);
-  loading = true;
-  updateControls();
+  const generation = isSystem ? beginSettingsImport('bios') : beginMediaImport('cartridge');
   status(`Loading ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name)) throw new Error('Select a .rom or .bin ROM image.');
@@ -228,8 +364,10 @@ async function load(file, isSystem) {
     if (generation !== importGeneration) return;
     uploadRom(bytes, isSystem ? 1 : 0, mapper);
     if (!isSystem) attachSave(identity, wasm.msx_detected_mapper());
-    if (isSystem) localName = file.name;
-    else {
+    if (isSystem) {
+      localName = file.name;
+      closePanel('advanced-panel');
+    } else {
       const selected = wasm.msx_detected_mapper();
       const name = mapperNames[selected];
       cartridge = `${file.name} (${mapper === 0 ? `Auto: ${name}${wasm.msx_detection_confidence() === 4 ? ', estimate' : ', recognized format'}` : name})`;
@@ -239,11 +377,9 @@ async function load(file, isSystem) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
     const message = error instanceof RangeError ? 'Not enough browser/Wasm memory to import this image. Close other tabs or try a smaller image.' : `ROM import failed: ${error.message}`;
-    status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
-    $(isSystem ? 'bios' : 'cartridge').value = '';
+    status(`${message} Selected ROMs are unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', isSystem ? undefined : 'cartridge');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    $(isSystem ? 'bios' : 'cartridge').value = '';
   }
 }
 const soundProfileNames = ['', 'Snatcher', 'SD Snatcher'];
@@ -251,8 +387,7 @@ function updateSoundCartridge() {
   const profile = ready ? wasm.msx_sound_cartridge_profile() : 0;
   $('sound-cartridge-status').textContent = profile ? `${soundProfileNames[profile]} · 64 KiB RAM · SCC-I · slot 1` : 'No sound cartridge installed';
   for (const id of ['sound-cartridge', 'install-sound-cartridge']) $(id).disabled = !ready || loading;
-  $('remove-sound-cartridge').disabled = !ready || (!profile && !loading);
-  $('remove-sound-cartridge').textContent = loading ? 'Cancel import' : 'Remove sound cartridge';
+  $('remove-sound-cartridge').disabled = !ready || loading || !profile;
 }
 $('install-sound-cartridge').addEventListener('click', () => {
   if (!ready || loading) return;
@@ -261,41 +396,57 @@ $('install-sound-cartridge').addEventListener('click', () => {
     status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return;
   }
   detachSave(); cartridge = ''; $('cartridge').value = '';
-  restart(() => wasm.msx_cancel_upload());
+  restart(() => wasm.msx_cancel_upload(), 'install-sound-cartridge');
 });
 $('remove-sound-cartridge').addEventListener('click', () => {
-  if (loading) {
-    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session, sound cartridge and media unchanged.'); return;
-  }
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); });
+  if ($('remove-sound-cartridge').disabled) return;
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_sound_cartridge(); }, 'install-sound-cartridge');
 });
 
 // Tape uses the same generation/staging boundary as other local media imports.
 function updateTape() {
   const flags = ready ? wasm.msx_tape_flags() : 0;
-  for (const id of ['open-cas', 'tape', 'tape-rate']) $(id).disabled = !ready || loading;
-  $('rewind-tape').disabled = !ready || !(flags & 1) || loading;
-  $('eject-tape').disabled = !ready || (!(flags & 1) && !loading);
-  $('eject-tape').textContent = loading ? 'Cancel import' : 'Eject tape';
-  const text = flags & 1 ? `Cassette: ${tapeName} · ${wasm.msx_tape_rate()} baud · ${flags & 4 ? 'end of tape' : paused ? 'paused' : flags & 2 ? 'playing' : 'stopped'} · motor ${flags & 2 ? 'on' : 'off'} · ${Math.floor(wasm.msx_tape_position())} s` : 'Cassette: empty';
+  for (const id of ['insert-cassette', 'open-cas', 'tape', 'tape-rate']) $(id).disabled = !ready || loading;
+  $('rewind-tape').hidden = !(flags & 1);
+  $('eject-tape').hidden = !(flags & 1);
+  $('rewind-tape').disabled = !(flags & 1) || loading;
+  $('eject-tape').disabled = !ready || loading || !(flags & 1);
+  const text = flags & 1 ? `${tapeName} · ${wasm.msx_tape_rate()} baud · ${flags & 4 ? 'end of tape' : paused ? 'paused' : flags & 2 ? 'playing' : 'stopped'} · motor ${flags & 2 ? 'on' : 'off'} · ${Math.floor(wasm.msx_tape_position())} s` : 'Empty';
   if ($('tape-status').textContent !== text) $('tape-status').textContent = text;
 }
-function cancelMediaImport() {
+function cancelImport() {
   importGeneration++;
   loading = false;
   wasm.msx_cancel_upload();
 }
+for (const slot of mediaSlots) {
+  const cancel = $(`cancel-${slot}-import`);
+  cancel.addEventListener('click', () => {
+    if (cancel.hidden) return;
+    cancelImport();
+    updateControls();
+    status(slot === 'cassette' ? 'Import canceled. Session and tape unchanged.' : 'Import canceled. Session and media unchanged.');
+  });
+}
+for (const target of settingsImports) {
+  $(`cancel-${target}-import`).addEventListener('click', () => {
+    if (!isImporting(target)) return;
+    cancelImport();
+    updateControls();
+    status('Import canceled. Session, firmware and media unchanged.');
+  });
+}
 $('open-cas').addEventListener('click', () => $('tape').click());
 $('tape').addEventListener('cancel', () => {
-  cancelMediaImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
+  if (loading && !isImporting('cassette')) return;
+  cancelImport(); updateControls(); status('CAS import canceled. Session and tape unchanged.');
 });
 $('tape').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file) return;
-  const generation = ++importGeneration;
+  const file = takeFile(event.target);
+  if (!file || !ready) return;
   const rate = Number($('tape-rate').value);
-  loading = true; updateControls(); status(`Loading CAS ${file.name}…`);
+  const generation = beginMediaImport('cassette');
+  status(`Loading CAS ${file.name}…`);
   try {
     if (!/\.cas$/i.test(file.name) || !file.size || file.size > 16 * 1024 * 1024) throw new Error('Select a nonempty MSX .cas image up to 16 MiB.');
     if (![1200, 2400].includes(rate)) throw new Error('CAS rate must be 1200 or 2400 baud.');
@@ -310,38 +461,35 @@ $('tape').addEventListener('change', async event => {
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
-    status(`CAS import failed: ${error.message} Session and previous tape unchanged.`, 'error');
+    status(`CAS import failed: ${error.message} Session and previous tape unchanged.`, 'error', 'tape');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('rewind-tape').addEventListener('click', () => {
-  cancelMediaImport(); wasm.msx_rewind_tape(); updateControls();
+  cancelImport(); wasm.msx_rewind_tape(); updateControls();
   status('Tape rewound. Execution unchanged.');
 });
 $('eject-tape').addEventListener('click', () => {
-  const canceled = loading;
-  cancelMediaImport();
-  if (!canceled) { wasm.msx_eject_tape(); tapeName = ''; }
-  updateControls(); status(canceled ? 'Import canceled. Session and tape unchanged.' : 'Tape ejected. Execution unchanged.');
+  if ($('eject-tape').disabled) return;
+  cancelImport(); wasm.msx_eject_tape(); tapeName = '';
+  updateControls(); status('Tape ejected. Execution unchanged.');
+  $('insert-cassette').focus();
 });
 
 // Internal FM firmware shares the transactional local-media staging boundary.
 function updateMusic() {
   const installed = ready && wasm.msx_music_profile() === 1;
   for (const id of ['music-profile', 'open-music-rom', 'music-rom']) $(id).disabled = !ready || loading;
-  $('remove-music-rom').disabled = !ready || (!installed && !loading);
-  $('remove-music-rom').textContent = loading ? 'Cancel import' : 'Remove MSX-MUSIC';
+  $('remove-music-rom').disabled = !ready || loading || !installed;
   $('music-status').textContent = installed ? `MSX-MUSIC · ${musicRomName} · slot 3-1 · ${model ? 'active' : 'inactive on MSX1'}` : 'MSX-MUSIC not installed';
 }
 $('open-music-rom').addEventListener('click', () => $('music-rom').click());
 $('music-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = ++importGeneration;
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
   const profile = Number($('music-profile').value);
-  loading = true; updateControls();
+  const generation = beginSettingsImport('music-rom');
   status(`Loading MSX-MUSIC firmware ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a separate 16 KiB internal-profile .rom or .bin firmware image.');
@@ -353,41 +501,35 @@ $('music-rom').addEventListener('change', async event => {
     persistSave();
     if (!wasm.msx_install_music_rom(bytes.length, profile)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     musicRomName = file.name;
-    restart(() => {});
+    restart(() => {}, 'open-music-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
     status(`MSX-MUSIC import failed: ${error.message} Session and installation unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-music-rom').addEventListener('click', () => {
-  if (loading) {
-    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session and installation unchanged.');
-    return;
-  }
+  if ($('remove-music-rom').disabled) return;
   persistSave();
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_music_rom(); musicRomName = ''; }, 'open-music-rom');
 });
 
 // The external accessory has its own firmware identity and shared battery save.
 function updatePac() {
   const installed = ready && wasm.msx_fm_pac_profile() === 1;
   for (const id of ['open-pac-rom', 'pac-rom']) $(id).disabled = !ready || loading;
-  $('remove-pac-rom').disabled = !ready || (!installed && !loading);
-  $('remove-pac-rom').textContent = loading ? 'Cancel import' : 'Remove FM-PAC';
+  $('remove-pac-rom').disabled = !ready || loading || !installed;
   $('pac-status').textContent = installed ? `FM-PAC · ${pacRomName} · slot 2-1 · active` : 'FM-PAC not installed';
   for (const id of ['export-pac-save', 'import-pac-save']) $(id).disabled = !ready || loading || !pacSaves.active;
 }
 $('open-pac-rom').addEventListener('click', () => $('pac-rom').click());
 $('pac-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = ++importGeneration;
-  loading = true; updateControls(); status(`Loading FM-PAC firmware ${file.name}…`);
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
+  const generation = beginSettingsImport('pac-rom');
+  status(`Loading FM-PAC firmware ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 65536) throw new Error('Select a separate 64 KiB original FM-PAC .rom or .bin firmware image.');
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -400,23 +542,19 @@ $('pac-rom').addEventListener('change', async event => {
     if (!wasm.msx_install_fm_pac(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     pacRomName = file.name;
     attachSave(identity, 'original-fm-pac', pacSaves);
-    restart(() => {});
+    restart(() => {}, 'open-pac-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
     status(`FM-PAC import failed: ${error.message} Session and installation unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-pac-rom').addEventListener('click', () => {
-  if (loading) {
-    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session and installation unchanged.'); return;
-  }
+  if ($('remove-pac-rom').disabled) return;
   persistSave(); detachSave(pacSaves);
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_fm_pac(); pacRomName = ''; }, 'open-pac-rom');
 });
 
 // Disk media and interface imports share the ROM generation token and staging allocation.
@@ -425,25 +563,27 @@ function updateDisk() {
   const profile = philips ? `Philips NMS1200-style · ${diskRomName} · slot 2 · selected system firmware` : 'Weave disk/demo boot option · no external interface installed';
   if ($('disk-profile-status').textContent !== profile) $('disk-profile-status').textContent = profile;
   for (const id of ['open-disk-rom', 'disk-rom']) $(id).disabled = !ready || loading;
-  $('remove-disk-rom').disabled = !ready || (!philips && !loading);
-  $('remove-disk-rom').textContent = loading ? 'Cancel import' : 'Remove disk interface';
+  $('remove-disk-rom').disabled = !ready || loading || !philips;
   const flags = ready ? wasm.msx_disk_flags() : 0;
   const mounted = Boolean(flags & 1);
-  for (const id of ['open-dsk', 'disk']) $(id).disabled = !ready || loading;
+  for (const id of ['insert-disk', 'open-dsk', 'disk', 'mount-disk-demo', 'mount-disk-protected']) $(id).disabled = !ready || loading;
+  $('disk-actions').hidden = $('eject-disk').hidden = !mounted;
   for (const id of ['boot-disk', 'export-disk', 'disk-protected']) $(id).disabled = !ready || loading || !mounted;
   // Eject is also a cancellation boundary, like cartridge Eject.
   $('eject-disk').disabled = !ready || !mounted;
   if (mounted) $('disk-protected').checked = Boolean(flags & 2);
   const bootError = ready && wasm.msx_disk_boot_state() === 2 ? ' · boot failed: this firmware requires a WV boot sector; check media or use the original demo' : '';
-  const text = mounted ? `Drive A: ${diskName} · ${wasm.msx_disk_len() / 1024} KiB · ${flags & 2 ? 'read-only' : 'writable'} · ${flags & 4 ? 'unsaved modifications — export to keep' : 'no unsaved modifications'}${bootError}` : 'Drive A: empty';
-  if ($('disk-status').textContent !== text) $('disk-status').textContent = text;
+  const text = mounted ? `${diskName} · ${wasm.msx_disk_len() / 1024} KiB · ${flags & 2 ? 'read-only' : 'writable'} · ${flags & 4 ? 'unsaved modifications — export to keep' : 'no unsaved modifications'}${bootError}` : 'Empty';
+  if ($('disk-status').textContent !== text) {
+    $('disk-status').textContent = text;
+    $('disk-status').dataset.warning = String(Boolean((flags & 4) || bootError));
+  }
 }
 $('open-disk-rom').addEventListener('click', () => $('disk-rom').click());
 $('disk-rom').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = ++importGeneration;
-  loading = true; updateControls();
+  const file = takeFile(event.target);
+  if (!file || !ready || loading) return;
+  const generation = beginSettingsImport('disk-rom');
   status(`Loading Philips disk ROM ${file.name}…`);
   try {
     if (!/\.(rom|bin)$/i.test(file.name) || file.size !== 16384) throw new Error('Select a 16 KiB AB-header .rom or .bin disk ROM.');
@@ -455,57 +595,62 @@ $('disk-rom').addEventListener('change', async event => {
     persistSave();
     if (!wasm.msx_install_disk_rom(bytes.length, 1)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     diskRomName = file.name;
-    restart(() => {});
+    restart(() => {}, 'open-disk-rom');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
     status(`Disk ROM import failed: ${error.message} Session, interface and media unchanged.`, 'error');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
 });
 $('remove-disk-rom').addEventListener('click', () => {
-  if (loading) {
-    importGeneration++; loading = false; wasm.msx_cancel_upload(); updateControls();
-    status('Import canceled. Session, interface and media unchanged.');
-    return;
-  }
+  if ($('remove-disk-rom').disabled) return;
   persistSave();
-  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; });
+  restart(() => { wasm.msx_cancel_upload(); wasm.msx_remove_disk_rom(); diskRomName = ''; }, 'open-disk-rom');
 });
 $('open-dsk').addEventListener('click', () => $('disk').click());
-$('disk').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  if (!file || !ready || loading) { event.target.value = ''; return; }
-  const generation = ++importGeneration;
-  loading = true; updateControls();
-  try {
+$('disk').addEventListener('change', event => {
+  const file = takeFile(event.target);
+  if (file) mountDisk(file.name, async () => {
     if (!/\.dsk$/i.test(file.name) || ![368640, 737280].includes(file.size)) throw new Error('Use a raw .dsk of exactly 360 or 720 KiB (80 tracks, 1/2 sides, 9 sectors of 512 bytes). DMK/FDI and truncated images are unsupported.');
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    return file.arrayBuffer();
+  });
+});
+$('mount-disk-demo').addEventListener('click', () => {
+  mountDisk('weave-disk-demo.dsk', async () => (await staticAsset('weave-disk-demo.dsk')).arrayBuffer());
+});
+async function mountDisk(name, readBytes) {
+  if (!ready || loading) return;
+  const protection = $('mount-disk-protected');
+  const protectedDisk = protection.checked;
+  const generation = beginMediaImport('disk');
+  status(`Loading DSK ${name}…`);
+  try {
+    const bytes = new Uint8Array(await readBytes());
     if (generation !== importGeneration) return;
     const pointer = wasm.msx_upload(bytes.length);
     if (!pointer) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     new Uint8Array(wasm.memory.buffer, pointer >>> 0, bytes.length).set(bytes);
-    if (!wasm.msx_mount_disk(bytes.length, $('disk-protected').checked ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
-    diskName = file.name;
+    if (!wasm.msx_mount_disk(bytes.length, protectedDisk ? 1 : 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
+    diskName = name;
+    protection.checked = true;
     status(wasm.msx_disk_profile() === 1 ? 'Disk mounted in drive A:. Boot disk restarts the selected system firmware with the Philips interface.' : 'Disk mounted in drive A:. Choose Boot disk to restart with original disk firmware.');
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
-    status(`DSK import failed: ${error.message} Session and previous disk unchanged.`, 'error');
+    status(`DSK import failed: ${error.message} Session and previous disk unchanged.`, 'error', 'disk');
   } finally {
     if (generation === importGeneration) { loading = false; updateControls(); }
-    event.target.value = '';
   }
-});
+}
 $('boot-disk').addEventListener('click', () => {
   persistSave();
-  if (!wasm.msx_boot_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  if (!wasm.msx_boot_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error', 'disk'); return; }
   restart(() => {});
 });
 $('eject-disk').addEventListener('click', () => {
-  if (!wasm.msx_eject_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error'); return; }
+  if (!wasm.msx_eject_disk()) { status(readString(wasm.msx_error(), wasm.msx_error_len()), 'error', 'disk'); return; }
   diskName = '';
   restart(() => {});
 });
@@ -516,6 +661,7 @@ $('export-disk').addEventListener('click', () => {
   const link = document.createElement('a');
   link.href = url; link.download = diskName.replace(/\.dsk$/i, '') + '-modified.dsk'; link.click();
   wasm.msx_disk_exported(); updateDisk();
+  status('DSK exported.');
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 window.addEventListener('beforeunload', event => {
@@ -523,7 +669,12 @@ window.addEventListener('beforeunload', event => {
 });
 
 // Save failures have their own persistent status, independent of emulator messages.
-function saveStatus(message, target = gameSaves) { $(target.status).textContent = message; }
+function saveStatus(message, target = gameSaves) {
+  $(target.status).textContent = message;
+  const warning = $(target === gameSaves ? 'cartridge-save-warning' : 'pac-save-warning');
+  warning.hidden = !target.active?.blocked;
+  warning.textContent = warning.hidden ? '' : `${target === gameSaves ? 'Cartridge' : 'FM-PAC'} SRAM needs attention. Open Settings to export a backup or recover the save.`;
+}
 function sramBytes(target = gameSaves) { return new Uint8Array(wasm.memory.buffer, target.pointer() >>> 0, target.size()).slice(); }
 function restoreSave(bytes, target = gameSaves) {
   if (bytes.length !== target.size() || !target.sizes.includes(bytes.length)) throw new Error('Save size does not match cartridge SRAM.');
@@ -631,19 +782,38 @@ async function staticAsset(path) {
   if (!response.ok) throw new Error(`${path}: HTTP ${response.status}. Reload or try another demo.`);
   return response;
 }
-function describeDemo() {
-  const demo = demos?.find(item => item.id === $('demo').value);
-  if (!demo) return;
-  $('demo-description').textContent = `${demo.model} · ${demo.mapper} · ${demo.description}`;
-  $('demo-controls-help').textContent = `Controls: ${demo.controls}`;
+function demoChoice(demo) {
+  const row = document.createElement('div');
+  row.className = 'demo-choice';
+  const play = document.createElement('button');
+  play.id = `demo-${demo.id}`;
+  const modelLabel = document.createElement('span');
+  modelLabel.className = 'demo-model';
+  modelLabel.textContent = demo.model;
+  play.append(demo.title, modelLabel);
+  play.addEventListener('click', () => playDemo(demo));
+  const details = document.createElement('details');
+  details.className = 'demo-details';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Controls & credits';
+  summary.setAttribute('aria-label', `${demo.title} controls and credits`);
+  const description = document.createElement('p');
+  description.textContent = `${demo.mapper} mapper · ${demo.description} ${demo.controls}`;
+  const credit = document.createElement('p');
   const license = document.createElement('a');
   license.href = demo.licenseFile; license.textContent = demo.license;
   const source = document.createElement('a');
   source.href = demo.source; source.textContent = 'Source';
-  $('demo-credit').replaceChildren(document.createTextNode(`${demo.creator} · `), license, document.createTextNode(' · '), source);
+  credit.append(`${demo.creator} · `, license, ' · ', source);
+  details.append(summary, description, credit);
+  row.append(play, details);
+  return row;
 }
 async function loadCatalog() {
+  if (!ready || loading || catalogLoading) return;
+  const retry = $('retry-demos');
   catalogLoading = true; updateControls();
+  $('demo-message').textContent = 'Loading demos…';
   try {
     const manifest = await (await staticAsset('demos/manifest.json')).json();
     if (manifest.version !== 1 || !Array.isArray(manifest.demos) || !manifest.demos.length) throw new Error('Invalid demo manifest.');
@@ -654,24 +824,22 @@ async function loadCatalog() {
           || ![demo.id, demo.title, demo.creator, demo.description, demo.controls, demo.license].every(value => typeof value === 'string' && value.length)
           || !demo.source?.startsWith('https://github.com/')) throw new Error('Invalid demo metadata.');
     }
-    demos = manifest.demos;
-    $('demo').replaceChildren(...demos.map(demo => new Option(demo.title, demo.id)));
-    describeDemo();
+    const demoList = $('demo-list');
+    demoList.replaceChildren(...manifest.demos.map(demoChoice));
+    if (document.activeElement === retry && $('cartridge-picker').matches(':popover-open')) {
+      demoList.querySelector('button').focus();
+    }
     $('demo-message').textContent = '';
-    $('play-demo').textContent = 'Play demo';
+    retry.hidden = true;
   } catch (error) {
     $('demo-message').textContent = `Demos unavailable: ${error.message} Your session is unchanged. Retry to reload the catalog.`;
-    $('play-demo').textContent = 'Retry demos';
+    retry.hidden = false;
   } finally { catalogLoading = false; updateControls(); }
 }
-$('demo').addEventListener('change', describeDemo);
-$('play-demo').addEventListener('click', async () => {
+$('retry-demos').addEventListener('click', loadCatalog);
+async function playDemo(demo) {
   if (!ready || loading || catalogLoading) return;
-  if (!demos) { await loadCatalog(); return; }
-  const demo = demos.find(item => item.id === $('demo').value);
-  if (!demo) return;
-  const generation = ++importGeneration;
-  loading = true; updateControls();
+  const generation = beginMediaImport('cartridge');
   status(`Loading ${demo.title}…`);
   try {
     const bytes = new Uint8Array(await (await staticAsset(demo.file)).arrayBuffer());
@@ -696,9 +864,11 @@ $('play-demo').addEventListener('click', async () => {
   } catch (error) {
     if (generation !== importGeneration) return;
     wasm.msx_cancel_upload();
-    status(`Demo load failed: ${error.message} Session unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error');
-  } finally { if (generation === importGeneration) { loading = false; updateControls(); } }
-});
+    status(`Demo load failed: ${error.message} Session unchanged: ${system}${wasm.msx_disk_profile() === 1 ? ' · Philips NMS1200-style' : ''}${cartridge ? ` · ${cartridge}` : ''}.`, 'error', 'cartridge');
+  } finally {
+    if (generation === importGeneration) { loading = false; updateControls(); }
+  }
+}
 // International MSX keyboard matrix (US key placement). Matrix keys continue
 // to work with a user BIOS; text/editor events are consumed only by our firmware.
 const matrix = new Map();
@@ -766,6 +936,7 @@ function restoreFirmware(selected = 'auto') {
   detachSave();
   localName = '';
   clearRomSelections();
+  closePanel('advanced-panel');
   restart(() => {});
 }
 $('builtin').addEventListener('click', () => restoreFirmware());
@@ -805,20 +976,26 @@ $('model').addEventListener('change', () => {
   updateModelControls();
   restart(() => wasm.msx_model(model));
 });
-$('cartridge').addEventListener('change', event => load(event.target.files[0], false));
+$('cartridge').addEventListener('change', event => {
+  load(takeFile(event.target), false);
+});
 $('bios').addEventListener('change', event => {
-  if (!model) load(event.target.files[0], true);
+  if (!model) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    load(file, true);
+  }
   else { mainFile = event.target.files[0]; updateFirmwareSelection(); }
 });
 $('subrom').addEventListener('change', event => { subFile = event.target.files[0]; updateFirmwareSelection(); });
 $('apply-firmware').addEventListener('click', async () => {
   if (!ready || loading) return;
-  const generation = ++importGeneration;
+  let generation = importGeneration;
   try {
     if (!mainFile || !subFile) throw new Error('Select both the 32 KiB main BIOS/BASIC and the 16 KiB sub-ROM.');
     if (mainFile.size !== 32768 || subFile.size !== 16384) throw new Error('MSX2 requires a 32 KiB main BIOS/BASIC and a separate 16 KiB sub-ROM.');
     if (![mainFile, subFile].every(file => /\.(rom|bin)$/i.test(file.name))) throw new Error('Select .rom or .bin firmware images.');
-    loading = true; updateControls();
+    generation = beginSettingsImport('bios');
     const [main, sub] = await Promise.all([mainFile.arrayBuffer(), subFile.arrayBuffer()]);
     if (generation !== importGeneration) return;
     const pointer = wasm.msx_upload(49152);
@@ -828,6 +1005,7 @@ $('apply-firmware').addEventListener('click', async () => {
     if (!wasm.msx_load(49152, 2, 0)) throw new Error(readString(wasm.msx_error(), wasm.msx_error_len()));
     localName = `${mainFile.name} + ${subFile.name}`;
     firmware = 'local'; $('firmware').value = firmware;
+    closePanel('advanced-panel');
     restart(() => {});
   } catch (error) {
     if (generation === importGeneration) { wasm.msx_cancel_upload(); status(`ROM import failed: ${error.message} Active firmware is unchanged: ${system}.`, 'error'); }

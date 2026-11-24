@@ -40,13 +40,19 @@ RUN
 The screen prints 1 through 5. `LIST` displays the program. Replace a numbered line by
 entering it again, or delete it by entering its number alone. Left/Right, Home, End,
 Backspace and Delete edit the current line. ASCII text can also be pasted. Escape
-interrupts execution. **Reset** clears the machine and program while keeping selected
-ROMs. **Use Weave BASIC** clears firmware overrides and ejects cartridges on either
-model. **Pause / Resume** controls emulation. The compact toolbar also has **Open
-ROM**, **Eject**, and **Fullscreen**. Fullscreen keeps the toolbar accessible; **Exit
-fullscreen** or Escape returns to the page. Browsers without fullscreen support get a
-focused view with the same controls and exit options. BASIC programs and ROM
-images are not stored. Supported ASCII cartridge SRAM is saved locally; see [cartridge saves](docs/cartridge-sram.md#browser-saving-and-recovery).
+interrupts execution when the display has focus. **Reset** clears the machine and
+program while keeping selected ROMs. **Pause / Resume** controls emulation.
+**Fullscreen** fits the screen to the available space and keeps playback controls
+at the bottom. **Exit fullscreen** or Escape returns to the page. Browsers without
+fullscreen support get a focused view with the same exit options.
+
+**Machine**, **Cartridge**, **Drive A:** and **Cassette** sit beside the player on
+wide screens and below it on narrow screens. Open **Insert cartridge** to launch
+a bundled demo or choose **Open local ROM**. Mounted media show their names and
+available actions in their slots. **Settings → Use Weave BASIC** clears firmware
+overrides and ejects cartridges on either model. BASIC programs and ROM images
+stay in the current tab. Supported ASCII cartridge SRAM is saved locally.
+[Cartridge save and recovery details](docs/cartridge-sram.md#browser-saving-and-recovery)
 
 Use **Display** below the screen to switch between **Retro CRT** and **Clean**,
 even while paused.
@@ -54,8 +60,10 @@ Retro CRT is the default on browsers with usable WebGL2. It adds subtle scanline
 a fine color mask and mild softness. Clean shows the exact framebuffer with
 nearest-neighbor scaling and avoids the shader's GPU cost. The emulator shows
 Clean with a status message if WebGL2 is unavailable or fails, and resumes the
-requested effect if the graphics context returns. Your explicit choice is stored
-in this browser separately from cartridge saves.
+requested effect if the graphics context returns. Your explicit display mode is
+stored in this browser separately from cartridge saves. **Display scale** caps the
+4:3 screen at 1×, 2× or 3× a 256×192 frame, fitting smaller viewports automatically.
+Scale and volume apply to the current session.
 
 Retro CRT is an aesthetic effect. It uses one shader pass on the current frame
 and scales its drawing buffer with display size and device pixel ratio up to
@@ -69,20 +77,33 @@ The starters enter commands into the current built-in BASIC session, resume paus
 emulation, and restore keyboard focus. Graphics draws a sine curve using the
 emulated VDP; Enter returns to text. Sound demo enables audio and plays a sustained
 tone; **Stop tone** silences it. You can also **Enable audio**, then type `BEEP`
-and silence it with `SOUND 8,0`. **Mute audio** turns browser playback off;
-**Resume audio** restores it after browser suspension. Audio requires a user gesture.
+and silence it with `SOUND 8,0`. **Volume** adjusts browser playback gain.
+**Mute audio** turns playback off, and **Resume audio** restores it after browser
+suspension. Audio requires a user gesture.
 
-Expand **Keyboard & BASIC help** for editing and input guidance, **ROMs & advanced
-system options** for BIOS loading and compatibility/legal details, or **BASIC text
-transcript** for the full built-in interpreter output. Weave BASIC is our original
-interpreter, not original Microsoft MSX BASIC.
+Open **Help** for keyboard, joystick and media instructions, Weave BASIC examples,
+and the **BASIC text transcript**. Open **Settings** for firmware, cartridge
+mappers and saves, the disk interface, and optional sound hardware. Escape closes
+an open panel or picker and returns focus to its button. Weave BASIC is our
+independently implemented, MSX BASIC-inspired interpreter.
+
+### Browser UI principles
+
+- Give the 4:3 display the most space, with playback controls directly below it.
+- Use spacing and consistent slot controls to show what belongs together. Keep
+  names, available actions, and warnings next to the media they describe.
+- Keep occasional settings, help and credits reachable in contextual panels.
+  Clearly indicate when an action restarts the machine or requires an export.
+
+The screen-first hierarchy and media pickers were inspired by the maintainer's
+SNES browser player. [snes-rust UI/UX reference](https://github.com/takahirox/snes-rust/blob/416b6c4097c447cd2f2a58298c153ab6295f243a/README.md#uiux)
 
 ## Demo ROMs
 
-Choose a title in **Demo ROMs** below the display, then **Play demo**. No local
-ROM or account is needed. The app selects the declared machine and Plain mapper,
-boots the bundled C-BIOS and focuses the display. plustaker starts immediately;
-press Space/Z at YOKO’s start prompt:
+Choose a title from **Cartridge → Insert cartridge**. The app selects the declared
+machine and Plain mapper, boots the bundled C-BIOS under automatic firmware
+policy and focuses the display. Open **Controls & credits** for the title's keys
+and provenance. plustaker starts immediately. Press Space/Z at YOKO’s start prompt.
 
 | Demo | Machine | Play |
 | --- | --- | --- |
@@ -99,9 +120,9 @@ restarts the cartridge; **Eject** returns to BASIC in the same model under autom
 policy. **Use Weave BASIC** clears explicit firmware overrides and the cartridge.
 Explicit C-BIOS remains selected across demo/model changes. Local firmware and
 the diagnostic loader are retained for same-model demos; a cross-model demo is
-rejected with the session unchanged until you clear that override. **Open ROM**
-and the BASIC starters remain available. Failed fetches, integrity checks or
-unsupported imports preserve the running session; retry Play demo.
+rejected with the session unchanged until you clear that override. Failed fetches,
+integrity checks or unsupported imports preserve the running session. Reopen
+**Insert cartridge** to retry, or use **Retry demos** if the catalog fails to load.
 
 The two unmodified third-party ROMs retain their upstream **MIT** licenses. The
 [manifest](demos/manifest.json) pins official source/download revisions, sizes,
@@ -123,8 +144,9 @@ Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
 
 ## Cassette playback
 
-**Open CAS** mounts a local MSX CAS image (up to 16 MiB) at **1200 baud** by default;
-select **2400 baud** before importing for that rate. Software receives standard
+Choose **Cassette → Insert cassette → Open local CAS** to mount a local MSX CAS
+image (up to 16 MiB) at **1200 baud** by default. Select **2400 baud** in the picker
+before importing for that rate. Software receives standard
 clocked bytes through PSG R14.7 and controls the active-low PPI motor. Status shows
 mounted media, rate, motor, playback/end state and position. **Rewind tape** resets
 tape position; **Eject tape** removes it. Neither restarts execution. Pause freezes
@@ -135,17 +157,17 @@ Local bytes stay private in this tab and are never uploaded or stored. Standard
 read-only CAS only: recording, WAV/TSX, exotic loaders and audible monitoring are
 deferred. C-BIOS and Weave BASIC do not gain a complete BASIC tape environment;
 compatible firmware/software is still required. No load command or payload is
-injected. Original MIT cartridge/CAS diagnostics are linked below the display;
+injected. Original MIT cartridge/CAS diagnostics are linked under **Help → Cassette playback**;
 they validate both models/rates and exact recovered bytes, not commercial-title
 compatibility. See [format, reconstruction policies, wiring, fixtures and limits](docs/cassette.md).
 
 ## Floppy disks
 
-**Open DSK → Boot disk** mounts a private raw 360/720 KiB image in drive A: and
-boots original, MIT-licensed Z80 disk firmware through a WD2793-compatible
-controller. Download the original bootable disk demo below the browser display,
-open it, boot and press Space. Read-only is the default; uncheck it and press Space
-to write, then **Export modified DSK** to keep changes. Reset retains media and
+Choose **Drive A: → Insert disk** to mount the bundled **Weave disk demo** or
+**Open local DSK** for a raw 360/720 KiB image. **Boot disk** restarts the machine
+with the original MIT-licensed Z80 disk firmware through a WD2793-compatible
+controller. In the demo, press Space to exercise the disk. Read-only is the default.
+Uncheck it and press Space to write, then use **Export DSK** to keep changes. Reset retains media and
 changes; export is required before ejecting or replacing modified media. Disk
 images stay in this page's memory and are never uploaded or persisted.
 
@@ -155,14 +177,14 @@ boots the original disk firmware, takes priority over a parked cartridge, and
 requires its `WV` sector signature. Clear an explicit system firmware override
 with Use Weave BASIC before using that option.
 
-For conventional wiring, open **ROMs & advanced system options → Disk interface →
+For conventional wiring, open **Settings → Disk interface →
 Install Philips disk ROM** and supply a local **16 KiB AB-header disk ROM**. This
 explicit **Philips NMS1200-style** single-drive interface installs in slot 2,
 page 1, independently of media and selected system firmware. Installation restarts
 execution while retaining the main BIOS, MSX2 sub-ROM, cartridge and SRAM.
 **Boot disk** then restarts the selected system firmware with the disk interface;
 it does not install Weave firmware or require `WV`. Leave an active Weave disk
-boot with Use Weave BASIC or Open ROM before installing this profile.
+boot with **Use Weave BASIC** or insert a cartridge before installing this profile.
 
 Reset, disk ejection, firmware/cartridge changes and model changes retain the
 installed disk ROM. Model/firmware controls still follow their existing rules for
@@ -181,7 +203,7 @@ provenance and validation](docs/disks.md).
 
 ## Optional MSX-MUSIC
 
-Under **ROMs & advanced system options → MSX-MUSIC**, explicitly install a
+Under **Settings → Optional sound hardware → Internal MSX-MUSIC**, install a
 separate local **16 KiB internal-profile firmware** image. It maps read-only in
 expanded slot **3-1**, 4000h–7FFFh. The clocked YM2413 uses write-only ports
 7Ch/7Dh and continues playing while the firmware is hidden. FM joins PSG/SCC in
@@ -199,7 +221,7 @@ See [synthesis, timing, notices, fixture instructions and validation](docs/msx-m
 
 ## Optional external FM-PAC
 
-Under **ROMs & advanced system options → External FM-PAC**, supply a separate
+Under **Settings → Optional sound hardware → External FM-PAC**, supply a separate
 **64 KiB original-profile firmware**. Both MSX1 and MSX2 support this explicitly
 optional accessory in **2-1/page 1**, alongside the game or SCC-I in slot 1 and
 disk in 2-0. Slot 2 is expanded only while installed. Four ROM banks, memory
@@ -223,21 +245,21 @@ with the V9938, 128 KiB VRAM and 256 KiB mapped RAM profile. Choose **MSX1** in 
 that model; reloads and new tabs start MSX2 again without remembering a preference.
 Both models support Weave BASIC.
 Selecting a machine clears incompatible ROMs and starts fresh BASIC. Under the
-default automatic policy, **Open ROM** switches to the matching bundled
+default automatic policy, inserting a cartridge switches to the matching bundled
 **C-BIOS 0.29a** (MSX1 main or MSX2 main + sub-ROM) before Z80 cartridge boot.
 **Eject** returns to fresh BASIC in the same model. **Reset** retains firmware,
 cartridge and mapper, restoring initial banks. Opening a cartridge or changing
 firmware resets execution and **discards the in-memory BASIC program**.
 
-Under **ROMs & advanced system options → Firmware policy**, explicitly selecting
+Under **Settings → System firmware → Firmware policy**, explicitly selecting
 C-BIOS, the MSX2 **Original diagnostic loader**, or local firmware sets an override
-that survives Open ROM, Reset and Eject. C-BIOS is a separate cartridge BIOS with
+that survives cartridge insertion, Reset and Eject. C-BIOS is a separate cartridge BIOS with
 **no MSX BASIC**. The diagnostic loader has no standard BIOS API. Selecting either
 bundled override ejects cartridges and clears local firmware selections.
 **Use Weave BASIC** clears the override and cartridge, restoring automatic behavior.
 No Microsoft MSX BASIC 2.0 or commercial cartridge compatibility is claimed.
 
-Download our original **C-BIOS service-test cartridge** under advanced options and
+Download our original **C-BIOS service-test cartridge** under firmware compatibility and credits in Settings and
 open it to exercise standard BIOS calls, expanded slots, video, keyboard and PSG.
 Space changes a black tile to white and plays a tone after enabling audio. The
 separate original MSX2 diagnostic demonstrates V9938 512×212 palette video,
@@ -411,7 +433,7 @@ MSX BASIC-inspired language subset, not Microsoft's original BASIC.
 These examples, fixtures and interpreter additions are independently authored under
 this repository's MIT license. Copy/type each listing into a fresh Weave BASIC session
 on either machine (Reset or `NEW`), then enter `RUN`. They are also in
-[examples/basic](examples/basic) and the browser's **Keyboard & BASIC help**.
+[examples/basic](examples/basic) and **Help → BASIC commands and examples**.
 
 Array/data processing with a subroutine:
 
@@ -511,15 +533,17 @@ download or SourceForge connection. Rust has no external crate dependencies;
 Playwright is a development-only dependency under its upstream license and is not
 shipped in the site.
 
-Expand **ROMs & advanced system options** to download the original **test cartridge**,
-then choose it with **Open ROM** in the toolbar. It displays a title and sprite;
+Open **Settings → Cartridge mapper and SRAM → Mapper compatibility, saves and
+diagnostics** to download the original **test cartridge**, then load it with
+**Insert cartridge → Open local ROM**. It displays a title and sprite;
 hold Space to play a roughly 440 Hz PSG tone.
 This cartridge runs Z80 code against standard hardware ports, with no native BASIC
 service calls. Select `.rom` or `.bin` cartridge files locally. There is **no fixed
 upload size limit**: available browser/Wasm memory and the selected mapper's hardware
 address range apply. No image is truncated to fit.
 
-Choose **Cartridge mapper** under **ROMs & advanced system options** before selecting the file with **Open ROM**:
+Choose **Cartridge mapper** in **Settings** before selecting the file with
+**Insert cartridge → Open local ROM**.
 
 - **Auto** (default) recognizes plain 8, 16, 32 and 48 KiB AB-header layouts and
   estimates ASCII8, ASCII16, Konami or Konami SCC from reachable Z80 mapper writes
@@ -634,7 +658,7 @@ images, register boundaries, reset, slot effects and invalid-load preservation.
 No fixture downloads or proprietary ROMs are required. These synthetic tests verify
 specified evidence handling, not universal detection accuracy on commercial ROMs.
 
-Under **ROMs & advanced system options → Local system BIOS / BASIC**, select a
+Under **Settings → System firmware**, select a
 lawfully obtained 32 KiB MSX1 BIOS/BASIC ROM (generation byte 002Dh = 0). **Use Weave
 BASIC** in that section unloads selected ROMs and returns to Weave BASIC in the
 current model. With a system ROM selected, the CPU executes it from reset, allowing
@@ -669,10 +693,12 @@ Clean Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero 
 waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
 AudioContext, and uses real file inputs for ROMs.
 The suite also checks starter actions, scoped keyboard focus, loading/failure
-feedback, native fullscreen and its unavailable/rejected API fallbacks, expandable
-help/BIOS/transcript controls, and desktop/tablet/mobile layouts (including 320px
-width). Screenshots of BASIC, graphics, cartridge, responsive layouts, expanded
-details and fullscreen go to `test-results/`; CI uploads them as `browser-evidence`.
+feedback, keyboard navigation in media pickers and reference panels, browser
+volume and display scale, native fullscreen and its unavailable/rejected API
+fallbacks, and desktop/tablet/mobile portrait and landscape layouts (including
+320px width). Screenshots of BASIC, graphics, cartridge, responsive layouts,
+panels and fullscreen go to `test-results/`. CI uploads them as `browser-evidence`.
+[Screen-first player screenshots and validation](docs/player-validation.md)
 Automated audio checks verify the browser signal path, not physical speakers.
 The display tests use real WebGL2 in Chromium with SwiftShader and sample
 composited screenshots to verify the visible CRT effect, geometry and fallback.

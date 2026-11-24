@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const sites=['/','http://127.0.0.1:41874/msx-rust/'];
@@ -38,10 +39,10 @@ async function observe(page) {
 }
 async function boot(page,site) {
   await observe(page);await page.goto(site);await expect(page.locator('#transcript')).toContainText('READY');
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
 }
 async function install(page) {
-  const chooser=page.waitForEvent('filechooser');await page.locator('#open-music-rom').click();
+  const chooser=page.waitForEvent('filechooser');await (await settingsControl(page, 'open-music-rom')).click();
   await(await chooser).setFiles(file('diagnostic-fm.rom',firmware));
   await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
   await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
@@ -56,7 +57,7 @@ for(const site of sites) {
       Storage.prototype.setItem=()=>{throw new Error('Unexpected storage');};indexedDB.open=()=>{throw new Error('Unexpected IndexedDB');};navigator.sendBeacon=()=>{throw new Error('Unexpected beacon');};
     });
     await install(page);
-    await page.locator('#firmware').selectOption('diagnostic');await page.locator('#mapper').selectOption('1');
+    await (await settingsControl(page, 'firmware')).selectOption('diagnostic');await (await settingsControl(page, 'mapper')).selectOption('1');
     await page.locator('#cartridge').setInputFiles('dist/music-test-cartridge.rom');
     await green(page);
     await page.getByRole('button',{name:'Enable audio',exact:true}).click();
@@ -81,14 +82,14 @@ for(const site of sites) {
     const snapshot=await advance(page,0);await page.waitForTimeout(100);expect(await advance(page,0)).toEqual(snapshot);
     await page.locator('#pause').click();await green(page);
     await page.evaluate(()=>window.manualMusic=true);
-    await page.locator('#remove-music-rom').click();expect(await page.evaluate(()=>window.musicWasm.msx_music_profile())).toBe(0);
+    await (await settingsControl(page, 'remove-music-rom')).click();expect(await page.evaluate(()=>window.musicWasm.msx_music_profile())).toBe(0);
     const removed=await advance(page,5);expect(removed.every(v=>v===0)).toBe(true);
     expect(errors).toEqual([]);expect(requests.filter(r=>r.method()!=='GET'||new URL(r.url()).origin!==new URL(page.url()).origin)).toEqual([]);
     expect(await page.evaluate(()=>({local:localStorage.length,session:sessionStorage.length}))).toEqual({local:0,session:0});
   });
   test(`MSX-MUSIC failed/canceled/stale imports, retained SRAM and inactive MSX1 ${site}`,async({page})=>{
     await boot(page,site);
-    await page.locator('#mapper').selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await (await settingsControl(page, 'mapper')).selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
     await expect(page.locator('#export-save')).toBeEnabled();
     await page.evaluate(()=>{const w=window.musicWasm;new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);});
     await install(page);
@@ -99,34 +100,34 @@ for(const site of sites) {
       await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
     }
     await page.locator('#music-rom').setInputFiles(file('deferred.rom',firmware));
-    await expect(page.locator('#remove-music-rom')).toHaveText('Cancel import');await page.locator('#remove-music-rom').click();
+    await (await settingsControl(page, 'cancel-music-rom-import')).click();
     await page.evaluate(()=>window.finishMusic());await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
     await page.locator('#music-rom').setInputFiles(file('deferred.rom',firmware));
-    await page.locator('#eject').click();await page.evaluate(()=>window.finishMusic());
+    await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());
     await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
     await page.locator('#model').selectOption('0');await expect(page.locator('#music-status')).toContainText('inactive on MSX1');
     await page.locator('#model').selectOption('1');await expect(page.locator('#music-status')).toContainText('active');
-    await page.locator('#builtin').click();await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
-    await page.locator('#remove-music-rom').click();await expect(page.locator('#music-status')).toHaveText('MSX-MUSIC not installed');
+    await (await settingsControl(page, 'builtin')).click();await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
+    await (await settingsControl(page, 'remove-music-rom')).click();await expect(page.locator('#music-status')).toHaveText('MSX-MUSIC not installed');
     await expect(page.locator('#transcript')).toContainText('READY');
   });
   test(`MSX-MUSIC plus SCC-I/PSG and exact Philips disk transfers ${site}`,async({page})=>{
     await boot(page,site);await install(page);
-    await page.locator('#sound-cartridge').selectOption('1');await page.locator('#install-sound-cartridge').click();
+    await (await settingsControl(page, 'sound-cartridge')).selectOption('1');await (await settingsControl(page, 'install-sound-cartridge')).click();
     const main=await hex('philips-system',32768);main[0x2d]=1;
     const sub=Buffer.alloc(16384);sub.write('CD');sub[0x100]=0x7b;
-    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await page.locator('#apply-firmware').click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     const disk=await hex('philips-scci-sector',368640,0x35);disk[510]=0;
-    await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await page.locator('#disk-protected').uncheck();
-    await page.locator('#boot-disk').click();await green(page);
+    await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await (await mediaControl(page, 'disk-protected')).uncheck();
+    await (await mediaControl(page, 'boot-disk')).click();await green(page);
     await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
-    const downloading=page.waitForEvent('download');await page.locator('#export-disk').click();const exported=await readFile(await(await downloading).path());
+    const downloading=page.waitForEvent('download');await (await mediaControl(page, 'export-disk')).click();const exported=await readFile(await(await downloading).path());
     const expected=Buffer.from(disk);expected.fill(0x6c,8*512,9*512);expect(exported).toEqual(expected);
     await page.getByRole('button',{name:'Enable audio',exact:true}).click();
     await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({pcm})=>pcm.some(v=>Math.abs(v)>0.05)&&pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
     expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_music_profile(),w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_firmware()];})).toEqual([1,1,1,3]);
-    await page.locator('#remove-music-rom').click();
+    await (await settingsControl(page, 'remove-music-rom')).click();
     expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_disk_len()];})).toEqual([1,1,368640]);
   });
 }
@@ -155,7 +156,7 @@ for(const site of sites) test(`MSX-MUSIC real Wasm allocation failure preserves 
     };
   },bounded.toString('base64'));
   await boot(page,site);await install(page);
-  await page.locator('#firmware').selectOption('diagnostic');await page.locator('#mapper').selectOption('1');await page.locator('#cartridge').setInputFiles('dist/music-test-cartridge.rom');await green(page);
+  await (await settingsControl(page, 'firmware')).selectOption('diagnostic');await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/music-test-cartridge.rom');await green(page);
   await page.evaluate(()=>window.failMusicAllocation=true);
   await page.locator('#music-rom').setInputFiles(file('replacement.rom',firmware));await expect(page.locator('#status')).toContainText('MSX-MUSIC import failed');
   expect(await page.evaluate(()=>window.musicReservation)).toBe(0);

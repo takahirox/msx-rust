@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const sites=['/','http://127.0.0.1:41874/msx-rust/'];
@@ -38,10 +39,10 @@ async function observe(page) {
 }
 async function boot(page,site) {
   await observe(page);await page.goto(site);await expect(page.locator('#transcript')).toContainText('READY');
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
 }
 async function install(page) {
-  const chooser=page.waitForEvent('filechooser');await page.locator('#open-pac-rom').click();
+  const chooser=page.waitForEvent('filechooser');await (await settingsControl(page, 'open-pac-rom')).click();
   await(await chooser).setFiles(file('diagnostic-pac.rom',firmware));
   await expect(page.locator('#pac-status')).toContainText('diagnostic-pac.rom');
   await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
@@ -60,14 +61,14 @@ async function saved(page) {
   return page.evaluate(()=>{const w=window.musicWasm;return [...new Uint8Array(w.memory.buffer,w.msx_fm_pac_sram(),w.msx_fm_pac_sram_len())];});
 }
 async function backup(page) {
-  const downloading=page.waitForEvent('download');await page.locator('#export-pac-save').click();
+  const downloading=page.waitForEvent('download');await (await settingsControl(page, 'export-pac-save')).click();
   return JSON.parse(await readFile(await(await downloading).path(),'utf8'));
 }
 const pattern=Array.from({length:8190},(_,i)=>(i*71+Math.floor(i/257))&255);
 for(const site of sites) {
   for(const model of [0,1]) test(`FM-PAC Z80 banks/SRAM, independent pitch, scheduled PCM and lifecycle MSX${model+1} ${site}`,async({page})=>{
     await boot(page,site);await page.locator('#model').selectOption(String(model));await install(page);
-    await page.locator('#mapper').selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page,model);
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page,model);
     await page.getByRole('button',{name:'Enable audio',exact:true}).click();
     await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({rate,pcm})=>rate===44100 && pcm.some(v=>Math.abs(v)>0.015) && pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
     const scheduled=await page.evaluate(()=>window.musicScheduled.find(({rate,pcm})=>rate===44100 && pcm.some(v=>Math.abs(v)>0.015)));
@@ -81,20 +82,21 @@ for(const site of sites) {
     await page.evaluate(()=>window.manualMusic=false);await page.locator('#pause').click();await page.waitForTimeout(50);
     const paused=await advance(page,0);await page.waitForTimeout(100);expect(await advance(page,0)).toEqual(paused);
     await page.locator('#pause').click();await green(page,model);
-    await page.evaluate(()=>window.manualMusic=true);await page.locator('#remove-pac-rom').click();
+    await page.evaluate(()=>window.manualMusic=true);await (await settingsControl(page, 'remove-pac-rom')).click();
     expect(await page.evaluate(()=>window.musicWasm.msx_fm_pac_profile())).toBe(0);
     expect((await advance(page,300)).every(v=>v===0)).toBe(true);
   });
   test(`FM-PAC separate shared save roundtrip/reload, exact validation, conflicts and recovery ${site}`,async({page})=>{
-    await boot(page,site);await page.locator('#mapper').selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await boot(page,site);await (await settingsControl(page, 'mapper')).selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await expect(page.locator('#cartridge-status')).toContainText('mapper-6.rom');
     await install(page);
     await page.evaluate(pattern=>{const w=window.musicWasm;new Uint8Array(w.memory.buffer,w.msx_fm_pac_sram(),8190).set(pattern);new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);},pattern);
     const container=await backup(page);expect(container.size).toBe(8190);expect(container.mapper).toBe('original-fm-pac');
     expect([...Buffer.from(container.data,'base64')]).toEqual(pattern);
     await page.locator('#reset').click();expect(await saved(page)).toEqual(pattern);
-    await page.locator('#mapper').selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');expect(await saved(page)).toEqual(pattern);
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');expect(await saved(page)).toEqual(pattern);
     await page.locator('#model').selectOption('0');expect(await saved(page)).toEqual(pattern);
-    await page.locator('#builtin').click();expect(await saved(page)).toEqual(pattern);
+    await (await settingsControl(page, 'builtin')).click();expect(await saved(page)).toEqual(pattern);
     // Exact checksum/version/firmware/profile/length validation before mutation.
     for(const patch of [{version:2},{rom:'0'.repeat(64)},{mapper:'1'},{size:8192},{checksum:'00000000'},{data:container.data.slice(4)}]) {
       await page.locator('#import-pac-save').setInputFiles(file('invalid.json',Buffer.from(JSON.stringify({...container,...patch}))));
@@ -106,7 +108,7 @@ for(const site of sites) {
     expect(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('msx-rust:fm-pac:v1:'))))).toBe('foreign-tab-record');
     await page.locator('#import-pac-save').setInputFiles(file('restore.json',Buffer.from(JSON.stringify(container))));await expect(page.locator('#pac-save-status')).toContainText('Imported SRAM');expect(await saved(page)).toEqual(pattern);
     expect(conflicted.data).not.toBe(container.data);
-    await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#advanced-panel > summary').click();await install(page);
+    await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#settings').click();await install(page);
     await expect(page.locator('#pac-save-status')).toContainText('restored');expect(await saved(page)).toEqual(pattern);
     // Cartridge SRAM namespace remains distinct, with its exact bytes intact.
     const records=await page.evaluate(()=>Object.keys(localStorage).map(k=>[k,JSON.parse(localStorage[k])]));
@@ -134,34 +136,34 @@ for(const site of sites) {
     for(const [name,bytes] of [['short.rom',Buffer.alloc(65535)],['wrong.txt',firmware],['allocation.rom',firmware]]) {
       await page.locator('#pac-rom').setInputFiles(file(name,bytes));await expect(page.locator('#status')).toContainText('FM-PAC import failed');expect(await saved(page)).toEqual(pattern);
     }
-    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await expect(page.locator('#remove-pac-rom')).toHaveText('Cancel import');await page.locator('#remove-pac-rom').click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
-    await page.locator('#mapper').selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
-    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await page.locator('#eject').click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
+    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await settingsControl(page, 'cancel-pac-rom-import')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
     await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('msx-rust:fm-pac:v1:'));localStorage[key]='corrupted';});
-    await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#advanced-panel > summary').click();await install(page);
+    await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#settings').click();await install(page);
     await expect(page.locator('#pac-save-status')).toContainText('restore unavailable');expect(await saved(page)).toEqual(Array(8190).fill(255));
     await page.locator('#import-pac-save').setInputFiles(file('recovery.json',Buffer.from(JSON.stringify(container))));await expect(page.locator('#pac-save-status')).toContainText('Imported SRAM');expect(await saved(page)).toEqual(pattern);
     await page.evaluate(()=>{Storage.prototype.setItem=()=>{throw new Error('Test quota exceeded');};const w=window.musicWasm;new Uint8Array(w.memory.buffer,w.msx_fm_pac_sram(),8190)[0]=0x37;});
     const live=await backup(page);await expect(page.locator('#pac-save-status')).toContainText('in memory only');expect(Buffer.from(live.data,'base64')[0]).toBe(0x37);
     await install(page);expect((await saved(page))[0]).toBe(0x37); // same firmware, unsaved RAM retained
-    await page.locator('#remove-pac-rom').click();await expect(page.locator('#export-pac-save')).toBeDisabled();await install(page);
+    await (await settingsControl(page, 'remove-pac-rom')).click();await expect(page.locator('#export-pac-save')).toBeDisabled();await install(page);
     await page.locator('#import-pac-save').setInputFiles(file('memory-recovery.json',Buffer.from(JSON.stringify(live))));await expect(page.locator('#pac-save-status')).toContainText('in memory only');expect((await saved(page))[0]).toBe(0x37);
   });
   test(`FM-PAC plus SCC-I/PSG and exact Philips disk transfers ${site}`,async({page})=>{
     await boot(page,site);await install(page);
-    await page.locator('#sound-cartridge').selectOption('1');await page.locator('#install-sound-cartridge').click();
+    await (await settingsControl(page, 'sound-cartridge')).selectOption('1');await (await settingsControl(page, 'install-sound-cartridge')).click();
     const main=await hex('fm-pac-system',32768);main[0x2d]=1;
     const sub=Buffer.alloc(16384);sub.write('CD');sub[0x100]=0x7b;
-    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await page.locator('#apply-firmware').click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     const disk=await hex('philips-scci-sector',368640,0x35);disk[510]=0;
-    await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await page.locator('#disk-protected').uncheck();await page.locator('#boot-disk').click();await green(page);
+    await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await (await mediaControl(page, 'disk-protected')).uncheck();await (await mediaControl(page, 'boot-disk')).click();await green(page);
     await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
-    const downloading=page.waitForEvent('download');await page.locator('#export-disk').click();const exported=await readFile(await(await downloading).path());
+    const downloading=page.waitForEvent('download');await (await mediaControl(page, 'export-disk')).click();const exported=await readFile(await(await downloading).path());
     const expected=Buffer.from(disk);expected.fill(0x6c,8*512,9*512);expect(exported).toEqual(expected);
     await page.getByRole('button',{name:'Enable audio',exact:true}).click();await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({pcm})=>pcm.some(v=>Math.abs(v)>0.05)&&pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
     expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_fm_pac_profile(),w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_firmware()];})).toEqual([1,1,1,3]);
-    await page.locator('#remove-pac-rom').click();expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_disk_len()];})).toEqual([1,1,368640]);
+    await (await settingsControl(page, 'remove-pac-rom')).click();expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_disk_len()];})).toEqual([1,1,368640]);
   });
 }
 
@@ -189,7 +191,7 @@ for(const site of sites) test(`FM-PAC real Wasm allocation failure preserves ins
     };
   },bounded.toString('base64'));
   await boot(page,site);await install(page);
-  await page.locator('#firmware').selectOption('diagnostic');await page.locator('#mapper').selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page);
+  await (await settingsControl(page, 'firmware')).selectOption('diagnostic');await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page);
   await page.evaluate(()=>window.failMusicAllocation=true);
   await page.locator('#pac-rom').setInputFiles(file('replacement.rom',firmware));await expect(page.locator('#status')).toContainText('FM-PAC import failed');
   expect(await page.evaluate(()=>window.musicReservation)).toBe(0);

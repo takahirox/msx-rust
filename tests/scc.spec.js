@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 
 // Observe the real compiled Wasm and scheduled native Web Audio buffers. No
@@ -152,8 +153,8 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await page.goto(site);
         await expect(page.locator('#transcript')).toContainText('READY');
         await page.locator('#model').selectOption(model);
-        await page.locator('#advanced-panel').evaluate(el => { el.open = true; });
-        await page.locator('#mapper').selectOption(mapper);
+        await page.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
+        await (await settingsControl(page, 'mapper')).selectOption(mapper);
         await page.locator('#cartridge').setInputFiles('dist/scc-test-cartridge.rom');
         await expect(page.locator('#status')).toContainText(mapper === '0' ? 'Auto: Konami SCC' : '(Konami SCC)');
         await expect.poll(() => page.evaluate(() => window.sccWasm.msx_firmware())).toBe(1);
@@ -227,7 +228,8 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await silence(page);
         await page.keyboard.down('Space');
         await square(page);
-        await page.locator('#mapper').focus(); // Canvas blur releases the held key.
+        await page.locator('#focus-screen').focus(); // Canvas blur releases the held key.
+        await expect(page.locator('#focus-screen')).toBeFocused();
         await silence(page);
         await page.keyboard.up('Space');
         await page.locator('#screen').focus();
@@ -239,7 +241,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await page.locator('#screen').focus();
         await page.keyboard.down('Space');
         await square(page);
-        await page.locator('#eject').click();
+        await (await mediaControl(page, 'eject')).click();
         await page.keyboard.up('Space');
         await silence(page);
         await expect(page.locator('#status')).toContainText('Weave BASIC');

@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 
 async function boot(page, path = '/') {
@@ -106,22 +107,22 @@ test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and retu
 test('MSX2 firmware imports are atomic, paired, validated and reversible', async ({page}) => {
   const requests=[];page.on('request',r=>requests.push({method:r.method(),body:r.postData()}));
   await boot(page);await fixture(page);
-  await page.locator('#advanced-panel > summary').click();
-  await page.locator('#apply-firmware').click();await expect(page.locator('#status')).toContainText('Select both');
+  await page.locator('#settings').click();
+  await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#status')).toContainText('Select both');
   await page.locator('#bios').setInputFiles('dist/weave-msx2-boot.rom');
   await page.locator('#subrom').setInputFiles('dist/msx2-diagnostic-sub.rom');
   await expect(page.locator('#firmware-selection')).toContainText('weave-msx2-boot.rom');
-  await page.locator('#apply-firmware').click();
+  await (await settingsControl(page, 'apply-firmware')).click();
   await expect(page.locator('#status')).toContainText('weave-msx2-boot.rom + msx2-diagnostic-sub.rom');
   await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
   await page.locator('#reset').click();await expect(page.locator('#status')).toContainText('msx2-diagnostic-sub.rom');
   await expect(page.locator('#transcript')).toHaveText('');
   await page.locator('#subrom').setInputFiles({name:'bad-sub.rom',mimeType:'application/octet-stream',buffer:Buffer.alloc(16384)});
-  await page.locator('#apply-firmware').click();await expect(page.locator('#status')).toContainText('CD-header');
+  await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#status')).toContainText('CD-header');
   await expect.poll(()=>pixel(page,10,10)).toEqual([0,255,255]);
   await page.locator('#subrom').setInputFiles({name:'short-sub.rom',mimeType:'application/octet-stream',buffer:Buffer.alloc(7)});
-  await page.locator('#apply-firmware').click();await expect(page.locator('#status')).toContainText('16 KiB');
-  await page.locator('#builtin').click();await expect(page.locator('#status')).toContainText('Weave BASIC');
+  await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#status')).toContainText('16 KiB');
+  await (await settingsControl(page, 'builtin')).click();await expect(page.locator('#status')).toContainText('Weave BASIC');
   await expect(page.locator('#eject')).toBeDisabled();
   await expect(page.locator('#bios')).toHaveValue('');await expect(page.locator('#subrom')).toHaveValue('');
   await page.locator('#model').selectOption('0');await expect(page.locator('#transcript')).toContainText('READY');
@@ -140,7 +141,7 @@ test('MSX2 boots from the GitHub Pages project subpath with relative fixture lin
   await commandEdges(page, false);
   for(const file of ['msx2-test-cartridge.rom','weave-msx2-boot.rom','msx2-diagnostic-sub.rom','cbios-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) expect((await page.request.get(`http://127.0.0.1:41874/msx-rust/${file}`)).ok()).toBe(true);
   await page.setViewportSize({width:320,height:720});
-  await page.locator('#advanced-panel > summary').click();
+  await page.locator('#settings').click();
   await expect(page.locator('#firmware')).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   const box=await page.locator('#screen').boundingBox();expect(box.width).toBeLessThan(320);
@@ -175,9 +176,10 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     });
     await boot(page, path);
     await expect(page.locator('#transcript')).toContainText('READY');
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     await expect(page.locator('#firmware')).toHaveValue('auto');
-    await expect(page.locator('#msx2-builtins')).toContainText('no original MSX BASIC');
+    await page.getByText('Firmware compatibility and credits', { exact: true }).click();
+    await expect(page.locator('#advanced-panel').getByText('no original MSX BASIC', { exact: true })).toBeVisible();
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('Auto: Plain');
     // Only reached after C-BIOS slot discovery, RDSLT/WRSLT, EXTROM,
@@ -200,27 +202,27 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     // A local alternative uses the same real file inputs and core boot path.
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx2.rom');
     await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom');
-    await page.locator('#apply-firmware').click();
+    await (await settingsControl(page, 'apply-firmware')).click();
     await expect(page.locator('#firmware')).toHaveValue('local');
     await servicePattern(page);
     await page.locator('#subrom').setInputFiles({name:'invalid-local.rom',mimeType:'application/octet-stream',buffer:Buffer.alloc(16384)});
-    await page.locator('#apply-firmware').click();
+    await (await settingsControl(page, 'apply-firmware')).click();
     await expect(page.locator('#status')).toContainText('unchanged');
     await expect(page.locator('#firmware')).toHaveValue('local');
     await expect.poll(() => pixel(page, 0, 16)).toEqual([255,255,255]);
-    await page.locator('#firmware').selectOption('diagnostic');
+    await (await settingsControl(page, 'firmware')).selectOption('diagnostic');
     await expect(page.locator('#status')).toContainText('Original cartridge loader');
     await expect(page.locator('#eject')).toBeDisabled();
     await expect(page.locator('#bios')).toHaveValue('');
     await expect(page.locator('#subrom')).toHaveValue('');
     await fixture(page);
-    await page.locator('#firmware').selectOption('cbios');
+    await (await settingsControl(page, 'firmware')).selectOption('cbios');
     await expect(page.locator('#status')).toContainText('C-BIOS 0.29a');
     await expect(page.locator('#eject')).toBeDisabled();
     await expect(page.locator('#screen')).toHaveAttribute('width','256');
     await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
     await servicePattern(page);
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#status')).toHaveText('Running · MSX2 C-BIOS 0.29a · cartridge BIOS (no BASIC)');
     await expect(page.locator('#transcript')).toHaveText('');
     await page.locator('#model').selectOption('0');

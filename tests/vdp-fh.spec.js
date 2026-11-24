@@ -24,7 +24,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     const chooser = page.waitForEvent('filechooser');
-    await page.locator('#open-rom').click();
+    await page.locator('#insert-cartridge').click(); await page.locator('#open-rom').click();
     await (await chooser).setFiles('dist/fh-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await passed(page);

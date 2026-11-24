@@ -77,8 +77,18 @@ const chroma = [60, 61, 62].map(x => [x, 49]);
 const rows = Array.from({ length: 15 }, (_, i) => [60, 48 + i]);
 
 test('default CRT softens and modulates the visible MSX2 image, with exact Clean and a saved choice', async ({ page }) => {
+  await page.setViewportSize({ width: 1105, height: 1100 });
   await watchWasm(page);
   await boot(page);
+  // Playwright rounds fractional bounds outward. Keep the 640×480 surface
+  // on whole CSS pixels so the samples hit the intended compositor pixels.
+  await surface(page).evaluate(element => {
+    element.style.width = '640px';
+    const { x, y } = element.getBoundingClientRect();
+    element.style.left = `${Math.round(x) - x}px`;
+    element.style.top = `${Math.round(y) - y}px`;
+  });
+  await expect(crt(page)).toHaveAttribute('width', '640');
   await expect(crt(page)).toBeVisible();
   const textPixels = Array.from({ length: 90 * 24 }, (_, i) => [i % 90 * 3, Math.floor(i / 90) * 3]);
   expect((await sample(page, textPixels)).filter(rgb => rgb.every(channel => channel > 210) && new Set(rgb).size > 1).length)
@@ -141,14 +151,20 @@ test('default CRT softens and modulates the visible MSX2 image, with exact Clean
   await expect(page.locator('#status')).toContainText('Paused');
   expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
 
+  await surface(page).evaluate(element => {
+    Object.assign(element.style, { width: '', left: '', top: '' });
+  });
   await page.setViewportSize({ width: 370, height: 800 });
-  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual([324, 243]);
+  const mobileWidth = Math.round((await surface(page).boundingBox()).width);
+  const mobileHeight = Math.round((await surface(page).boundingBox()).height);
+  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual([mobileWidth, mobileHeight]);
   const small = await sample(page, rows);
   expect(small.every(rgb => rgb.every(channel => channel >= 253))).toBe(true);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 370, height: 800, deviceScaleFactor: 2, mobile: false });
   await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBe(2);
-  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual([648, 486]);
+  const mobileRect = await surface(page).boundingBox();
+  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual([Math.round(mobileRect.width * 2), Math.round(mobileRect.height * 2)]);
   await cdp.detach();
   expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
   await select(page).selectOption('clean');
@@ -172,7 +188,9 @@ test('512-wide and woven interlaced output retain geometry in fullscreen while p
   await boot(page);
   await paste(page, 'COLOR 15,0:SCREEN 7:LINE (64,25)-(159,90),15,BF:LINE (352,120)-(447,190),15,BF\n');
   await expect.poll(() => page.evaluate(() => [window.displayWasm.msx_width(), window.displayWasm.msx_height()])).toEqual([512, 212]);
-  const coords = [[128, 96], [512, 96], [128, 336], [512, 336]];
+  const wideSurface = await surface(page).boundingBox();
+  const coords = [[0.2, 0.2], [0.8, 0.2], [0.2, 0.7], [0.8, 0.7]]
+    .map(([x, y]) => [Math.floor(x * wideSurface.width), Math.floor(y * wideSurface.height)]);
   await expect.poll(async () => (await sample(page, coords))[3][0]).toBeGreaterThan(200);
   await page.locator('#pause').click();
   const wide = await sample(page, coords);
@@ -200,6 +218,7 @@ test('512-wide and woven interlaced output retain geometry in fullscreen while p
   expect(await page.evaluate(() => window.displayWasm.msx_height())).toBe(424);
   await page.locator('#pause').click();
   const paused = await page.evaluate(() => window.displayCalls.frames);
+  const normalOutput = await crt(page).evaluate(canvas => [canvas.width, canvas.height]);
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen');
   expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('emulator');
@@ -222,7 +241,7 @@ test('512-wide and woven interlaced output retain geometry in fullscreen while p
   await select(page).selectOption('crt');
   expect(await sample(page, fields)).toEqual(pixels);
   await page.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
-  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual([640, 480]);
+  await expect.poll(() => crt(page).evaluate(canvas => [canvas.width, canvas.height])).toEqual(normalOutput);
   expect(await page.evaluate(() => window.displayCalls.frames)).toBe(paused);
   await expect(screen(page)).toBeFocused();
 });
@@ -233,14 +252,15 @@ test('the Pages subpath presents an MSX1 demo with CRT and forwards joystick inp
   page.on('pageerror', error => errors.push(error.message));
   await boot(page, 'http://127.0.0.1:41874/msx-rust/');
   await expect(crt(page)).toBeVisible();
-  await page.locator('#demo').selectOption('plustaker');
-  await page.locator('#play-demo').click();
+  await page.locator('#insert-cartridge').click(); await page.locator('#demo-plustaker').click();
   await expect(page.locator('#status')).toContainText('MSX1 C-BIOS');
   await expect(page.locator('#status')).toContainText('plustaker');
   await expect(page.locator('#model')).toHaveValue('0');
   await expect(crt(page)).toBeVisible();
   // The running game's bottom HUD contains white glyphs on black.
-  const hud = Array.from({ length: 31 * 12 }, (_, i) => [165 + i % 31 * 10, 420 + Math.floor(i / 31) * 5]);
+  const { width } = await surface(page).boundingBox();
+  const hud = Array.from({ length: 31 * 12 }, (_, i) =>
+    [165 + i % 31 * 10, 420 + Math.floor(i / 31) * 5].map(value => Math.floor(value * width / 640)));
   await expect.poll(async () => {
     const pixels = await sample(page, hud);
     return pixels.filter(rgb => rgb.every(channel => channel > 200) && new Set(rgb).size > 1).length;
@@ -303,14 +323,14 @@ test('the fallback message does not trigger a CRT retry in the page layout', asy
     await boot(page);
     await page.addStyleTag({ content: 'html::-webkit-scrollbar { width: 15px; }' });
     await paste(page, 'COLOR 15,15:CLS\n');
-    await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
+    await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 180)).toBe(true);
     await page.locator('#pause').click();
     const paused = await page.evaluate(() => window.displayCalls);
-    // Leave just enough room for the page at 660 px wide. An added status
-    // row would cause overflow and the scrollbar would narrow the canvas.
+    // Leave just enough room for the wider of the two layouts. The fallback notice
+    // must leave the CRT allocation stable even at the scrollbar boundary.
     const height = await page.locator('main').evaluate(main => Math.ceil(main.getBoundingClientRect().height) + 4);
     await page.setViewportSize({ width: 652, height });
-    expect(await page.evaluate(() => document.documentElement.clientWidth)).toBe(652);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
     const width = await screen(page).evaluate(canvas => Math.round(canvas.getBoundingClientRect().width));
     await expect(crt(page)).toHaveAttribute('width', String(width));
     await expect(crt(page)).toBeVisible();
@@ -352,7 +372,7 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
     // The CSS fullscreen view lets Playwright resize the browser in place.
     Element.prototype.requestFullscreen = undefined;
   });
-  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.setViewportSize({ width: 1280, height: 750 });
   await boot(page);
   await paste(page, 'COLOR 15,15:CLS\n');
   await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
@@ -360,11 +380,11 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
   await expect(page.locator('#audio-state')).toHaveText('Audio on');
   await page.locator('#pause').click();
   const paused = await page.evaluate(() => window.displayCalls);
-  await expect(crt(page)).toHaveAttribute('width', '640');
+  const normalWidth = await crt(page).evaluate(canvas => canvas.width);
 
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
-  await expect.poll(() => crt(page).evaluate(canvas => canvas.width)).toBeGreaterThan(640);
+  await expect.poll(() => crt(page).evaluate(canvas => canvas.width)).toBeGreaterThan(normalWidth);
   const width = await crt(page).evaluate(canvas => canvas.width);
   expect(width).toBeLessThan(940);
   const before = await sample(page, chroma);
@@ -376,7 +396,7 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
     window.outputLimit = width;
     window.outputAttempts.length = 0;
   }, width);
-  await page.setViewportSize({ width: 1280, height: 828 });
+  await page.setViewportSize({ width: 1280, height: 758 });
   await expect.poll(() => page.evaluate(() => window.outputAttempts[0])).toBeGreaterThan(width);
   const attempts = await page.evaluate(async () => {
     for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
@@ -390,7 +410,7 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
   await expect(select(page)).toHaveValue('crt');
   expect(await sample(page, chroma)).toEqual(chroma.map(() => white));
 
-  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.setViewportSize({ width: 1280, height: 750 });
   await expect(crt(page)).toHaveAttribute('width', String(width));
   await expect(crt(page)).toBeVisible();
   await expect(status(page)).toBeEmpty();

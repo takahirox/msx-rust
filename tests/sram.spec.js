@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -22,7 +23,7 @@ async function start(page, site, model='1') {
   await expect(page.locator('#transcript')).toContainText('READY');
   await expect(page.locator('#model')).toHaveValue('1');
   if (model==='0') await page.locator('#model').selectOption('0');
-  await page.locator('#advanced-panel').evaluate(el=>{el.open=true;});
+  await page.locator('#advanced-panel').evaluate(el=>{el.showPopover();});
   await page.evaluate(()=>{window.manualFrames=true;});
 }
 async function advance(page, n=2) {
@@ -38,7 +39,7 @@ async function pixel(page) {
   return page.locator('#screen').evaluate(c=>Array.from(c.getContext('2d').getImageData(0,0,1,1).data).slice(0,3));
 }
 async function open(page,id,rom=`dist/mapper-${id}.rom`) {
-  await page.locator('#mapper').selectOption(String(id));
+  await (await settingsControl(page, 'mapper')).selectOption(String(id));
   await page.locator('#cartridge').setInputFiles(rom);
   await expect(page.locator('#status')).toContainText(`(${names[id]})`);
 }
@@ -52,7 +53,7 @@ async function increment(page) {
 }
 async function backup(page) {
   const downloadPromise=page.waitForEvent('download');
-  await page.locator('#export-save').click();
+  await (await settingsControl(page, 'export-save')).click();
   const download=await downloadPromise;
   return JSON.parse(await readFile(await download.path(),'utf8'));
 }
@@ -120,7 +121,7 @@ for (const site of sites) {
       await importSave(page,save);await expect(page.locator('#save-status')).toContainText('Imported');
       await page.locator('#reset').click();await boot(page,5);
       await page.screenshot({path:`test-results/sram-${id}-${site.includes('msx-rust')?'pages':'root'}.png`,fullPage:true});
-      await page.locator('#eject').click();await expect(page.locator('#export-save')).toBeDisabled();
+      await (await mediaControl(page, 'eject')).click();await expect(page.locator('#export-save')).toBeDisabled();
       await expect(page.locator('#status')).toContainText('Weave BASIC');
       expect(requests.every(r=>r.method()==='GET'&&r.url().startsWith(site))).toBe(true);
       expect(errors).toEqual([]);
@@ -142,7 +143,7 @@ for (const site of sites) {
     const invalid=Buffer.alloc(512*1024);invalid.set([65,66]);
     await page.locator('#cartridge').setInputFiles(file('wrong-layout.rom',invalid));
     await expect(page.locator('#status')).toContainText('exactly 384 KiB');expect(await pixel(page)).toEqual([218,218,36]);
-    await page.locator('#mapper').selectOption('0');await page.locator('#cartridge').setInputFiles('dist/mapper-10.rom');
+    await (await settingsControl(page, 'mapper')).selectOption('0');await page.locator('#cartridge').setInputFiles('dist/mapper-10.rom');
     await expect(page.locator('#status')).toContainText('manual R-Type');expect(await pixel(page)).toEqual([218,218,36]);
   });
   test(`SRAM survives demo, firmware and model transitions; stale save reads are ignored at ${site}`,async({page})=>{
@@ -152,21 +153,21 @@ for (const site of sites) {
     // Disk priority parks the cartridge and its SRAM; Reset and failed imports
     // cannot corrupt it, and Eject disk resumes the same C-BIOS cartridge.
     await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
-    await page.locator('#boot-disk').click(); await advance(page,100);
+    await (await mediaControl(page, 'boot-disk')).click(); await advance(page,100);
     expect(await backup(page)).toEqual(saved);
     await page.locator('#reset').click(); await advance(page,100);
     expect(await backup(page)).toEqual(saved);
     await page.locator('#disk').setInputFiles(file('bad.dsk',Buffer.alloc(17)));
     await expect(page.locator('#status')).toContainText('previous disk unchanged');
     expect(await backup(page)).toEqual(saved);
-    await page.locator('#eject-disk').click(); await boot(page,5);
+    await (await mediaControl(page, 'eject-disk')).click(); await boot(page,5);
     // Replacement saves outgoing data before the demo's declared-model change.
-    await expect(page.locator('#play-demo')).toBeEnabled();
-    await page.locator('#demo').selectOption('plustaker');await page.locator('#play-demo').click();
+    await expect(page.locator('#demo-plustaker')).toBeEnabled();
+    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-plustaker').click();
     await expect(page.locator('#status')).toContainText('plustaker (Plain)');
     await expect(page.locator('#export-save')).toBeDisabled();
     await open(page,7);await boot(page,5);
-    await page.locator('#firmware').selectOption('cbios');await expect(page.locator('#export-save')).toBeDisabled();
+    await (await settingsControl(page, 'firmware')).selectOption('cbios');await expect(page.locator('#export-save')).toBeDisabled();
     await open(page,7);await boot(page,5);
     // Local BIOS imports reset while retaining the active cartridge and SRAM.
     await page.locator('#bios').setInputFiles('dist/cbios_main_msx1.rom');
@@ -185,13 +186,16 @@ for (const site of sites) {
     await open(page,9);
     await page.evaluate(text=>window.resolveSave(text),JSON.stringify(saved));
     await boot(page,4);expect((await sram(page))[0]).toBe(4);
-    await page.locator('#builtin').click();await open(page,7);await boot(page,5);
+    await (await settingsControl(page, 'builtin')).click();await open(page,7);await boot(page,5);
   });
   test(`storage permissions/quota failures and cross-tab conflicts preserve execution at ${site}`,async({page})=>{
     test.setTimeout(60000);
     await start(page,site);
     await page.evaluate(()=>{window.storageGet=Storage.prototype.getItem;Storage.prototype.getItem=()=>{throw new Error('Storage permission denied');};});
     await open(page,6);await boot(page);await expect(page.locator('#save-status')).toContainText('permission denied');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cartridge-save-warning')).toBeVisible();
+    await expect(page.locator('#cartridge-save-warning')).toContainText('Open Settings to export a backup');
     await increment(page);expect((await sram(page))[0]).toBe(5);
     const backupSave=await backup(page);
     await page.evaluate(()=>{Storage.prototype.getItem=window.storageGet;window.storageSet=Storage.prototype.setItem;Storage.prototype.setItem=()=>{throw new Error('Quota exceeded');};});
@@ -201,6 +205,7 @@ for (const site of sites) {
     await open(page,6);await boot(page,5);
     await page.evaluate(()=>{Storage.prototype.setItem=window.storageSet;});
     await importSave(page,backupSave);await expect(page.locator('#save-status')).toContainText('Imported');
+    await expect(page.locator('#cartridge-save-warning')).toBeHidden();
     const key=`msx-rust:sram:v1:${backupSave.rom}:6`;
     const conflicting=JSON.stringify({...backupSave,otherTab:true});
     await page.evaluate(([key,text])=>localStorage.setItem(key,text),[key,conflicting]);
@@ -208,6 +213,6 @@ for (const site of sites) {
     await expect(page.locator('#save-status')).toContainText('Another tab');
     expect(await page.evaluate(k=>localStorage.getItem(k),key)).toBe(conflicting);
     const exported=await backup(page);expect(Buffer.from(exported.data,'base64')[0]).toBe(6);
-    await page.locator('#builtin').click();await expect(page.locator('#export-save')).toBeDisabled();
+    await (await settingsControl(page, 'builtin')).click();await expect(page.locator('#export-save')).toBeDisabled();
   });
 }

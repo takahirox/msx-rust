@@ -1,3 +1,4 @@
+import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -18,7 +19,7 @@ const sites = ['http://127.0.0.1:41873/', 'http://127.0.0.1:41874/msx-rust/'];
 const file = (name, buffer) => ({name, buffer, mimeType: 'application/octet-stream'});
 async function exportDisk(page) {
   const download = page.waitForEvent('download');
-  await page.locator('#export-disk').click();
+  await (await mediaControl(page, 'export-disk')).click();
   return readFile(await (await download).path());
 }
 async function installSystem(page, model) {
@@ -27,7 +28,7 @@ async function installSystem(page, model) {
   if (model === '1') {
     const sub = Buffer.alloc(16384); sub.write('CD'); sub[0x100] = 0x7b;
     await page.locator('#subrom').setInputFiles(file('original-sub.rom', sub));
-    await page.locator('#apply-firmware').click();
+    await (await settingsControl(page, 'apply-firmware')).click();
   }
   await expect(page.locator('#firmware')).toHaveValue('local');
 }
@@ -57,6 +58,39 @@ async function greenOutput(page, model) {
     return [...data];
   }), {timeout:15000}).toEqual(model === '1' ? [36, 218, 36, 255] : [33, 200, 66, 255]);
 }
+
+test('finishing a firmware import moves keyboard focus from Cancel to Install', async ({ page }) => {
+  await observeWasm(page);
+  await page.goto('/');
+  await expect(page.locator('#transcript')).toContainText('READY');
+  const cases = [
+    ['pac-rom', 'pac-status', await readFile('dist/fm-pac-diagnostic-firmware.rom')],
+    ['music-rom', 'music-status', await readFile('dist/music-diagnostic-firmware.rom')],
+    ['disk-rom', 'disk-profile-status', diskRom],
+  ];
+  for (const [input, status, bytes] of cases) {
+    const install = await settingsControl(page, `open-${input}`);
+    const fileInput = page.locator(`#${input}`);
+    await install.focus();
+    await fileInput.setInputFiles(file('deferred.rom', bytes));
+    await expect.poll(() => page.evaluate(() => typeof window.finishPhilips)).toBe('function');
+    const cancel = page.locator('#advanced-panel').getByRole('button', { name: 'Cancel import', exact: true });
+    await cancel.focus();
+    await expect(cancel).toBeFocused();
+    await page.evaluate(() => {
+      window.finishPhilips();
+      delete window.finishPhilips;
+    });
+    await expect(page.locator(`#${status}`)).toContainText('deferred.rom');
+    await expect(cancel).toBeHidden();
+    await expect(install).toBeFocused();
+    // Dismiss the picker so the test can check the firmware after Enter.
+    await fileInput.evaluate(element => element.addEventListener('click', event => event.preventDefault(), { once: true }));
+    await page.keyboard.press('Enter');
+    await expect(page.locator(`#${status}`)).toContainText('deferred.rom');
+  }
+});
+
 for (const site of sites) {
   for (const model of ['0', '1']) {
     for (const size of [368640, 737280]) {
@@ -66,8 +100,8 @@ for (const site of sites) {
         page.on('request', request => requests.push(request)); page.on('pageerror', error => errors.push(error.message));
         await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
         if (model === '0') await page.locator('#model').selectOption('0');
-        await page.locator('#advanced-panel > summary').click();
-        await page.locator('#mapper').selectOption('6');
+        await page.locator('#settings').click();
+        await (await settingsControl(page, 'mapper')).selectOption('6');
         await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
         await expect(page.locator('#status')).toContainText('mapper-6.rom (ASCII8SRAM2)');
         await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
@@ -79,14 +113,14 @@ for (const site of sites) {
         await page.locator('#disk').setInputFiles(file('original-non-wv.dsk', disk));
         await expect(page.locator('#disk-status')).toContainText('original-non-wv.dsk');
         const picker = page.waitForEvent('filechooser');
-        await page.locator('#open-disk-rom').click();
+        await (await settingsControl(page, 'open-disk-rom')).click();
         await (await picker).setFiles(file('original-disk.rom', diskRom));
         await expect(page.locator('#disk-profile-status')).toContainText('Philips NMS1200-style · original-disk.rom');
         await expect(page.locator('#firmware')).toHaveValue('local');
         await greenOutput(page, model); // sector executed real VDP writes despite write protection
         expect(await exportDisk(page)).toEqual(disk);
-        await page.locator('#disk-protected').uncheck();
-        await page.locator('#boot-disk').click();
+        await (await mediaControl(page, 'disk-protected')).uncheck();
+        await (await mediaControl(page, 'boot-disk')).click();
         await greenOutput(page, model);
         // Green is painted before the original fixture's write. Wait for the
         // commit: 'no unsaved modifications' also contains the shorter phrase.
@@ -95,7 +129,7 @@ for (const site of sites) {
         await expect(page.locator('#status')).toContainText('Philips NMS1200-style');
         const expected = Buffer.from(disk), sector = size === 737280 ? 17 : 8;
         expected.fill(0xa6, sector*512, (sector+1)*512);
-        await page.locator('#eject-disk').click();
+        await (await mediaControl(page, 'eject-disk')).click();
         await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
         expect(await exportDisk(page)).toEqual(expected);
         const sram = await page.evaluate(() => {
@@ -104,22 +138,22 @@ for (const site of sites) {
         });
         expect(sram).toBe(0x6d);
         await page.locator('#reset').click(); await greenOutput(page, model);
-        await page.locator('#eject-disk').click();
-        await expect(page.locator('#disk-status')).toHaveText('Drive A: empty');
+        await (await mediaControl(page, 'eject-disk')).click();
+        await expect(page.locator('#disk-status')).toHaveText('Empty');
         await expect(page.locator('#firmware')).toHaveValue('local');
         await expect(page.locator('#disk-profile-status')).toContainText('Philips');
         // Removal keeps explicit system firmware and SRAM; legacy protection still applies.
-        await page.locator('#remove-disk-rom').click();
+        await (await settingsControl(page, 'remove-disk-rom')).click();
         await expect(page.locator('#disk-profile-status')).toContainText('Weave disk/demo boot option');
         await expect(page.locator('#firmware')).toHaveValue('local');
         expect(await page.evaluate(() => {
           const w = window.philipsWasm;
           return new Uint8Array(w.memory.buffer, w.msx_sram(), w.msx_sram_len())[0x123];
         })).toBe(0x6d);
-        await page.locator('#builtin').click();
+        await (await settingsControl(page, 'builtin')).click();
         await expect(page.locator('#transcript')).toContainText('READY');
         await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
-        await page.locator('#boot-disk').click();
+        await (await mediaControl(page, 'boot-disk')).click();
         await expect(page.locator('#status')).toContainText('Weave disk firmware');
         await expect.poll(() => page.evaluate(() => window.philipsWasm.msx_disk_boot_state())).toBe(1);
         expect(errors).toEqual([]);
@@ -132,13 +166,13 @@ for (const site of sites) {
       const errors = []; page.on('pageerror', error => errors.push(error.message));
       await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
       if (model === '0') await page.locator('#model').selectOption('0');
-      await page.locator('#advanced-panel > summary').click();
+      await page.locator('#settings').click();
       await installSystem(page, model);
       const disk = await fixture('movement', 368640, 0x35);
       disk.fill(0x62, 2*9*512, 3*9*512);
       await page.locator('#disk').setInputFiles(file('original-movement.dsk', disk));
       await expect(page.locator('#disk-status')).toContainText('original-movement.dsk');
-      await page.locator('#disk-protected').uncheck();
+      await (await mediaControl(page, 'disk-protected')).uncheck();
       await page.locator('#disk-rom').setInputFiles(file('original-disk.rom', diskRom));
       await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');
       // Green is painted only after the CPU checks intermediate BUSY/Track,
@@ -157,7 +191,7 @@ for (const site of sites) {
       page.on('request', request => requests.push(request));
       await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
       if (model === '0') await page.locator('#model').selectOption('0');
-      await page.locator('#advanced-panel > summary').click();
+      await page.locator('#settings').click();
       await installSystem(page, model);
       const readiness = await fixture('readiness', 16384, 255);
       await page.locator('#disk-rom').setInputFiles(file('original-readiness.rom', readiness));
@@ -167,14 +201,14 @@ for (const site of sites) {
       await expect.poll(() => page.locator('#screen').evaluate(canvas =>
         [...canvas.getContext('2d').getImageData(20, 20, 1, 1).data]
       )).toEqual([255, 255, 255, 255]);
-      await expect(page.locator('#disk-status')).toHaveText('Drive A: empty');
+      await expect(page.locator('#disk-status')).toHaveText('Empty');
       // Mount resumes ordinary firmware polling without resetting its head or CPU.
       await page.locator('#pause').click();
       const disk = Buffer.alloc(368640, 0x35);
       disk.fill(0x62, 2*9*512, 3*9*512);
       await page.locator('#disk').setInputFiles(file('original-readiness.dsk', disk));
       await expect(page.locator('#disk-status')).toContainText('original-readiness.dsk');
-      await page.locator('#disk-protected').uncheck();
+      await (await mediaControl(page, 'disk-protected')).uncheck();
       await page.locator('#pause').click();
       await greenOutput(page, model);
       const expected = Buffer.from(disk);
@@ -192,12 +226,12 @@ for (const site of sites) {
         page.on('request', request => requests.push(request));
         await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
         if (model === '0') await page.locator('#model').selectOption('0');
-        await page.locator('#advanced-panel > summary').click();
+        await page.locator('#settings').click();
         await installSystem(page, model);
         const disk = Buffer.alloc(size, 0x35); disk.fill(0x62, 2*512, 3*512);
         await page.locator('#disk').setInputFiles(file('original-search.dsk', disk));
         await expect(page.locator('#disk-status')).toContainText('original-search.dsk');
-        await page.locator('#disk-protected').uncheck();
+        await (await mediaControl(page, 'disk-protected')).uncheck();
         const rom = await fixture('search', 16384, 255); rom[0x3ff] = Number(size === 737280);
         await page.locator('#disk-rom').setInputFiles(file('original-search.rom', rom));
         await expect(page.locator('#disk-profile-status')).toContainText('original-search.rom');
@@ -208,7 +242,7 @@ for (const site of sites) {
         const expected = Buffer.from(disk), sector = size === 737280 ? 17 : 8;
         expected.fill(0x62, sector*512, (sector+1)*512);
         Buffer.from([1,0xff,0x7f,0,1,0xff,0xbf,0x10,1,0xff,0x7f,0,1,0xff,0xbf,0x10]).copy(expected, sector*512);
-        await page.locator('#eject-disk').click();
+        await (await mediaControl(page, 'eject-disk')).click();
         await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
         expect(await exportDisk(page)).toEqual(expected);
         expect(errors).toEqual([]);
@@ -225,7 +259,7 @@ for (const site of sites) {
           page.on('request', request => requests.push(request));
           await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
           if (model === '0') await page.locator('#model').selectOption('0');
-          await page.locator('#advanced-panel > summary').click();
+          await page.locator('#settings').click();
           if (philips) await installSystem(page, model);
           const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('clock-weave', size, 0x35);
           if (!philips) disk[2] = size === 737280 ? 0xf9 : 0xf8;
@@ -236,11 +270,11 @@ for (const site of sites) {
           Buffer.from([philips ? 0xbf : 0x80,4,0xb8,0,4,4]).copy(expected, 8*512);
           await page.locator('#disk').setInputFiles(file('original-clock.dsk', disk));
           await expect(page.locator('#disk-status')).toContainText('original-clock.dsk');
-          await page.locator('#disk-protected').uncheck();
+          await (await mediaControl(page, 'disk-protected')).uncheck();
           if (philips) {
             await page.locator('#disk-rom').setInputFiles(file('original-clock.rom', await fixture('clock',16384,255)));
             await expect(page.locator('#disk-profile-status')).toContainText('original-clock.rom');
-          } else { await page.locator('#boot-disk').click(); }
+          } else { await (await mediaControl(page, 'boot-disk')).click(); }
           // CPU checks all 512 read bytes, LOST DATA for unread read/initial
           // starvation/later zero-fill, clean new-command status, and waits for
           // the final serializer/CRC tail before painting success.
@@ -262,7 +296,7 @@ for (const site of sites) {
           page.on('request', request => requests.push(request));
           await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
           if (model === '0') await page.locator('#model').selectOption('0');
-          await page.locator('#advanced-panel > summary').click();
+          await page.locator('#settings').click();
           if (philips) await installSystem(page, model);
           const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('force-weave', size, 0x35);
           if (!philips) disk[2] = size === 737280 ? 0xf9 : 0xf8;
@@ -276,11 +310,11 @@ for (const site of sites) {
           Buffer.from(trace).copy(expected, 8*512);
           await page.locator('#disk').setInputFiles(file('original-force.dsk', disk));
           await expect(page.locator('#disk-status')).toContainText('original-force.dsk');
-          await page.locator('#disk-protected').uncheck();
+          await (await mediaControl(page, 'disk-protected')).uncheck();
           if (philips) {
             await page.locator('#disk-rom').setInputFiles(file('original-force.rom', await fixture('force',16384,255)));
             await expect(page.locator('#disk-profile-status')).toContainText('original-force.rom');
-          } else { await page.locator('#boot-disk').click(); }
+          } else { await (await mediaControl(page, 'boot-disk')).click(); }
           await greenOutput(page, model);
           await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
           expect(await exportDisk(page)).toEqual(expected);
@@ -299,7 +333,7 @@ for (const site of sites) {
           page.on('request', request => requests.push(request));
           await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
           if (model === '0') await page.locator('#model').selectOption('0');
-          await page.locator('#advanced-panel > summary').click();
+          await page.locator('#settings').click();
           if (philips) await installSystem(page, model);
           const side = Number(size === 737280);
           const disk = philips ? Buffer.alloc(size, 0x35) : await fixture('address-weave', size, 0x35);
@@ -312,15 +346,15 @@ for (const site of sites) {
           expected.fill(0x35, offset, offset+512); Buffer.from(trace).copy(expected, offset);
           await page.locator('#disk').setInputFiles(file('original-address.dsk', disk));
           await expect(page.locator('#disk-status')).toContainText('original-address.dsk');
-          await page.locator('#disk-protected').uncheck();
+          await (await mediaControl(page, 'disk-protected')).uncheck();
           if (philips) {
             const rom = await fixture('address',16384,255); rom[0x3ff] = side;
             await page.locator('#disk-rom').setInputFiles(file('original-address.rom', rom));
             await expect(page.locator('#disk-profile-status')).toContainText('original-address.rom');
-          } else { await page.locator('#boot-disk').click(); }
+          } else { await (await mediaControl(page, 'boot-disk')).click(); }
           await greenOutput(page, model);
           await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
-          await page.locator('#eject-disk').click();
+          await (await mediaControl(page, 'eject-disk')).click();
           await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
           // Reset retains the completed write and reruns the serviced/unserviced
           // diagnostic through compiled Wasm; the complete export must be exact.
@@ -336,7 +370,7 @@ for (const site of sites) {
   test(`Philips failed, canceled and stale imports preserve interface/session/media ${site}`, async ({page}) => {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
-    await page.locator('#advanced-panel > summary').click();
+    await page.locator('#settings').click();
     await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
     await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
     await page.locator('#disk-rom').setInputFiles(file('retained.rom', diskRom));
@@ -366,28 +400,28 @@ for (const site of sites) {
     await page.locator('#disk-rom').setInputFiles(file('deferred.rom', diskRom));
     await expect.poll(() => page.evaluate(() => typeof window.finishPhilips)).toBe('function');
     await expect(page.locator('#open-rom')).toBeDisabled();
-    await page.locator('#remove-disk-rom').click();
+    await (await settingsControl(page, 'cancel-disk-rom-import')).click();
     await page.evaluate(() => window.finishPhilips());
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#screen').focus(); await page.keyboard.type('RUN'); await page.keyboard.press('Enter');
     await expect(page.locator('#transcript')).toContainText('73\nREADY');
-    await page.locator('#remove-disk-rom').click();
+    await (await settingsControl(page, 'remove-disk-rom')).click();
     await expect(page.locator('#disk-profile-status')).toContainText('no external interface');
     expect(await exportDisk(page)).toEqual(await readFile('dist/weave-disk-demo.dsk'));
     await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
     await page.locator('#disk-rom').setInputFiles(file('retained.rom', diskRom));
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
-    await page.locator('#firmware').selectOption('cbios');
-    await page.locator('#boot-disk').click();
+    await (await settingsControl(page, 'firmware')).selectOption('cbios');
+    await (await mediaControl(page, 'boot-disk')).click();
     await expect(page.locator('#firmware')).toHaveValue('cbios');
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#model').selectOption('0');
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#cartridge').setInputFiles('dist/cbios-msx1-test-cartridge.rom');
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
-    await page.locator('#eject').click();
+    await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
-    await page.locator('#remove-disk-rom').click(); await page.locator('#builtin').click();
+    await (await settingsControl(page, 'remove-disk-rom')).click(); await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#transcript')).toContainText('READY');
   });
 }
