@@ -2,9 +2,8 @@ import { test, expect } from '@playwright/test';
 import { displayPreferenceKey } from '../web/display.js';
 import { installInterlaceProbe } from './fixtures/interlace.js';
 
-test.use({
-  launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
-});
+const webglArgs = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+test.use({ launchOptions: { args: webglArgs } });
 
 const crt = page => page.locator('#crt-screen');
 const screen = page => page.locator('#screen');
@@ -278,11 +277,8 @@ test('unavailable WebGL2 and blocked storage leave a usable Clean display', asyn
   expect(await sample(page, [[630, 470]])).toEqual(before);
 });
 
-test('paused fullscreen allocation failure stays Clean until resized smaller', async ({ page }) => {
-  await watchWasm(page);
+async function watchOutputAllocations(page) {
   await page.addInitScript(() => {
-    // The CSS fullscreen view lets Playwright resize the browser in place.
-    Element.prototype.requestFullscreen = undefined;
     const prototype = WebGL2RenderingContext.prototype;
     const { get } = Object.getOwnPropertyDescriptor(prototype, 'drawingBufferWidth');
     window.outputLimit = Infinity;
@@ -294,6 +290,67 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
         return Math.min(width, window.outputLimit);
       },
     });
+  });
+}
+
+test('the fallback message does not trigger a CRT retry in the page layout', async ({ playwright, baseURL }) => {
+  const browser = await playwright.chromium.launch({ args: webglArgs, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  try {
+    const page = await browser.newPage({ baseURL });
+    await watchWasm(page);
+    await watchOutputAllocations(page);
+    await page.setViewportSize({ width: 660, height: 3000 });
+    await boot(page);
+    await page.addStyleTag({ content: 'html::-webkit-scrollbar { width: 15px; }' });
+    await paste(page, 'COLOR 15,15:CLS\n');
+    await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
+    await page.locator('#pause').click();
+    const paused = await page.evaluate(() => window.displayCalls);
+    // Leave just enough room for the page at 660 px wide. An added status
+    // row would cause overflow and the scrollbar would narrow the canvas.
+    const height = await page.locator('main').evaluate(main => Math.ceil(main.getBoundingClientRect().height) + 4);
+    await page.setViewportSize({ width: 652, height });
+    expect(await page.evaluate(() => document.documentElement.clientWidth)).toBe(652);
+    const width = await screen(page).evaluate(canvas => Math.round(canvas.getBoundingClientRect().width));
+    await expect(crt(page)).toHaveAttribute('width', String(width));
+    await expect(crt(page)).toBeVisible();
+    const before = await sample(page, chroma);
+    expect(before).not.toEqual(chroma.map(() => white));
+    await page.evaluate(width => {
+      window.outputLimit = width;
+      window.outputAttempts.length = 0;
+    }, width);
+
+    await page.setViewportSize({ width: 660, height });
+    await expect.poll(() => page.evaluate(() => window.outputAttempts[0])).toBe(width + 8);
+    const attempts = await page.evaluate(async () => {
+      for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
+      return window.outputAttempts;
+    });
+    expect(attempts).toEqual([width + 8]);
+    await expect(status(page)).toHaveText('Clean active · WebGL2 output allocation failed.');
+    await expect(status(page)).toBeVisible();
+    await expect(crt(page)).toBeHidden();
+    await expect(select(page)).toHaveValue('crt');
+    expect(await sample(page, chroma)).toEqual(chroma.map(() => white));
+
+    await page.setViewportSize({ width: 652, height });
+    await expect(crt(page)).toBeVisible();
+    await expect(status(page)).toBeEmpty();
+    expect(await sample(page, chroma)).toEqual(before);
+    expect(await page.evaluate(() => window.outputAttempts)).toEqual([width + 8, width]);
+    expect(await page.evaluate(() => window.displayCalls)).toEqual(paused);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('paused fullscreen allocation failure stays Clean until resized smaller', async ({ page }) => {
+  await watchWasm(page);
+  await watchOutputAllocations(page);
+  await page.addInitScript(() => {
+    // The CSS fullscreen view lets Playwright resize the browser in place.
+    Element.prototype.requestFullscreen = undefined;
   });
   await page.setViewportSize({ width: 1280, height: 820 });
   await boot(page);
