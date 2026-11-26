@@ -10,6 +10,7 @@ let loading = false;
 let playRequested = true;
 let running = false;
 let audioContext;
+let audioActivationFailed = false;
 let outputGain;
 let nextAudio = 0;
 let system = 'Weave BASIC';
@@ -108,7 +109,7 @@ function updateAudioState() {
   $('mute').title = label;
   $('volume').value = volume;
   $('volume').setAttribute('aria-valuetext', volume ? `${volume}%` : '0% (muted)');
-  $('audio-state').textContent = ready && !document.hidden && (running || audioContext) && volume && !audible
+  $('audio-state').textContent = ready && !document.hidden && (running || audioContext || audioActivationFailed) && volume && !audible
     ? 'Sound is waiting for the browser. Use the speaker or volume to try again.' : '';
 }
 function resetTiming() {
@@ -347,8 +348,10 @@ async function activateAudio() {
     const resumed = audioContext.resume();
     updateAudioState();
     await resumed;
+    audioActivationFailed = false;
   } catch {
     // Browser policy or device errors are retryable through the same controls.
+    audioActivationFailed = true;
   }
   updateAudioState();
 }

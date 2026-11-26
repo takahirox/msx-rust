@@ -1164,20 +1164,30 @@ MSX_TEST_BIOS=target/validation/cbios_main_msx1.rom npm test
 
 ## Manual browser smoke flow
 
-1. Build/serve using the README commands. Confirm the visible blue display says
+1. [Build and serve the player locally](../README.md#run-locally). Confirm the blue display says
    `WEAVE BASIC 0.1` and `READY`. Click the display before typing.
 2. Type `10 FOR I=1 TO 5 : PRINT I : NEXT I`, Enter, `LIST`, Enter, `RUN`, Enter.
    Confirm visible lines 1–5. Replace line 10 with `10 PRINT 42` and run again.
    Enter `10` alone and `LIST` to verify deletion. Exercise arrow/Home/End editing.
-3. Click **Graphics demo** and confirm a yellow curve appears. Press Enter to return.
-   Optionally run the numbered graphics example from README.
-4. Click the **speaker button** to start sound, then type `BEEP` and listen for a steady tone. Type `SOUND 8,0`
-   and confirm silence. Audio should remain silent before user activation.
-5. Expand **ROMs & advanced system options**, download `test-cartridge.rom`, then
-   choose it with **Open ROM**. Confirm title and yellow sprite. Click the display and hold Space: hear the tone, then release to silence. Check that focus
-   loss releases held keys. Reset should boot the cartridge again; Eject returns to BASIC.
-6. Optionally select your lawfully obtained 32 KiB system ROM, then a compatible
-   plain cartridge. Files must stay local. **Built-in BASIC** unloads both inputs.
+3. Type `SCREEN 2:FOR X=0 TO 255:PSET X,INT(96+60*SIN(X/20)),10:NEXT X` and press
+   Enter. Confirm a yellow curve appears, then press Enter again to return to text.
+4. Use the **speaker button** to start sound if needed. Focus the display, type
+   `BEEP` and listen for a steady tone. Type `SOUND 8,0` and confirm silence.
+   Sound should stay silent before a user gesture activates browser audio.
+5. Generate the [original test fixtures](../tests/fixtures/README.md) locally.
+
+   ```sh
+   cargo run --locked --quiet -p msx-core --example fixtures -- target/browser-fixtures
+   ```
+
+   Select **MSX1** under **Machine**, then use **Insert cartridge** to open
+   `target/browser-fixtures/test-cartridge.rom`. Confirm the cartridge title and
+   yellow sprite. Focus the display and hold Space to hear the tone, then release
+   it to silence. Check that focus loss releases held keys. **Reset** should boot
+   the cartridge again. **Eject** returns to BASIC with automatic firmware.
+6. Optionally select a lawfully obtained 32 KiB MSX1 system ROM under
+   **Settings → System firmware**, then insert a compatible plain cartridge.
+   Files stay local. **Use Weave BASIC** unloads both ROMs.
 7. Pause, confirm video execution stops, and Resume again. Reload to verify the
    original BASIC prompt returns without retaining user ROM data.
 

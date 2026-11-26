@@ -43,6 +43,7 @@ async function observePlayback(page) {
     const Audio = window.AudioContext;
     window.AudioContext = class extends Audio {
       constructor(...args) {
+        if (evidence.failAudioConstruction) throw new Error('AudioContext unavailable');
         super(...args);
         evidence.audio = this;
         if (evidence.blockSound) evidence.suspending = super.suspend();
@@ -206,6 +207,33 @@ test('hidden startup, import and deliberate Reset execute their first frame only
   await advance(page, 1000);
   await advance(page, 17);
   expect((await state(page)).frames).toBe(2);
+});
+
+test('speaker shows audio initialization failure and retries while playback stays paused', async ({ page }) => {
+  await observePlayback(page);
+  await page.goto('/');
+  await expect(status(page)).toContainText('Running');
+  await page.locator('#pause').click();
+  await expect(status(page)).toContainText('Paused');
+
+  const speaker = page.locator('#mute');
+  const audioStatus = page.locator('#audio-state');
+  await expect(audioStatus).toBeEmpty();
+  await page.evaluate(() => { window.playback.failAudioConstruction = true; });
+  await speaker.press('Enter');
+  expect(await page.evaluate(() => window.playback.audio)).toBeUndefined();
+  await expect(speaker).toHaveAccessibleName('Start sound');
+  await expect(audioStatus).toContainText('Use the speaker or volume to try again');
+
+  const paused = await state(page);
+  await page.evaluate(() => { window.playback.failAudioConstruction = false; });
+  await speaker.press('Space');
+  await expect(speaker).toHaveAccessibleName('Mute');
+  await expect(audioStatus).toBeEmpty();
+  expect(await page.evaluate(() => window.playback.audio.state)).toBe('running');
+  await advance(page, 1000);
+  expect(await state(page)).toEqual(paused);
+  await expect(status(page)).toContainText('Paused');
 });
 
 test('speaker retries blocked audio and remembers volume and mute across reload and visibility changes', async ({ page }) => {
