@@ -54,9 +54,13 @@ with no scheduled audio gaps. The local comparison covers one workload and
 viewport with software WebGL2. Audio coverage comes from browser scheduling
 and buffer completion.
 
-Published Pages verification is pending. After merge and deployment, check the
-visible CRT default on fresh MSX2 BASIC, live switching, and a representative
-demo. Record the deployed revision, Actions run, browser and results.
+### Historical Pages checklist
+
+The Issue #83 deployment checklist called for checking the visible CRT default
+on fresh MSX2 BASIC, live switching and a representative bundled demo, then
+recording the deployed revision, Actions run, browser and results. Verification
+was recorded as pending. For current deployment checks, use the
+[Issue #87 local-media checklist](deployment.md#required-post-merge-verification-pending).
 
 # Issue 73 WZ MEMPTR and BIT HL flags
 

@@ -216,9 +216,11 @@ MSX2 BASIC, diagnostic and disk loaders initialize 3,2,1,0 through Z80 I/O;
 C-BIOS and supplied firmware initialize their own selectors. MSX1 keeps fixed
 64 KiB RAM and unconnected mapper ports. One fixed-capacity mapper is supported;
 multiple mappers and configurable profiles remain outside this implementation.
-The original **RAM mapper probe** download in advanced options reports
-`RAM MAPPER PASS` after checking all sixteen segments through normal ROM import,
-including memory above 64 KiB; Reset repeats the test. See [profile and validation](docs/msx2.md#ram-mapper).
+The original **RAM mapper probe** is a locally generated test fixture. After a
+normal ROM import, it reports `RAM MAPPER PASS` if all sixteen segments work,
+including memory above 64 KiB. Reset repeats the test.
+See the [test fixture inventory](tests/fixtures/README.md) and the
+[RAM mapper profile and validation](docs/msx2.md#ram-mapper).
 
 For external firmware, select a matching local **32 KiB MSX2 main BIOS/BASIC** and
 **16 KiB sub-ROM**, then **Apply MSX2 firmware**. The pair is validated before
