@@ -83,6 +83,16 @@ const state = page => page.evaluate(() => {
 });
 const status = page => page.locator('#status');
 
+async function deferRomRead(page) {
+  await page.addInitScript(() => {
+    const read = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = async function () {
+      const bytes = await read.call(this);
+      return new Promise(resolve => { window.deliverRom = () => resolve(bytes); });
+    };
+  });
+}
+
 test('visibility suspends frames, media time and sound and releases input without changing manual pause', async ({ page }) => {
   await observePlayback(page);
   await page.goto('/');
@@ -159,13 +169,7 @@ test('hidden startup, import and deliberate Reset execute their first frame only
   let deliverWasm;
   const wasmPending = new Promise(resolve => { deliverWasm = resolve; });
   await page.route('**/msx_wasm.wasm', async route => { await wasmPending; await route.continue(); });
-  await page.addInitScript(() => {
-    const read = File.prototype.arrayBuffer;
-    File.prototype.arrayBuffer = async function () {
-      const bytes = await read.call(this);
-      return new Promise(resolve => { window.deliverRom = () => resolve(bytes); });
-    };
-  });
+  await deferRomRead(page);
 
   await page.goto('http://127.0.0.1:41874/msx-rust/');
   await visibility(page, true);
@@ -208,6 +212,40 @@ test('hidden startup, import and deliberate Reset execute their first frame only
   await advance(page, 17);
   expect((await state(page)).frames).toBe(2);
 });
+
+for (const mode of ['native', 'fallback']) {
+  test(`${mode} fullscreen exposes playback status during a pending ROM import`, async ({ page }) => {
+    await observePlayback(page);
+    await deferRomRead(page);
+    if (mode === 'fallback') await page.addInitScript(() => { Element.prototype.requestFullscreen = undefined; });
+    await page.setViewportSize({ width: 812, height: 375 });
+    await page.goto('/');
+    await expect(status(page)).toContainText('Running');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom');
+    await expect.poll(() => page.evaluate(() => typeof window.deliverRom)).toBe('function');
+    await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Exit fullscreen' })).toBeVisible();
+    if (mode === 'native') expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('emulator');
+    else await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
+
+    const playback = page.getByRole('status').locator('#playback-state');
+    await page.getByRole('button', { name: 'Pause', exact: true }).click();
+    await expect(playback).toHaveText('Paused ·');
+    await expect(playback).toBeInViewport({ ratio: 1 });
+    await page.getByRole('button', { name: 'Resume', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await expect(playback).toHaveText('Waiting for import ·');
+    await expect(playback).toBeInViewport({ ratio: 1 });
+    expect(await playback.evaluate(element => element.closest('[aria-busy="true"]') === null)).toBe(true);
+    const frames = (await state(page)).frames;
+    await advance(page, 100);
+    expect((await state(page)).frames).toBe(frames);
+
+    await page.evaluate(() => window.deliverRom());
+    await expect(playback).toHaveText('Running ·');
+    await expect(playback).toBeInViewport({ ratio: 1 });
+  });
+}
 
 test('speaker shows audio initialization failure and retries while playback stays paused', async ({ page }) => {
   await observePlayback(page);

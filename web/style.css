@@ -201,7 +201,7 @@ body.focus-view-active { overflow: hidden; }
 .computer:is(:fullscreen, .focus-view) :is(button, select) { color: #eff3ef; background: #26332e; border-color: #5b7167; }
 .computer:is(:fullscreen, .focus-view) button:hover:enabled { background: #32483e; }
 .computer:is(:fullscreen, .focus-view) :focus-visible { outline-color: #a1d5b8; }
-.computer:is(:fullscreen, .focus-view) :is(.scale, #status:not([data-kind="error"])) { display: none; }
+.computer:is(:fullscreen, .focus-view) .scale { display: none; }
 /* Reserve a line so renderer fallback cannot resize the display and retry. */
 .computer:is(:fullscreen, .focus-view) .machine-state { display: block; flex: none; height: 24px; overflow: auto; text-align: center; color: #c8dbd2; }
 .computer:is(:fullscreen, .focus-view) #status[data-kind="error"] { color: #ffbfaa; }

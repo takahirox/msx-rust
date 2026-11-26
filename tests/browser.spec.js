@@ -868,7 +868,7 @@ test('loading disables commands and shows progress before Wasm is ready', async 
   release();
   await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
   await expect(page.locator('#model')).toHaveValue('1');
-  await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('#screen')).toHaveAttribute('aria-busy', 'false');
 });
 
 for (const failure of ['http', 'invalid-wasm']) {
@@ -879,7 +879,7 @@ for (const failure of ['http', 'invalid-wasm']) {
     await expect(page.locator('#status')).toContainText('Reload to retry');
     await expect(page.locator('#status')).toHaveAttribute('data-kind', 'error');
     for (const id of ['pause', 'insert-cartridge', 'mute', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
-    await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('#screen')).toHaveAttribute('aria-busy', 'false');
   });
 }
 

@@ -99,7 +99,8 @@ function updateControls() {
       $(fallback).focus();
     }
   }
-  $('emulator').setAttribute('aria-busy', String(!ready || loading));
+  // Keep the live playback status outside the busy display during imports.
+  screen.setAttribute('aria-busy', String(!ready || loading));
 }
 function updateAudioState() {
   const audible = audioContext?.state === 'running';
@@ -999,6 +1000,6 @@ try {
   ready = false;
   syncPlayback();
   updateControls();
-  $('emulator').setAttribute('aria-busy', 'false');
+  screen.setAttribute('aria-busy', 'false');
   status(`Unable to start: ${error.message}. Reload to retry; serve the built site over HTTP.`, 'error');
 }
