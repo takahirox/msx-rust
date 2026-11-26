@@ -45,7 +45,7 @@ async function install(page) {
   const chooser=page.waitForEvent('filechooser');await (await settingsControl(page, 'open-pac-rom')).click();
   await(await chooser).setFiles(file('diagnostic-pac.rom',firmware));
   await expect(page.locator('#pac-status')).toContainText('diagnostic-pac.rom');
-  await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+  await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
 }
 async function advance(page,n) {return page.evaluate(n=>{const w=window.musicWasm;for(let i=0;i<n;i++)w.msx_frame();return [...new Float32Array(w.memory.buffer,w.msx_audio(),w.msx_audio_len())];},n);}
 async function green(page,model=1) {await expect.poll(()=>page.locator('#screen').evaluate(c=>[...c.getContext('2d').getImageData(20,20,1,1).data])).toEqual(model ? [36,218,36,255] : [33,200,66,255]);}
@@ -124,12 +124,12 @@ for(const site of sites) {
     const other=Buffer.from(firmware);other[0x1234]^=255;
     await page.locator('#pac-rom').setInputFiles(file('other-profile-firmware.rom',other));
     await expect(page.locator('#pac-status')).toContainText('other-profile-firmware.rom');
-    await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
     expect(await saved(page)).toEqual(Array(8190).fill(255));
     expect((await backup(page)).rom).not.toBe(container.rom);
     await page.locator('#pac-rom').setInputFiles(file('renamed-original.rom',firmware));
     await expect(page.locator('#pac-status')).toContainText('renamed-original.rom');
-    await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
     expect(await saved(page)).toEqual(pattern);
 
   });
@@ -141,7 +141,7 @@ for(const site of sites) {
       await page.locator('#pac-rom').setInputFiles(file(name,bytes));await expect(page.locator('#status')).toContainText('FM-PAC import failed');expect(await saved(page)).toEqual(pattern);
     }
     await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await settingsControl(page, 'cancel-pac-rom-import')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
-    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
     await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
     await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('msx-rust:fm-pac:v1:'));localStorage[key]='corrupted';});
     await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#settings').click();await install(page);
@@ -158,8 +158,8 @@ for(const site of sites) {
     await (await settingsControl(page, 'sound-cartridge')).selectOption('1');await (await settingsControl(page, 'install-sound-cartridge')).click();
     const main=await hex('fm-pac-system',32768);main[0x2d]=1;
     const sub=Buffer.alloc(16384);sub.write('CD');sub[0x100]=0x7b;
-    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
-    await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
+    await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
     const disk=await hex('philips-scci-sector',368640,0x35);disk[510]=0;
     await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await (await mediaControl(page, 'disk-protected')).uncheck();await (await mediaControl(page, 'boot-disk')).click();await green(page);
     await expect(page.locator('#disk-status')).toContainText('unsaved modifications');

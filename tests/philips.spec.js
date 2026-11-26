@@ -104,7 +104,7 @@ for (const site of sites) {
         await (await settingsControl(page, 'mapper')).selectOption('6');
         await page.locator('#cartridge').setInputFiles('target/browser-fixtures/mapper-6.rom');
         await expect(page.locator('#status')).toContainText('mapper-6.rom (ASCII8SRAM2)');
-        await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('#screen')).toHaveAttribute('aria-busy', 'false');
         await expect(page.locator('#export-save')).toBeEnabled();
         await installSystem(page, model);
         const disk = await fixture('sector', size, 0x35);

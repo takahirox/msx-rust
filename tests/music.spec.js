@@ -45,7 +45,7 @@ async function install(page) {
   const chooser=page.waitForEvent('filechooser');await (await settingsControl(page, 'open-music-rom')).click();
   await(await chooser).setFiles(file('diagnostic-fm.rom',firmware));
   await expect(page.locator('#music-status')).toContainText('diagnostic-fm.rom');
-  await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+  await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
 }
 async function advance(page,n) {return page.evaluate(n=>{const w=window.musicWasm;for(let i=0;i<n;i++)w.msx_frame();return [...new Float32Array(w.memory.buffer,w.msx_audio(),w.msx_audio_len())];},n);}
 async function green(page) {await expect.poll(()=>page.locator('#screen').evaluate(c=>[...c.getContext('2d').getImageData(20,20,1,1).data])).toEqual([36,218,36,255]);}
@@ -116,8 +116,8 @@ for(const site of sites) {
     await (await settingsControl(page, 'sound-cartridge')).selectOption('1');await (await settingsControl(page, 'install-sound-cartridge')).click();
     const main=await hex('philips-system',32768);main[0x2d]=1;
     const sub=Buffer.alloc(16384);sub.write('CD');sub[0x100]=0x7b;
-    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
-    await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await page.locator('#bios').setInputFiles(file('original-main.rom',main));await page.locator('#subrom').setInputFiles(file('original-sub.rom',sub));await (await settingsControl(page, 'apply-firmware')).click();await expect(page.locator('#firmware')).toHaveValue('local');await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
+    await page.locator('#disk-rom').setInputFiles(file('original-disk.rom',await hex('music-disk',16384,255)));await expect(page.locator('#disk-profile-status')).toContainText('original-disk.rom');await expect(page.locator('#screen')).toHaveAttribute('aria-busy','false');
     const disk=await hex('philips-scci-sector',368640,0x35);disk[510]=0;
     await page.locator('#disk').setInputFiles(file('original.dsk',disk));await expect(page.locator('#disk-status')).toContainText('original.dsk');await (await mediaControl(page, 'disk-protected')).uncheck();
     await (await mediaControl(page, 'boot-disk')).click();await green(page);
