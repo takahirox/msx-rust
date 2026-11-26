@@ -41,7 +41,7 @@ async function boot(page, path, model) {
   await page.goto(path);
   await expect(page.locator('#status')).toContainText('Running · MSX2 · Weave BASIC');
   if (model === '0') await page.locator('#model').selectOption(model);
-  await page.locator('#cartridge').setInputFiles('dist/joystick-test-cartridge.rom');
+  await page.locator('#cartridge').setInputFiles('target/browser-fixtures/joystick-test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('C-BIOS');
   await assertInputs(page);
   await page.locator('#screen').focus();
@@ -156,21 +156,21 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await page.keyboard.up('KeyN');
       await hold();
       // Replacing a cartridge clears host-held and matrix state as well as core input.
-      await page.locator('#cartridge').setInputFiles('dist/joystick-test-cartridge.rom');
+      await page.locator('#cartridge').setInputFiles('target/browser-fixtures/joystick-test-cartridge.rom');
       await assertInputs(page);
       await up();
       await assertInputs(page);
       await hold();
       await page.locator('#eject').click();
       await expect(page.locator('#transcript')).toContainText('READY');
-      await page.locator('#cartridge').setInputFiles('dist/joystick-test-cartridge.rom');
+      await page.locator('#cartridge').setInputFiles('target/browser-fixtures/joystick-test-cartridge.rom');
       await assertInputs(page);
       await up();
       await assertInputs(page);
       await hold();
       await page.locator('#model').selectOption(model === '0' ? '1' : '0');
       await expect(page.locator('#transcript')).toContainText('READY');
-      await page.locator('#cartridge').setInputFiles('dist/joystick-test-cartridge.rom');
+      await page.locator('#cartridge').setInputFiles('target/browser-fixtures/joystick-test-cartridge.rom');
       await assertInputs(page);
       await up();
       await assertInputs(page);

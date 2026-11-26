@@ -1,4 +1,4 @@
-import { mediaControl, settingsControl } from './fixtures/player-controls.js';
+import { startSound, mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 
 async function boot(page, path = '/') {
@@ -21,7 +21,7 @@ async function servicePattern(page) {
   }), {timeout:15000}).toBe(true);
 }
 async function fixture(page) {
-  await page.locator('#cartridge').setInputFiles('dist/msx2-test-cartridge.rom');
+  await page.locator('#cartridge').setInputFiles('target/browser-fixtures/msx2-test-cartridge.rom');
   await expect(page.locator('#screen')).toHaveAttribute('width','512');
   await expect(page.locator('#screen')).toHaveAttribute('height','212');
   await expect.poll(() => pixel(page,0,0)).toEqual([255,0,0]);
@@ -71,9 +71,8 @@ test('MSX2 Z80 cartridge draws extended video, uses input/audio, resets and retu
     };
   });
   await boot(page);await fixture(page);
-  await expect(page.locator('#example')).toBeDisabled();
   await page.screenshot({path:'test-results/msx2-screen7.png',fullPage:true});
-  await page.getByRole('button',{name:'Enable audio',exact:true}).click();
+  await startSound(page);
   await page.keyboard.down('Space');
   await expect.poll(()=>page.evaluate(()=>Math.max(0,...window.msx2Audio))).toBeGreaterThan(0.05);
   await page.keyboard.up('Space');
@@ -128,7 +127,7 @@ test('MSX2 firmware imports are atomic, paired, validated and reversible', async
   await page.locator('#model').selectOption('0');await expect(page.locator('#transcript')).toContainText('READY');
   expect(requests.filter(r=>r.method!=='GET'||r.body)).toEqual([]);
 });
-test('MSX2 boots from the GitHub Pages project subpath with relative fixture links',async({page})=>{
+test('MSX2 boots from the GitHub Pages project subpath with local media and relative firmware paths',async({page})=>{
   await boot(page,'http://127.0.0.1:41874/msx-rust/');await fixture(page);
   await page.keyboard.down('8');
   await expect(page.locator('#screen')).toHaveAttribute('width','256');
@@ -139,7 +138,7 @@ test('MSX2 boots from the GitHub Pages project subpath with relative fixture lin
   await page.locator('#reset').click();
   await expect(page.locator('#screen')).toHaveAttribute('width','512');
   await commandEdges(page, false);
-  for(const file of ['msx2-test-cartridge.rom','weave-msx2-boot.rom','msx2-diagnostic-sub.rom','cbios-test-cartridge.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) expect((await page.request.get(`http://127.0.0.1:41874/msx-rust/${file}`)).ok()).toBe(true);
+  for(const file of ['weave-msx2-boot.rom','msx2-diagnostic-sub.rom','cbios_main_msx2.rom','cbios_sub.rom','CBIOS-LICENSE.txt','CBIOS-PROVENANCE.txt']) expect((await page.request.get(`http://127.0.0.1:41874/msx-rust/${file}`)).ok()).toBe(true);
   await page.setViewportSize({width:320,height:720});
   await page.locator('#settings').click();
   await expect(page.locator('#firmware')).toBeVisible();
@@ -180,7 +179,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#firmware')).toHaveValue('auto');
     await page.getByText('Firmware compatibility and credits', { exact: true }).click();
     await expect(page.locator('#advanced-panel').getByText('no original MSX BASIC', { exact: true })).toBeVisible();
-    await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('Auto: Plain');
     // Only reached after C-BIOS slot discovery, RDSLT/WRSLT, EXTROM,
     // CHGMOD/CHPUT/FILVRM/WRTVRM. These pixels are drawn by emulated Z80 code.
@@ -188,7 +187,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect.poll(() => pixel(page, 1, 16)).toEqual([0,0,0]);
     await expect.poll(() => pixel(page, 8, 16)).toEqual([0,0,0]);
     await expect(page.locator('#transcript')).toHaveText('');
-    await page.getByRole('button', {name:'Enable audio',exact:true}).click();
+    await startSound(page);
     await expect.poll(() => page.evaluate(() => window.cbiosAudio.slice(-5).length === 5 && window.cbiosAudio.slice(-5).every(v=>v<0.0001))).toBe(true);
     await page.keyboard.down('Space');
     await expect.poll(() => pixel(page, 8, 16)).toEqual([255,255,255]);
@@ -220,7 +219,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#status')).toContainText('C-BIOS 0.29a');
     await expect(page.locator('#eject')).toBeDisabled();
     await expect(page.locator('#screen')).toHaveAttribute('width','256');
-    await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom');
     await servicePattern(page);
     await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#status')).toHaveText('Running · MSX2 C-BIOS 0.29a · cartridge BIOS (no BASIC)');
@@ -232,7 +231,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#transcript')).toContainText('42');
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0,0]);
     const pageUrl = new URL(path, 'http://127.0.0.1:41873');
-    const assets = ['', 'app.js', 'display.js', 'saves.js', 'style.css', 'msx_wasm.wasm', 'demos/manifest.json'].map(file => new URL(file, pageUrl).href);
+    const assets = ['', 'app.js', 'display.js', 'saves.js', 'style.css', 'msx_wasm.wasm'].map(file => new URL(file, pageUrl).href);
     expect(requests.filter(r => r.method !== 'GET' || r.body || !assets.includes(r.url))).toEqual([]);
     expect(errors).toEqual([]);
   });

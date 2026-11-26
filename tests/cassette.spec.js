@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
-const cas = await readFile('dist/cassette-test.cas');
+const cas = await readFile('target/browser-fixtures/cassette-test.cas');
 // Hand specified bytes: no parser/encoding helper or ROM readback supplies expected data.
 const recovered = [
   208,208,208,208,208,208,208,208,208,208,84,65,80,69,32,32,
@@ -43,7 +43,7 @@ async function advance(page, n) {
     await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
   }, n);
 }
-async function openTape(page, rate = '1200', file = 'dist/cassette-test.cas') {
+async function openTape(page, rate = '1200', file = 'target/browser-fixtures/cassette-test.cas') {
   await page.locator('#insert-cassette').click();
   await page.locator('#tape-rate').selectOption(rate);
   const chooser = page.waitForEvent('filechooser'); await page.locator('#open-cas').click();
@@ -81,8 +81,8 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         navigator.sendBeacon=()=>{throw new Error('Unexpected beacon');};
       });
       if(model==='0') await page.locator('#model').selectOption(model);
-      const chooser=page.waitForEvent('filechooser');await page.locator('#insert-cartridge').click(); await page.locator('#open-rom').click();
-      await (await chooser).setFiles('dist/cassette-test-cartridge.rom');
+      const chooser=page.waitForEvent('filechooser');await page.locator('#insert-cartridge').click();
+      await (await chooser).setFiles('target/browser-fixtures/cassette-test-cartridge.rom');
       await openTape(page, rate);
       await expect(page.locator('#tape-status')).toContainText(`${rate} baud`);
       await advance(page,1000);await exactVisible(page);
@@ -103,7 +103,7 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
   test(`CAS pause, failed imports, canceled staging and session preservation at ${site}`,async({page}) => {
     await boot(page,site);
     await page.locator('#screen').focus();await page.keyboard.type('10 PRINT 73');await page.keyboard.press('Enter');await advance(page,4);
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await openTape(page);
     await page.evaluate(() => window.manualTapeFrames=false);
     await expect.poll(()=>page.evaluate(()=>window.tapeWasm.msx_tape_position())).toBeGreaterThan(0.1);
@@ -115,7 +115,7 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await expect(page.locator('#status')).toContainText('Session and previous tape unchanged');
       expect(await page.evaluate(()=>window.tapeWasm.msx_tape_position())).toBe(position);
     }
-    await page.evaluate(()=>window.failTapeAllocation=true);await page.locator('#tape').setInputFiles('dist/cassette-test.cas');
+    await page.evaluate(()=>window.failTapeAllocation=true);await page.locator('#tape').setInputFiles('target/browser-fixtures/cassette-test.cas');
     await expect(page.locator('#status')).toContainText('Session and previous tape unchanged');
     await page.evaluate(()=>window.failTapeAllocation=false);
     expect(await page.evaluate(()=>{
@@ -135,7 +135,7 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     expect(await page.evaluate(()=>window.tapeWasm.msx_tape_position())).toBe(0);
     await expect(page.locator('#pause')).toHaveText('Resume');
     await page.locator('#rewind-tape').click();await page.locator('#eject-tape').click();
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     await page.locator('#pause').click();await page.locator('#screen').focus();await page.keyboard.type('RUN');await page.keyboard.press('Enter');
     await expect(page.locator('#transcript')).toContainText('73\nREADY');
     // Landscape fullscreen prioritizes video and playback. Exiting returns
@@ -149,7 +149,7 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.locator('#insert-cassette').click();
     await expect(page.locator('#tape-rate')).toHaveValue('2400');
     await expect(page.locator('#open-cas')).toBeVisible();
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
   });
   test(`stale CAS completion cannot replace tape or a newer session at ${site}`,async({page}) => {
     await boot(page,site);
@@ -190,7 +190,7 @@ for(const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await expect(page.locator('#tape-status')).toContainText('new.cas');
     await defer();await page.locator('#tape').dispatchEvent('cancel');await finish();
     await expect(page.locator('#tape-status')).toContainText('new.cas');
-    await page.locator('#cartridge').setInputFiles('dist/cassette-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cassette-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await defer();await page.locator('#eject').click();await finish();
     await expect(page.locator('#status')).toContainText('Weave BASIC');

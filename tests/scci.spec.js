@@ -1,4 +1,4 @@
-import { mediaControl, settingsControl } from './fixtures/player-controls.js';
+import { startSound, mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -80,7 +80,7 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     await page.locator('#settings').click();
     // Replacing ordinary SRAM hardware runs the existing outgoing save safeguard.
     await (await settingsControl(page, 'mapper')).selectOption('6');
-    await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/mapper-6.rom');
     await expect(page.locator('#export-save')).toBeEnabled();
     await page.evaluate(()=>{const w=window.scciWasm;new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);});
     await install(page,profile);
@@ -116,14 +116,14 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     const rises=pcm.flatMap((v,i)=>i && pcm[i-1]<0 && v>0 ? [i] : []);
     expect(rises.length).toBeGreaterThan(40);
     for(let i=1;i<rises.length;i++) expect(Math.abs(rises[i]-rises[0]-i*32*200*44100/3579545)).toBeLessThan(1);
-    await page.locator('#audio').click();
+    await startSound(page);
     await expect.poll(()=>page.evaluate(()=>window.scciScheduled.filter(r=>r.square).length)).toBeGreaterThan(5);
     await page.locator('#pause').click();
     const count=await page.evaluate(()=>window.scciScheduled.length);
     await page.waitForTimeout(150);
     expect(await page.evaluate(()=>window.scciScheduled.length)).toBe(count);
-    await page.locator('#pause').click(); await page.locator('#audio').click();
-    await expect(page.locator('#audio-state')).toHaveText('Audio off · enable to hear sound');
+    await page.locator('#pause').click(); await page.getByRole('button', { name: 'Mute', exact: true }).click();
+    await expect(page.locator('#mute')).toHaveAccessibleName('Unmute');
     // Failed requests preserve running sound, profile, firmware and modified media.
     const before=await state(page);
     await page.locator('#cartridge').setInputFiles(file('invalid.rom',Buffer.alloc(32768)));
@@ -134,7 +134,7 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     await (await settingsControl(page, 'install-sound-cartridge')).click();
     expect(await state(page)).toEqual(before);
     await page.evaluate(()=>{window.failScci=false;});
-    await page.locator('#cartridge').setInputFiles(file('deferred.rom',await readFile('dist/test-cartridge.rom')));
+    await page.locator('#cartridge').setInputFiles(file('deferred.rom',await readFile('target/browser-fixtures/test-cartridge.rom')));
     await expect(page.locator('#remove-sound-cartridge')).toHaveText('Remove sound cartridge');
     await expect(page.locator('#remove-sound-cartridge')).toBeDisabled();
     await (await mediaControl(page, 'cancel-cartridge-import')).click();
@@ -155,7 +155,7 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     // Ordinary ROM replaces the accessory; bundled/model clearing remains explicit.
     await install(page,profile);
     await (await settingsControl(page, 'mapper')).selectOption('1');
-    await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('test-cartridge.rom (Plain)');
     expect((await state(page))[0]).toBe(0);
     await install(page,profile); await (await settingsControl(page, 'builtin')).click();
@@ -167,6 +167,9 @@ for (const site of sites) for (const model of [0,1]) for (const profile of [1,2]
     expect((await state(page))[3]).toBe(1);
     expect(errors).toEqual([]);
     expect(requests.some(r=>r.method()!=='GET' || !r.url().startsWith(site))).toBe(false);
-    expect(await page.evaluate(()=>Object.keys(localStorage).filter(k=>!k.startsWith('msx-rust:sram:v1:')))).toEqual([]);
+    const preferences = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)
+      .filter(([key]) => !key.startsWith('msx-rust:sram:v1:'))
+      .map(([key, value]) => [key, JSON.parse(value)])));
+    expect(preferences).toEqual({ 'msx-rust:volume': { volume: 0, lastNonzeroVolume: 100 } });
   });
 }

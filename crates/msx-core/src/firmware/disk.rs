@@ -1,4 +1,4 @@
-//! Independently authored Z80 disk firmware and demo; MIT. No external ROM bytes.
+//! Independently authored Z80 disk firmware and test fixture; MIT. No external ROM bytes.
 //! This small bytecode assembler is also the complete reproducible source.
 use crate::font;
 struct Code {
@@ -220,7 +220,7 @@ pub fn disk_rom() -> Vec<u8> {
 }
 /// Raw 720 KiB original boot disk. Sector zero loads ten more sectors via DISKIO.
 /// Space reads/increments/writes byte 0 of LBA 18; all other bytes are preserved.
-pub fn demo_disk() -> Vec<u8> {
+pub fn test_disk() -> Vec<u8> {
     let mut disk = vec![0; 737280];
     let loader = [
         0xaf, 0x06, 10, 0x0e, 0xf9, 0x11, 1, 0, 0x21, 0, 0xc2, 0xcd, 0x10, 0x40, 0xda, 0, 0x41,

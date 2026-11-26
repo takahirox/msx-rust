@@ -91,7 +91,7 @@ save identity.
 
 ## Browser saving and recovery
 
-Choose a mapper, then **Open ROM**. For SRAM choices the browser computes a local
+Choose a mapper, then **Insert cartridge**. For SRAM choices the browser computes a local
 SHA-256 of the original bytes before committing the import. After core validation,
 it restores the matching local save synchronously before any CPU frame executes.
 The key is `msx-rust:sram:v1:<ROM SHA-256>:<mapper ID>`. ROM images are never stored
@@ -137,7 +137,7 @@ synced or sent to a server.
 ## Executable evidence
 
 `firmware/sram_fixture.rs` generates original MIT-licensed probes (`mapper-6.rom`
-through `mapper-10.rom` in dist). SRAM probes boot with C-BIOS, execute code from
+through `mapper-10.rom` under `target/browser-fixtures/`). SRAM probes boot with C-BIOS, execute code from
 ROM bank 7, copy a routine into RAM, select SRAM, read it through a mirror and show
 its value as VDP backdrop. Space increments once per press. The R-Type probe has
 its AB header in fixed bank 0Fh, selects bank 17h through 7FFFh, executes it and
@@ -154,13 +154,13 @@ published-format Wasm at both `/` and `/msx-rust/`. It verifies both models,
 visible execution, local SHA-256 identity, export/import, a fresh page's restore,
 wrong/corrupt/oversized saves, failed ROM/memory transfers, ROM/mapper isolation,
 storage failures and cross-tab conflict preservation. Existing BASIC, C-BIOS,
-demos, keyboard/video and classic SCC tests remain required regressions.
+keyboard/video and classic SCC tests remain required regressions.
 
 Required post-merge verification remains pending: after Pages publication,
 record deployed commit, successful Actions run and the live
 <https://takahirox.github.io/msx-rust/> URLs. Run an SRAM and R-Type probe through
 the published picker/Wasm, recover SRAM after a fresh page, and confirm MSX2
-BASIC and curated demos. File a separate Issue for a deployed-site failure.
+BASIC and local cartridge playback. File a separate Issue for a deployed-site failure.
 Local checks do not establish publication.
 
 ## Local validation record

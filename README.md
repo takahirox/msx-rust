@@ -5,8 +5,7 @@ keyboard and joystick input, Web Audio PSG, SCC, SCC-I and optional MSX-MUSIC / 
 local ROM loading, local CAS playback, and a usable open-source BASIC environment. The core has no
 third-party dependencies or browser APIs.
 
-**Demo target:** <https://takahirox.github.io/msx-rust/>. Publication and post-merge
-verification are pending; this URL is a deployment target, not a claim of a live site.
+[Open the browser player](https://takahirox.github.io/msx-rust/).
 
 ## Run locally
 
@@ -30,26 +29,26 @@ export PATH="$(rustup run 1.99.0 rustc --print sysroot)/bin:$PATH"
 
 The display is the main workspace. Click or tap it to focus, then use a **physical
 keyboard** (touch typing / an on-screen keyboard is not supported). The focus cue
-changes to **Keyboard active**; Tab moves back to the page controls. Enter:
+changes to **Keyboard active**. Tab moves back to the page controls. Type
+`PRINT 2+2` and press Enter. Begin a line with a number to store it in a program.
+`RUN` executes stored lines and `LIST` shows them.
+Replace a numbered line by entering it again, or delete it by entering its number alone.
+Left/Right, Home, End, Backspace and Delete edit the current line. ASCII text can also
+be pasted. Escape interrupts execution when the display has focus.
 
-```basic
-10 FOR I=1 TO 5 : PRINT I : NEXT I
-RUN
-```
-
-The screen prints 1 through 5. `LIST` displays the program. Replace a numbered line by
-entering it again, or delete it by entering its number alone. Left/Right, Home, End,
-Backspace and Delete edit the current line. ASCII text can also be pasted. Escape
-interrupts execution when the display has focus. **Reset** clears the machine and
-program while keeping selected ROMs. **Pause / Resume** controls emulation.
+**Pause / Resume** controls playback. A hidden tab suspends the machine and clears
+queued sound and held keys. Returning resumes emulation if play is still requested.
+A manual Pause stays paused across tab changes and local media imports. **Reset**
+clears the machine and BASIC program while keeping selected ROMs. Reset and
+**Boot disk** request playback, which starts as soon as the tab is visible.
 **Fullscreen** fits the screen to the available space and keeps playback controls
 at the bottom. **Exit fullscreen** or Escape returns to the page. Browsers without
 fullscreen support get a focused view with the same exit options.
 
 **Machine**, **Cartridge**, **Drive A:** and **Cassette** sit beside the player on
-wide screens and below it on narrow screens. Open **Insert cartridge** to launch
-a bundled demo or choose **Open local ROM**. Mounted media show their names and
-available actions in their slots. **Settings → Use Weave BASIC** clears firmware
+wide screens and below it on narrow screens. Choose **Insert cartridge** to open
+a local ROM. Disk and cassette files are also supplied locally. Mounted media
+show their names and available actions in their slots. **Settings → Use Weave BASIC** clears firmware
 overrides and ejects cartridges on either model. BASIC programs and ROM images
 stay in the current tab. Supported ASCII cartridge SRAM is saved locally.
 [Cartridge save and recovery details](docs/cartridge-sram.md#browser-saving-and-recovery)
@@ -63,7 +62,7 @@ Clean with a status message if WebGL2 is unavailable or fails, and resumes the
 requested effect if the graphics context returns. Your explicit display mode is
 stored in this browser separately from cartridge saves. **Display scale** caps the
 4:3 screen at 1×, 2× or 3× a 256×192 frame, fitting smaller viewports automatically.
-Scale and volume apply to the current session.
+Scale applies to the current session.
 
 Retro CRT is an aesthetic effect. It uses one shader pass on the current frame
 and scales its drawing buffer with display size and device pixel ratio up to
@@ -72,16 +71,13 @@ to the VDP's woven interlaced rows. The independently written shader and browser
 integration are part of this project's MIT-licensed code. The WonderSwan Retro CRT
 mode served as a behavioral reference. [WonderSwan README](https://github.com/takahirox/wonderswan-rust/blob/bb6f672a1ec40dd688d01a1f6b312b28ad8e7359/README.md)
 
-Try **BASIC example**, **Graphics demo**, or **Sound demo** beneath the display.
-The starters enter commands into the current built-in BASIC session, resume paused
-emulation, and restore keyboard focus. Graphics draws a sine curve using the
-emulated VDP; Enter returns to text. Sound demo enables audio and plays a sustained
-tone; **Stop tone** silences it. You can also **Enable audio**, then type `BEEP`
-and silence it with `SOUND 8,0`. **Volume** adjusts browser playback gain.
-**Mute audio** turns playback off, and **Resume audio** restores it after browser
-suspension. Audio requires a user gesture.
+The **speaker button** mutes browser output or restores the previous audible
+volume. The **Volume** slider also mutes at zero. This browser remembers the
+volume and last audible level. Browser sound needs a user gesture. If the
+browser blocks or suspends it, use the speaker button or adjust the volume to
+retry. For Weave BASIC sound, type `BEEP` and use `SOUND 8,0` to silence the PSG.
 
-Open **Help** for keyboard, joystick and media instructions, Weave BASIC examples,
+Open **Help** for keyboard, joystick and media instructions, Weave BASIC commands,
 and the **BASIC text transcript**. Open **Settings** for firmware, cartridge
 mappers and saves, the disk interface, and optional sound hardware. Escape closes
 an open panel or picker and returns focus to its button. Weave BASIC is our
@@ -95,52 +91,8 @@ independently implemented, MSX BASIC-inspired interpreter.
 - Keep occasional settings, help and credits reachable in contextual panels.
   Clearly indicate when an action restarts the machine or requires an export.
 
-The screen-first hierarchy and media pickers were inspired by the maintainer's
-SNES browser player. [snes-rust UI/UX reference](https://github.com/takahirox/snes-rust/blob/416b6c4097c447cd2f2a58298c153ab6295f243a/README.md#uiux)
-
-## Demo ROMs
-
-Choose a title from **Cartridge → Insert cartridge**. The app selects the declared
-machine and Plain mapper, boots the bundled C-BIOS under automatic firmware
-policy and focuses the display. Open **Controls & credits** for the title's keys
-and provenance. plustaker starts immediately. Press Space/Z at YOKO’s start prompt.
-
-| Demo | Machine | Play |
-| --- | --- | --- |
-| plustaker, by m@3 | MSX1 | Arrows move; Space/Z fires or restarts; shoot falling blocks and collect characters for combos. |
-| YOKO (yokosht), by m@3 | MSX1 | Arrows move; Space/Z starts/fires or restarts; C uses a stocked bomb. Dodge enemies in a side-scrolling shooter. |
-| Original MSX2 diagnostic | MSX2 | Hold 8 for 256-color video, 7 for 512-wide palette video; Space plays a tone after Enable audio. |
-
-YOKO's on-screen “A” means the fire button. Prefer Space/Z and C: the existing
-browser X mapping also presses joystick trigger 2, so it can fire and use a bomb
-together. A physical keyboard is required. Enable audio separately to hear PSG.
-
-Switching demos replaces the cartridge and discards unsaved BASIC. **Reset**
-restarts the cartridge; **Eject** returns to BASIC in the same model under automatic
-policy. **Use Weave BASIC** clears explicit firmware overrides and the cartridge.
-Explicit C-BIOS remains selected across demo/model changes. Local firmware and
-the diagnostic loader are retained for same-model demos; a cross-model demo is
-rejected with the session unchanged until you clear that override. Failed fetches,
-integrity checks or unsupported imports preserve the running session. Reopen
-**Insert cartridge** to retry, or use **Retry demos** if the catalog fails to load.
-
-The two unmodified third-party ROMs retain their upstream **MIT** licenses. The
-[manifest](demos/manifest.json) pins official source/download revisions, sizes,
-SHA-256 hashes and metadata; [redistribution and asset audit](demos/PROVENANCE.txt)
-records the binary, graphics, font, music and runtime review. The selector links
-individual licenses and sources. These are verified local static assets; no
-third-party runtime downloads are made. Free downloads and online playability do
-not by themselves grant redistribution rights. Westen House was excluded because
-independent permission for credited third-party routines could not be verified.
-The emulator's MIT license does not relicense others' ROMs.
-
-The browser suite observes both games' actual MSX1 Canvas output and input-driven
-sprite movement, plus MSX2 diagnostic video/input, at `/` and `/msx-rust/`. It also
-checks Reset/Eject/BASIC, switching, explicit firmware, failed/tampered assets and
-stale asynchronous imports. Tests step the real Wasm CPU deterministically for
-gameplay assertions. They do not establish game completion, full audio accuracy,
-physical hardware behavior or MSX2 backward compatibility for these MSX1 games.
-Screenshots are `test-results/demo-*.png` (CI `browser-evidence` artifact).
+The screen-first layout and media controls follow the maintainer’s SNES player. [snes-rust UI/UX reference](https://github.com/takahirox/snes-rust/blob/416b6c4097c447cd2f2a58298c153ab6295f243a/README.md#uiux)
+The speaker and visibility controls follow the same player. [Pinned SNES implementation](https://github.com/takahirox/snes-rust/blob/3ee93a124f266312a84a4d2ef464c94f4660d110/web/app.js)
 
 ## Cassette playback
 
@@ -157,22 +109,19 @@ Local bytes stay private in this tab and are never uploaded or stored. Standard
 read-only CAS only: recording, WAV/TSX, exotic loaders and audible monitoring are
 deferred. C-BIOS and Weave BASIC do not gain a complete BASIC tape environment;
 compatible firmware/software is still required. No load command or payload is
-injected. Original MIT cartridge/CAS diagnostics are linked under **Help → Cassette playback**;
-they validate both models/rates and exact recovered bytes, not commercial-title
-compatibility. See [format, reconstruction policies, wiring, fixtures and limits](docs/cassette.md).
+injected. See [format, reconstruction policies, wiring, fixtures and limits](docs/cassette.md).
 
 ## Floppy disks
 
-Choose **Drive A: → Insert disk** to mount the bundled **Weave disk demo** or
-**Open local DSK** for a raw 360/720 KiB image. **Boot disk** restarts the machine
-with the original MIT-licensed Z80 disk firmware through a WD2793-compatible
-controller. In the demo, press Space to exercise the disk. Read-only is the default.
-Uncheck it and press Space to write, then use **Export DSK** to keep changes. Reset retains media and
-changes; export is required before ejecting or replacing modified media. Disk
-images stay in this page's memory and are never uploaded or persisted.
+Choose **Drive A: → Insert disk → Open local DSK** for a raw 360/720 KiB
+image. **Boot disk** restarts the machine with the selected disk environment.
+Read-only is the default. When software needs to write, clear **Read-only**.
+Use **Export DSK** to keep changes. Reset retains media and changes, and export
+is required before ejecting or replacing modified media. Disk images stay in
+this page's memory.
 
 Both MSX1 and MSX2 are supported. A fresh page still starts MSX2 Weave BASIC.
-Mounting alone leaves execution unchanged. The default **Weave disk/demo** option
+Mounting alone leaves execution unchanged. The default **Weave disk** option
 boots the original disk firmware, takes priority over a parked cartridge, and
 requires its `WV` sector signature. Clear an explicit system firmware override
 with Use Weave BASIC before using that option.
@@ -207,15 +156,14 @@ Under **Settings → Optional sound hardware → Internal MSX-MUSIC**, install a
 separate local **16 KiB internal-profile firmware** image. It maps read-only in
 expanded slot **3-1**, 4000h–7FFFh. The clocked YM2413 uses write-only ports
 7Ch/7Dh and continues playing while the firmware is hidden. FM joins PSG/SCC in
-the existing 44.1 kHz mono stream; Enable audio is still required for playback.
+the existing 44.1 kHz mono stream.
 
 Installation/removal restarts the selected firmware while retaining cartridge/SRAM,
 disk interface, disk changes and cassette. Reset and firmware/cartridge changes
 retain installation and reset the chip. MSX1 retains it inactive; returning to
 MSX2 resets/reactivates it without changing the machine-generation definition.
 Local firmware stays private in this tab. No vendor FM BIOS is bundled or emulated
-through host shortcuts. The downloadable **diagnostic firmware fixture** and
-**FM test cartridge** are original MIT Z80 software, not vendor-compatible FM BIOS.
+through host shortcuts.
 The separate external FM-PAC below supports MSX1/MSX2; MSX-AUDIO remains unsupported.
 See [synthesis, timing, notices, fixture instructions and validation](docs/msx-music.md).
 
@@ -234,8 +182,7 @@ tape position. The accessory save is **shared across games**, keyed separately b
 firmware SHA-256/profile, with independent backup/restore and the existing
 corruption, storage-error and cross-tab safeguards. Firmware is never persisted.
 After reload, reinstall identical firmware to recover the save. No vendor firmware,
-automatic device discovery or commercial playability is claimed. Original MIT
-firmware/cartridge diagnostics are downloadable in the controls. See [mapping,
+automatic device discovery or commercial playability is claimed. See [mapping,
 saves, timing, provenance and validation](docs/fm-pac.md).
 
 ## MSX2
@@ -259,12 +206,6 @@ bundled override ejects cartridges and clears local firmware selections.
 **Use Weave BASIC** clears the override and cartridge, restoring automatic behavior.
 No Microsoft MSX BASIC 2.0 or commercial cartridge compatibility is claimed.
 
-Download our original **C-BIOS service-test cartridge** under firmware compatibility and credits in Settings and
-open it to exercise standard BIOS calls, expanded slots, video, keyboard and PSG.
-Space changes a black tile to white and plays a tone after enabling audio. The
-separate original MSX2 diagnostic demonstrates V9938 512×212 palette video,
-256-color video (hold 8; hold 7 to restore), extended VRAM, commands, sprites and RTC.
-
 MSX2 RAM is sixteen shared 16 KiB segments in expanded slot **3-3**. Ports
 **FCh/FDh/FEh/FFh** independently select the segment for CPU pages
 0000h–3FFFh/4000h–7FFFh/8000h–BFFFh/C000h–FFFFh. Writes keep bits 0–3;
@@ -275,9 +216,11 @@ MSX2 BASIC, diagnostic and disk loaders initialize 3,2,1,0 through Z80 I/O;
 C-BIOS and supplied firmware initialize their own selectors. MSX1 keeps fixed
 64 KiB RAM and unconnected mapper ports. One fixed-capacity mapper is supported;
 multiple mappers and configurable profiles remain outside this implementation.
-The original **RAM mapper probe** download in advanced options reports
-`RAM MAPPER PASS` after checking all sixteen segments through normal ROM import,
-including memory above 64 KiB; Reset repeats the test. See [profile and validation](docs/msx2.md#ram-mapper).
+The original **RAM mapper probe** is a locally generated test fixture. After a
+normal ROM import, it reports `RAM MAPPER PASS` if all sixteen segments work,
+including memory above 64 KiB. Reset repeats the test.
+See the [test fixture inventory](tests/fixtures/README.md) and the
+[RAM mapper profile and validation](docs/msx2.md#ram-mapper).
 
 For external firmware, select a matching local **32 KiB MSX2 main BIOS/BASIC** and
 **16 KiB sub-ROM**, then **Apply MSX2 firmware**. The pair is validated before
@@ -428,48 +371,6 @@ Still unsupported: `ELSE`, automatic arrays, integer/single/double type suffixes
 points and MSX2 BASIC in C-BIOS mode. This is an independently implemented,
 MSX BASIC-inspired language subset, not Microsoft's original BASIC.
 
-### Original BASIC examples
-
-These examples, fixtures and interpreter additions are independently authored under
-this repository's MIT license. Copy/type each listing into a fresh Weave BASIC session
-on either machine (Reset or `NEW`), then enter `RUN`. They are also in
-[examples/basic](examples/basic) and **Help → BASIC commands and examples**.
-
-Array/data processing with a subroutine:
-
-```basic
-10 DIM A(3),N$(3)
-20 FOR I=1 TO 3:READ N$(I),A(I):NEXT I
-30 FOR I=1 TO 3:GOSUB 100:NEXT I
-40 END
-100 PRINT N$(I);":";A(I):RETURN
-200 DATA COMET,3,ORBIT,1,MOON,2
-RUN
-```
-
-Interactive greeting (enter a name, then a count from 1 to 5; Escape cancels):
-
-```basic
-10 INPUT "NAME";N$
-20 INPUT "COUNT (1-5)";N
-30 IF N<1 OR N>5 THEN 20
-40 FOR I=1 TO N:PRINT "HELLO ";N$:NEXT I
-50 END
-RUN
-```
-
-Graphics (Enter returns to text after the program finishes):
-
-```basic
-10 SCREEN 2
-20 LINE (16,16)-(239,175),15,B
-30 CIRCLE (128,96),40,15
-40 PAINT (128,96),10,15
-50 LINE (32,32)-(63,55),6,BF
-60 END
-RUN
-```
-
 ### Language references and provenance
 
 Syntax and observable behavior are informed by the publicly available
@@ -505,22 +406,12 @@ index without changing either connector. `msx_release_keys()` and reset release
 both. Core callers may use `Hardware::set_joystick` with the same indices/mask
 and a boolean result; the existing `Hardware::joystick` field remains connector 1.
 
-The original MIT [joystick diagnostic generator](crates/msx-core/src/firmware/joystick_fixture.rs)
-builds `dist/joystick-test-cartridge.rom`, available in advanced options. Open it
-with automatic firmware on either model to execute direct PSG reads and actual
-C-BIOS `GTSTCK`, `GTTRIG` and `SNSMAT` calls on the Z80. The display labels each
-result byte, with bit 0 first and white meaning 1. The first six rows probe R15
-00/40/10/60/20/50h; the following rows show both sticks, both triggers per stick,
-and keyboard rows 3/4/5. The native tests independently assert RAM and visible
-pixels; Playwright drives real keyboard events through compiled Wasm and reads
-the same Canvas output at both site roots. No proprietary ROM is needed.
+The native and browser tests drive both joysticks through C-BIOS and compare
+direct PSG reads and standard BIOS input results. [Test fixtures](tests/fixtures/README.md)
 
 ## ROM loading and legal guidance
 
-No proprietary BIOS, BASIC or commercial game ROM is included. Curated third-party
-games retain their upstream licenses; see [Demo ROMs](#demo-roms).
-The emulator, original glyphs,
-cartridges, original disk firmware/demo and generated ROMs are MIT licensed; the bundled C-BIOS MSX1 main and
+The emulator, original glyphs and original firmware are MIT licensed. The bundled C-BIOS MSX1 main and
 MSX2 main/sub-ROMs are separately **BSD-2-Clause**, with its complete upstream
 copyrights, conditions and disclaimer in
 [CBIOS-LICENSE.txt](firmware/cbios/CBIOS-LICENSE.txt). [The pinned release
@@ -533,17 +424,12 @@ download or SourceForge connection. Rust has no external crate dependencies;
 Playwright is a development-only dependency under its upstream license and is not
 shipped in the site.
 
-Open **Settings → Cartridge mapper and SRAM → Mapper compatibility, saves and
-diagnostics** to download the original **test cartridge**, then load it with
-**Insert cartridge → Open local ROM**. It displays a title and sprite;
-hold Space to play a roughly 440 Hz PSG tone.
-This cartridge runs Z80 code against standard hardware ports, with no native BASIC
-service calls. Select `.rom` or `.bin` cartridge files locally. There is **no fixed
+Select `.rom` or `.bin` cartridge files locally. There is **no fixed
 upload size limit**: available browser/Wasm memory and the selected mapper's hardware
 address range apply. No image is truncated to fit.
 
 Choose **Cartridge mapper** in **Settings** before selecting the file with
-**Insert cartridge → Open local ROM**.
+**Insert cartridge**.
 
 - **Auto** (default) recognizes plain 8, 16, 32 and 48 KiB AB-header layouts and
   estimates ASCII8, ASCII16, Konami or Konami SCC from reachable Z80 mapper writes
@@ -636,15 +522,6 @@ init pointer; many commercial cartridges need standard BIOS services. Both model
 automatically select their matching C-BIOS for that purpose, with limited
 compatibility. No commercial-game compatibility or manual copyrighted-game play-testing is required or claimed.
 
-Download the original **SCC test cartridge** in advanced options and open it with
-Konami SCC or Auto on either model. After enabling audio and focusing the display,
-hold Space for a 440 Hz SCC square, Up for all five SCC voices, Left for PSG,
-or combine Left with Space/Up. Right hides the SCC overlay; Down maps another slot
-into its page. Combine Right/Down to hide both while sound continues. Release
-Space/Up to explicitly silence SCC, even while Right/Down remain held; release Left
-to silence PSG. Reset restarts it and Eject returns to BASIC. Its code and synthetic
-waveforms are original MIT-licensed data; no music or game assets are included.
-
 Mapper fixtures are generated, original MIT-licensed code in
 [`cartridge.rs`](crates/msx-core/tests/cartridge.rs),
 [`detection.rs`](crates/msx-core/tests/detection.rs),
@@ -685,6 +562,11 @@ npx playwright install chromium
 npm test
 ```
 
+`npm test` generates original test media in `target/browser-fixtures/`. The site's
+`dist/` directory contains the app, firmware and notices. Tests open fixture images
+as local files at both hosting roots.
+[Fixture provenance](tests/fixtures/README.md)
+
 Stop the manual server first: browser tests start their own servers on 41873/41874 and
 intentionally refuse to reuse an unrelated service. On Linux CI, use
 `npx playwright install --with-deps chromium` to install browser system libraries.
@@ -692,14 +574,17 @@ The browser suite types through keyboard events, verifies BASIC digits directly 
 Clean Canvas pixels, tests editing and BREAK, checks graphics, observes nonzero PSG
 waveforms and fresh muted buffers below 0.0001 after bounded settling in a running
 AudioContext, and uses real file inputs for ROMs.
-The suite also checks starter actions, scoped keyboard focus, loading/failure
+The suite also checks visibility suspension and resume, scoped keyboard focus, loading/failure
 feedback, keyboard navigation in media pickers and reference panels, browser
 volume and display scale, native fullscreen and its unavailable/rejected API
 fallbacks, and desktop/tablet/mobile portrait and landscape layouts (including
 320px width). Screenshots of BASIC, graphics, cartridge, responsive layouts,
 panels and fullscreen go to `test-results/`. CI uploads them as `browser-evidence`.
 [Screen-first player screenshots and validation](docs/player-validation.md)
-Automated audio checks verify the browser signal path, not physical speakers.
+Chromium lifecycle tests control Page Visibility events and scheduler timestamps
+for repeatable results. The same tests run the release Wasm, Canvas and a native
+Web Audio graph. Physical tab switching and listening are covered separately by
+deployed-site verification.
 The display tests use real WebGL2 in Chromium with SwiftShader and sample
 composited screenshots to verify the visible CRT effect, geometry and fallback.
 
@@ -734,8 +619,7 @@ setup, failure inspection and pending production checks.
 One-time repository prerequisite: set **Settings → Pages → Build and deployment →
 Source → GitHub Actions**, and allow deployment to the `github-pages` environment.
 See [GitHub's custom workflow instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
-After merge, confirm the actual published URL boots, accepts keyboard input and
-ROM selection, and unlocks audible sound. Publication and these checks remain pending.
+After merge, verify the deployed player using the [Issue #87 checks](docs/deployment.md#required-post-merge-verification-pending).
 
 ## Contributing
 

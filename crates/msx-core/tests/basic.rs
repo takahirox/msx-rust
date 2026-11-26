@@ -171,7 +171,10 @@ fn keys(b: &mut Basic, v: &mut Vdp, p: &mut Psg, text: &str) {
 #[test]
 fn original_data_example_and_repeated_run_reset_arrays_scalars_and_data() {
     let (mut b, mut v, mut p) = fixture();
-    program(&mut b, include_str!("../../../examples/basic/scores.bas"));
+    program(
+        &mut b,
+        include_str!("../../../tests/fixtures/basic/scores.bas"),
+    );
     for _ in 0..2 {
         run(&mut b, &mut v, &mut p, "RUN");
         ends(&b, "COMET:3\nORBIT:1\nMOON:2\nREADY\n");
@@ -414,7 +417,10 @@ fn pset_distinguishes_parenthesized_expressions_from_coordinate_pairs() {
 #[test]
 fn original_shapes_draw_and_fill_real_vram_with_clipping() {
     let (mut b, mut v, mut p) = fixture();
-    program(&mut b, include_str!("../../../examples/basic/shapes.bas"));
+    program(
+        &mut b,
+        include_str!("../../../tests/fixtures/basic/shapes.bas"),
+    );
     run(&mut b, &mut v, &mut p, "RUN");
     v.render();
     for (x, y, c) in [
@@ -503,7 +509,10 @@ fn multicolor_fill_boxes_relative_points_and_graphics_errors() {
 #[test]
 fn input_example_and_print_punctuation() {
     let (mut b, mut v, mut p) = fixture();
-    program(&mut b, include_str!("../../../examples/basic/greeting.bas"));
+    program(
+        &mut b,
+        include_str!("../../../tests/fixtures/basic/greeting.bas"),
+    );
     run(&mut b, &mut v, &mut p, "RUN");
     keys(&mut b, &mut v, &mut p, "SKY");
     keys(&mut b, &mut v, &mut p, "0");

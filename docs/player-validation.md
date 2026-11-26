@@ -20,7 +20,7 @@ use Clean, and separate WebGL2 tests exercise the CRT shader and its fallback.
 | Phone portrait 375×812 | [Phone portrait](player-evidence/phone-portrait.png) | [Portrait fullscreen](player-evidence/fullscreen-phone-portrait.png) |
 | Phone landscape 812×375 | [Phone landscape](player-evidence/phone-landscape.png) | [Landscape fullscreen](player-evidence/fullscreen-phone-landscape.png) |
 
-[Cartridge picker at the Pages prefix](player-evidence/cartridge-picker.png)
+[Historical cartridge picker at the Pages prefix](https://github.com/takahirox/msx-rust/blob/ca1e8d0b60d142fcbfae8c07014454aee3d18ca0/docs/player-evidence/cartridge-picker.png)
 · [Fullscreen fallback in landscape](player-evidence/fullscreen-fallback.png)
 
 The focused interaction tests use the release build at `/` and `/msx-rust/`.
@@ -50,7 +50,10 @@ optional user-supplied BIOS test were outside this run.
 | `npm test` | 230 passed in 15.3 minutes |
 | `git diff --check` | Passed |
 
-## Post-merge verification pending
+## Issue #85 post-merge checklist
+
+The original checklist below describes the player at Issue #85. For the
+current local-media player, follow [Issue #87 deployment verification](deployment.md#required-post-merge-verification-pending).
 
 After a successful GitHub Pages publication, record the deployed commit,
 Actions run, browser and viewport sizes. Open the published

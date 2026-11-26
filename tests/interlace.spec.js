@@ -1,3 +1,4 @@
+import { startSound } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { installInterlaceProbe } from './fixtures/interlace.js';
 
@@ -16,7 +17,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       window.AudioContext = class extends NativeContext {
         createBuffer(...args) {
           const buffer = super.createBuffer(...args);
-          if (window.probeTrack) window.probeBuffers.push(args[1]);
+          if (window.probeTrack) window.probeBuffers.push({ field: window.probeTrace.length, samples: args[1] });
           return buffer;
         }
       };
@@ -38,12 +39,13 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       };
     });
     await page.goto(site);
+    await expect(page.locator('#status')).toContainText('Running');
+    await page.evaluate(() => { window.probeAnimation(0); window.probeAnimation(17); });
     await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#model').selectOption('1');
     await installInterlaceProbe(page);
     await expect(page.locator('#status')).toContainText('user BIOS');
-    await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
-    await expect(page.locator('#audio-state')).toContainText('Audio on');
+    await startSound(page);
 
     const result = await page.evaluate(() => {
       window.probeWasm.msx_reset();
@@ -68,10 +70,13 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       return { trace: window.probeTrace, buffers: window.probeBuffers, observations };
     });
     expect(result.trace.length).toBeGreaterThanOrEqual(110);
-    // The real enqueueAudio path prepares exactly one fresh Web Audio buffer
-    // per executed field, including catch-up and timing transitions. Its normal
-    // latency cap may omit playback of some buffers under accelerated test time.
-    expect(result.buffers).toEqual(result.trace.map(frame => frame.samples));
+    // Accelerated scheduler time outruns the native audio clock. Verify each
+    // allocated Web Audio buffer matches its real field and the queue bounds
+    // surplus work while the emulated PCM trace still covers every field.
+    expect(result.buffers.length).toBeGreaterThan(3);
+    expect(result.buffers.length).toBeLessThan(result.trace.length);
+    expect(new Set(result.buffers.map(buffer => buffer.field)).size).toBe(result.buffers.length);
+    for (const { field, samples } of result.buffers) expect(samples).toBe(result.trace[field - 1].samples);
     let nominal = 0, samples = 0;
     for (const [i, frame] of result.trace.entries()) {
       expect(frame.budget, `field ${i + 1}`).toBe(expectedBudget(i + 1));

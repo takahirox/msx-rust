@@ -18,9 +18,7 @@ The bundled international/60 Hz pair is copied unchanged from the official
 The same release supplies `cbios_main_msx1.rom` (32 KiB) for MSX1 cartridges.
 No logo/extension ROM is needed for this profile's slot initialization, no-cartridge
 message or verified cartridge boot. No original Microsoft/ASCII ROM, C-BIOS BASIC,
-disk or music ROM, or proprietary game is distributed. Separately licensed
-MSX1 games are available through [Demo ROMs](../README.md#demo-roms); their
-[binary/asset audit](../demos/PROVENANCE.txt) records redistribution rights.
+disk or music ROM, or proprietary game is distributed.
 
 [CBIOS-PROVENANCE.txt](../firmware/cbios/CBIOS-PROVENANCE.txt) records the original
 archive URL, exact version, archive and binary SHA-256 hashes, byte counts and
@@ -39,9 +37,9 @@ headers itself. The normal browser path loads only local static app assets, with
 no extra firmware fetch. There are no browser BIOS substitutes or native BIOS
 traps. The Weave BASIC private service ports are disabled with C-BIOS.
 
-Under **ROMs & advanced system options → Firmware policy**, explicitly selecting
+Under **Settings → System firmware → Firmware policy**, explicitly selecting
 C-BIOS, **Original diagnostic loader** or local firmware overrides automatic
-switching. An override survives cartridge Open ROM, Reset and Eject. Selecting
+switching. An override survives cartridge insertion, Reset and Eject. Selecting
 a bundled override clears cartridge and staged local files. **Use Weave BASIC**
 clears the override, ejects cartridges, and restores automatic behavior.
 
@@ -79,24 +77,21 @@ this is not Microsoft MSX BASIC 2.0 compatibility.
 RUN
 ```
 
-Download the **original C-BIOS service-test cartridge** from advanced options and
-open it through **Open ROM**. It displays `C-BIOS SERVICE TEST` through CHPUT, draws
-an original striped tile at (0,16), and changes the adjacent tile from black to
-white while Space is held. After enabling audio, Space also plays a ~440 Hz tone.
-Before drawing, Z80 code verifies BIOS EXPTBL initialization, calls RDSLT/WRSLT
+The test-only **original C-BIOS service-test cartridge** displays
+`C-BIOS SERVICE TEST` through CHPUT and draws an original striped tile at
+(0,16). Holding Space changes the adjacent tile from black to white and
+plays a roughly 440 Hz tone. Before drawing, Z80 code verifies BIOS EXPTBL initialization, calls RDSLT/WRSLT
 against protected sub-ROM slot 3-0 and RAM slot 3-3, and calls EXTROM INIPLT and
 CHGMOD (which executes the sub-ROM). Video uses CHPUT/FILVRM/WRTVRM/WRTVDP;
 keyboard and sound use SNSMAT/WRTPSG. The test needs real BIOS services and cannot
 run on the diagnostic loader. No game identity or commercial compatibility is
 inferred from this fixture.
 
-## Try the original diagnostic
+## MSX2 diagnostic fixture
 
-Choose **MSX2 diagnostic → Play demo** in Demo ROMs for a direct launch with
-automatic model selection. Alternatively, under **ROMs & advanced system options**,
-download **our original MSX2 diagnostic
-cartridge**, then select it with **Open ROM**. It runs with C-BIOS or the original
-diagnostic loader; no external firmware is needed.
+`npm test` generates the original MSX2 diagnostic cartridge under
+`target/browser-fixtures/`. The tests load the cartridge as a local ROM with
+C-BIOS or the built-in diagnostic loader on MSX2.
 It starts in SCREEN 7 (512×212), programs the extended palette, fills a page above
 64 KiB, draws a line, copies a rectangle, transfers CPU data through a command,
 and draws a mode-2 sprite. The color ramp is transferred from cartridge ROM by
@@ -228,8 +223,7 @@ firmware-specific hardware reset values. Readback/reset are this profile's contr
 not a claim that every physical mapper behaves identically.
 
 The [original probe](../crates/msx-core/src/firmware/ram_mapper_fixture.rs) is generated
-as `ram-mapper-test-cartridge.rom` (MIT). Open the advanced-options download with
-**Open ROM** on MSX2: it verifies firmware initialization, then writes distinct
+as `ram-mapper-test-cartridge.rom` (MIT) for testing. On MSX2 it verifies firmware initialization, then writes distinct
 signatures at both ends of all sixteen segments before reading any back. A smaller
 aliased capacity fails even if register readback claims sixteen segments. Z80
 instructions draw `RAM MAPPER PASS` with a green bar, or `RAM MAPPER FAIL` with a red
@@ -372,7 +366,7 @@ newer V9958/turbo R vertical-counter findings are not imported. Implementation,
 fixtures and expectations are independently authored; no upstream code was copied.
 
 The original MIT [Z80 probe](../crates/msx-core/src/firmware/fh_fixture.rs), generated
-as `dist/fh-test-cartridge.rom`, performs paired disabled S#1 reads, checks expiry,
+as `target/browser-fixtures/fh-test-cartridge.rom`, performs paired disabled S#1 reads, checks expiry,
 stale enable, enabled persistence and direct-disable/indirect-reenable discard,
 then enters a real IM1 handler installed in RAM that acknowledges only S#1. Six stage
 markers at C201h–C206h become A5h; C200h counts interrupts; completion at C210h is
@@ -466,8 +460,7 @@ it into displayed row 120. It also chains a four-pixel Y-major LINE into a fill
 that reuses DY without rewriting it, producing a white marker at displayed row
 124. Native CPU execution and compiled-Wasm Canvas tests observe these results
 in SCREEN 7/8 at both `/` and `/msx-rust/`, retaining reset/video/input/audio
-coverage. The demo manifest pins the updated original ROM and provenance; the
-third-party game ROMs and C-BIOS bytes/notices are unchanged.
+coverage. [Original fixture provenance](../tests/fixtures/README.md)
 
 Baseline proof: with only `vdp_command.rs` restored to the unchanged pre-fix
 version (identical to Issue #45's evaluation baseline), all 11 new native tests
@@ -557,9 +550,7 @@ cyan in SCREEN 7 / green in SCREEN 8, and 71–191 return to white. Red neighbor
 at 63 and 192 remain untouched. Native CPU execution and compiled-Wasm Canvas
 assertions check every pixel in this region at `/` and `/msx-rust/`, including
 reset. Existing diagnostic video, input/audio and firmware checks remain active.
-The [manifest](../demos/manifest.json), [provenance](../demos/PROVENANCE.txt) and
-[fixture inventory](../firmware/ROM-LICENSE.txt) describe the updated original ROM;
-third-party ROMs and C-BIOS bytes/notices are unchanged.
+The [fixture inventory](../tests/fixtures/README.md) describes the original ROM.
 
 Baseline proof: removing only the five-line production correction restores the
 unchanged evaluation-baseline command engine. All six `live_` native tests fail:
@@ -1008,7 +999,7 @@ edge/color/interleaving checks retain their result assertions with timing budget
 updated for these commands.
 
 The original [CPU diagnostic](../crates/msx-core/src/firmware/command_timing_fixture.rs)
-generates `dist/command-timing-test-cartridge.rom`. Six SCREEN 5 cases cover both
+generates `target/browser-fixtures/command-timing-test-cartridge.rom`. Six SCREEN 5 cases cover both
 commands and display off / sprites inhibited / sprites enabled settings. Each
 64×1 command samples CE at +662 CPU T: 12 for the starting OUT and 130 five-T
 NOPs. Baseline completes at +512 T; the fastest corrected case takes over 1000 T.
@@ -1018,8 +1009,7 @@ use specification-derived bounds valid for every horizontal start phase, without
 production timing helpers. Each stage records CE/progress in RAM and displays
 CMD PASS/FAIL and a green/red bar. Native tests execute it under both C-BIOS and
 the original loader; [browser tests](../tests/vdp-command-timing.spec.js) observe
-the compiled Wasm's Canvas at `/` and `/msx-rust/`, including Reset. The probe is
-downloadable under advanced options. No proprietary firmware or game is required.
+the compiled Wasm's Canvas at `/` and `/msx-rust/`, including Reset. The tests use original local media and built-in firmware.
 
 Baseline evidence: with only production `vdp.rs` and `vdp_command.rs` restored to
 `802254379eae15fee0e2386d87798c8a3f11fb28`, the new LMMV vector fails at CPU T=18

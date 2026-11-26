@@ -2,8 +2,8 @@ import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
-// The independent disk demo stores the original glyphs as a contiguous font.
-const disk = await readFile('dist/weave-disk-demo.dsk');
+// The independent disk fixture stores the original glyphs as a contiguous font.
+const disk = await readFile('target/browser-fixtures/weave-test.dsk');
 async function result(page, text, color) {
   const glyphs = [...text].map(ch => [...disk.subarray(2048 + ch.charCodeAt(0)*8, 2056 + ch.charCodeAt(0)*8)]);
   await expect.poll(() => page.locator('#screen').evaluate((canvas, {glyphs, color}) => {
@@ -25,8 +25,8 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     const chooser=page.waitForEvent('filechooser');
-    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#open-rom').click();
-    await (await chooser).setFiles('dist/ram-mapper-test-cartridge.rom');
+    await (await mediaControl(page, 'insert-cartridge')).click();
+    await (await chooser).setFiles('target/browser-fixtures/ram-mapper-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await expect(page.locator('#status')).toContainText('Auto: Plain');
     await result(page, 'RAM MAPPER PASS', [36,218,36]);
@@ -50,7 +50,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await (await settingsControl(page, 'builtin')).click();
     await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#model').selectOption('0');
-    await page.locator('#cartridge').setInputFiles('dist/ram-mapper-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/ram-mapper-test-cartridge.rom');
     await result(page, 'RAM MAPPER FAIL', [212,82,77]);
     expect(errors).toEqual([]);
   });

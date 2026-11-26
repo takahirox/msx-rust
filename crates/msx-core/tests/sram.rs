@@ -200,9 +200,7 @@ fn malformed_and_ambiguous_imports_keep_unsaved_sram_model_firmware_and_banks() 
         (image(Mapper::RType, 512 * 1024), Mapper::RType),
         (image(Mapper::Ascii8Sram8, 64 * 1024), Mapper::Auto),
     ] {
-        assert!(m
-            .load_cartridge_for_model_owned(bytes, kind, Model::Msx2)
-            .is_err());
+        assert!(m.load_cartridge_owned(bytes, kind).is_err());
         assert_eq!(m.hardware.model, Model::Msx1);
         assert_eq!(m.hardware.firmware, Firmware::Cbios);
         assert_eq!(m.boot_policy, BootPolicy::Automatic);

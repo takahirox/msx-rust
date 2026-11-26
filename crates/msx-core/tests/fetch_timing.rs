@@ -57,7 +57,7 @@ fn machine_fetch_policy_survives_lifecycle_transitions() {
         }
         nop(&mut m);
         m.use_builtin();
-        m.mount_disk(firmware::demo_disk(), true).unwrap();
+        m.mount_disk(firmware::test_disk(), true).unwrap();
         m.boot_disk().unwrap();
         nop(&mut m);
     }

@@ -8,25 +8,21 @@ universal compatibility with disk games. C-BIOS alone has no disk firmware. Issu
 
 ## Weave browser workflow and ownership
 
-The page still starts in MSX2 Weave BASIC. Download the original bootable demo,
-choose **Open DSK**, then **Boot disk**. Focus the screen and press Space. The
-program displays `WEAVE DISK BOOT` and `Z80 LOADED FROM DRIVE A`. Media initially
-mounts read-only; Space reports `WRITE PROTECTED`. Uncheck **Read-only**, focus
-again and press Space: `SAVED` appears and byte zero of logical sector 18 increments.
-Release Space between writes. **Export modified DSK** downloads a complete private
-image, with identical geometry and all other bytes preserved. The demo includes
-original source, text and glyphs, and is MIT licensed.
+Choose **Drive A: → Insert disk → Open local DSK** to mount a local raw image.
+Choose **Boot disk** to use the selected disk environment. Images mount read-only
+by default. Clear **Read-only** to let software write and choose **Export DSK**
+to save a complete copy of the changed image.
 
 Mounting validates and stages the entire image without resetting execution or
 changing the model, firmware, cartridge, SRAM, or previous disk on failure. Weave firmware
 and its slot ROM are prepared with the machine, embedded in Wasm; no firmware fetch
 is needed at mount/boot. An import generation token and synchronous Wasm commits
 prevent stale disk/ROM/firmware imports from changing a newer session. Eject is a
-cancellation boundary; other controls are disabled while importing.
+cancellation boundary. Playback controls remain available while importing.
 
 Boot disk explicitly gives the disk priority, installing the original reset loader
 in slot 0 and disk ROM in slot 2. The cartridge remains parked in slot 1, including
-SRAM. Open ROM deliberately gives the cartridge priority and restores automatic
+SRAM. Insert cartridge gives the cartridge priority and restores automatic
 C-BIOS. Explicit C-BIOS/local/diagnostic firmware is never silently replaced by
 Boot disk: choose **Use Weave BASIC** first. That action explicitly clears firmware
 and cartridge selections, preserves mounted media, and returns to BASIC. Changing
@@ -62,11 +58,11 @@ No BPB or filename can override the geometry. Empty, truncated and other lengths
 are rejected before state changes. DMK/FDI, 40-track disks, variable sector sizes,
 weak bits, CRC anomalies and copy-protected/nonstandard tracks are unsupported.
 A standard raw DSK cannot encode arbitrary physical track/protection information.
-The generated demo is a raw boot disk, not a DOS-formatted FAT disk.
+The generated test disk uses raw WV boot sectors.
 
 ## Philips NMS1200-style external interface
 
-In **ROMs & advanced system options → Disk interface**, choose **Install Philips
+In **Settings → Disk interface**, choose **Install Philips
 disk ROM** and select a local `.rom`/`.bin` of exactly 16,384 bytes beginning `AB`.
 The UI explicitly names this profile; a header/size check does not establish ROM
 compatibility. It is a single-drive, upstream-backed profile, not an independently
@@ -81,7 +77,7 @@ The shared import generation and synchronous Wasm commits prevent cross-import
 races. Cancel import preserves the running session and installed interface; media/cartridge
 Eject also invalidates pending imports. An
 active Weave reset loader is incompatible with this wiring, so installation is
-rejected until Use Weave BASIC or Open ROM returns to system firmware.
+rejected until Use Weave BASIC or Insert cartridge returns to system firmware.
 
 With this interface installed, Boot disk requires mounted media and restarts the
 **selected system firmware**. It never substitutes a main BIOS or imposes the
@@ -519,7 +515,7 @@ Initialization calls DISKIO to read logical sector 0 to C000h. Bytes 510/511 mus
 be ASCII `WV`, our explicit boot contract; otherwise the CPU halts with a red
 backdrop and the browser reports the unsupported boot contract. The firmware then jumps to C000h. This signature and entry are **not**
 a generic MSX-DOS boot-sector contract. Appropriate software must use this boot
-contract or run against the documented interface itself. The demo boot sector
+contract or run against the documented interface itself. The test fixture’s boot sector
 calls DISKIO to load logical sectors 1..10 into C200h..D5FFh and jumps to C200h.
 It initializes video, copies its disk-loaded glyphs/text to VRAM, polls the keyboard
 matrix, and uses DISKIO to read/increment/write LBA 18 via an E000h buffer.
@@ -537,7 +533,7 @@ Implemented standard disk-driver entry points (slot 2 must be visible):
   A=2 for absent/invalid drive. Uses the controller's media-change latch.
 - **4019h CHOICE**: HL=0 (no formatting choices).
 - **401Fh DSKSTP**: stops the drive motor.
-- **4016h GETDPB** and **401Ch DSKFMT** return carry set/A=12 unsupported. The demo
+- **4016h GETDPB** and **401Ch DSKFMT** return carry set/A=12 unsupported. The test fixture
   does not need these services. No filesystem, BDOS, CALSLT, Disk BASIC extension,
   DOS kernel or full main BIOS API is supplied by this firmware.
 
@@ -648,7 +644,7 @@ unchanged. Diagnostic success does not establish commercial playability.
 
 ## Provenance and reproducibility
 
-The drive, controller, reset loader, Weave disk ROM, demo program, synthetic sector data,
+The drive, controller, reset loader, Weave disk ROM, test program, synthetic sector data,
 text and original font are independently authored under this repository's MIT
 license. No proprietary disk BIOS, MSX-DOS files, Microsoft BASIC, commercial disk,
 third-party routines or copied ROM bytes are inputs. The separately bundled
@@ -662,8 +658,10 @@ Build with `./scripts/build.sh`, or generate standalone assets with:
 cargo run --locked -p msx-core --example assets -- OUTPUT_DIRECTORY
 ```
 
-This emits `weave-disk.rom` (16 KiB) and `weave-disk-demo.dsk` (720 KiB).
-The ROM is also embedded from the same generator in Wasm. No assembler, downloaded
+This emits `weave-disk.rom` (16 KiB), which is also embedded in Wasm.
+`npm test` builds the test-only `target/browser-fixtures/weave-test.dsk` (720 KiB).
+Its original Z80 program uses Space to request a deterministic modification to
+sector 18 and displays the result. No assembler, downloaded
 ROM, original hardware or proprietary fixture is needed. `check-dist.mjs` checks
 asset sizes, signatures, required ABI exports and deployment inventory.
 
@@ -678,7 +676,7 @@ protection, exact sector writes, reset/media change, slot visibility and real CP
 boot/write on both models. Browser tests at `/` and `/msx-rust/` verify glyph pixels
 in Canvas, keyboard response, exact downloaded bytes, read-only behavior,
 Reset/Eject, rejected imports, explicit firmware and import cancellation. The
-existing compiled-Wasm regression suites cover C-BIOS, local firmware, demos,
+existing compiled-Wasm regression suites cover C-BIOS, local firmware,
 mappers/SRAM and SCC audio alongside these tests.
 
 Post-merge verification required by #29 remains pending: record the deployment

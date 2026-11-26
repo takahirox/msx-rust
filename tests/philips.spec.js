@@ -64,8 +64,8 @@ test('finishing a firmware import moves keyboard focus from Cancel to Install', 
   await page.goto('/');
   await expect(page.locator('#transcript')).toContainText('READY');
   const cases = [
-    ['pac-rom', 'pac-status', await readFile('dist/fm-pac-diagnostic-firmware.rom')],
-    ['music-rom', 'music-status', await readFile('dist/music-diagnostic-firmware.rom')],
+    ['pac-rom', 'pac-status', await readFile('target/browser-fixtures/fm-pac-diagnostic-firmware.rom')],
+    ['music-rom', 'music-status', await readFile('target/browser-fixtures/music-diagnostic-firmware.rom')],
     ['disk-rom', 'disk-profile-status', diskRom],
   ];
   for (const [input, status, bytes] of cases) {
@@ -102,9 +102,9 @@ for (const site of sites) {
         if (model === '0') await page.locator('#model').selectOption('0');
         await page.locator('#settings').click();
         await (await settingsControl(page, 'mapper')).selectOption('6');
-        await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+        await page.locator('#cartridge').setInputFiles('target/browser-fixtures/mapper-6.rom');
         await expect(page.locator('#status')).toContainText('mapper-6.rom (ASCII8SRAM2)');
-        await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('#screen')).toHaveAttribute('aria-busy', 'false');
         await expect(page.locator('#export-save')).toBeEnabled();
         await installSystem(page, model);
         const disk = await fixture('sector', size, 0x35);
@@ -144,7 +144,7 @@ for (const site of sites) {
         await expect(page.locator('#disk-profile-status')).toContainText('Philips');
         // Removal keeps explicit system firmware and SRAM; legacy protection still applies.
         await (await settingsControl(page, 'remove-disk-rom')).click();
-        await expect(page.locator('#disk-profile-status')).toContainText('Weave disk/demo boot option');
+        await expect(page.locator('#disk-profile-status')).toContainText('Weave disk boot option');
         await expect(page.locator('#firmware')).toHaveValue('local');
         expect(await page.evaluate(() => {
           const w = window.philipsWasm;
@@ -152,7 +152,7 @@ for (const site of sites) {
         })).toBe(0x6d);
         await (await settingsControl(page, 'builtin')).click();
         await expect(page.locator('#transcript')).toContainText('READY');
-        await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+        await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
         await (await mediaControl(page, 'boot-disk')).click();
         await expect(page.locator('#status')).toContainText('Weave disk firmware');
         await expect.poll(() => page.evaluate(() => window.philipsWasm.msx_disk_boot_state())).toBe(1);
@@ -371,8 +371,8 @@ for (const site of sites) {
     await observeWasm(page);
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
     await page.locator('#settings').click();
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     await page.locator('#disk-rom').setInputFiles(file('retained.rom', diskRom));
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#screen').focus(); await page.keyboard.type('10 PRINT 73'); await page.keyboard.press('Enter');
@@ -380,7 +380,7 @@ for (const site of sites) {
       await page.locator('#disk-rom').setInputFiles(file(name, bytes));
       await expect(page.locator('#status')).toContainText('Session, interface and media unchanged');
       await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
-      await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+      await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     }
     await page.evaluate(() => window.failPhilipsUpload = true);
     await page.locator('#disk-rom').setInputFiles(file('allocation.rom', diskRom));
@@ -399,7 +399,7 @@ for (const site of sites) {
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#disk-rom').setInputFiles(file('deferred.rom', diskRom));
     await expect.poll(() => page.evaluate(() => typeof window.finishPhilips)).toBe('function');
-    await expect(page.locator('#open-rom')).toBeDisabled();
+    await expect(page.locator('#insert-cartridge')).toBeDisabled();
     await (await settingsControl(page, 'cancel-disk-rom-import')).click();
     await page.evaluate(() => window.finishPhilips());
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
@@ -407,8 +407,8 @@ for (const site of sites) {
     await expect(page.locator('#transcript')).toContainText('73\nREADY');
     await (await settingsControl(page, 'remove-disk-rom')).click();
     await expect(page.locator('#disk-profile-status')).toContainText('no external interface');
-    expect(await exportDisk(page)).toEqual(await readFile('dist/weave-disk-demo.dsk'));
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    expect(await exportDisk(page)).toEqual(await readFile('target/browser-fixtures/weave-test.dsk'));
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     await page.locator('#disk-rom').setInputFiles(file('retained.rom', diskRom));
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await (await settingsControl(page, 'firmware')).selectOption('cbios');
@@ -417,7 +417,7 @@ for (const site of sites) {
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await page.locator('#model').selectOption('0');
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
-    await page.locator('#cartridge').setInputFiles('dist/cbios-msx1-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-msx1-test-cartridge.rom');
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');
     await (await mediaControl(page, 'eject')).click();
     await expect(page.locator('#disk-profile-status')).toContainText('retained.rom');

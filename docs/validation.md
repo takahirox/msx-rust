@@ -54,9 +54,13 @@ with no scheduled audio gaps. The local comparison covers one workload and
 viewport with software WebGL2. Audio coverage comes from browser scheduling
 and buffer completion.
 
-Published Pages verification is pending. After merge and deployment, check the
-visible CRT default on fresh MSX2 BASIC, live switching, and a representative
-demo. Record the deployed revision, Actions run, browser and results.
+### Historical Pages checklist
+
+The Issue #83 deployment checklist called for checking the visible CRT default
+on fresh MSX2 BASIC, live switching and a representative bundled demo, then
+recording the deployed revision, Actions run, browser and results. Verification
+was recorded as pending. For current deployment checks, use the
+[Issue #87 local-media checklist](deployment.md#required-post-merge-verification-pending).
 
 # Issue 73 WZ MEMPTR and BIT HL flags
 
@@ -111,7 +115,7 @@ Four compiled-Wasm cases load generated local firmware through existing file
 controls, read the same bytes from actual Canvas pixels on both models at `/`
 and `/msx-rust/`, clear the Canvas and verify output again after Reset. No new
 Wasm debug ABI, proprietary firmware, game data or external test corpus is used.
-Fixture provenance is recorded in `firmware/ROM-LICENSE.txt`.
+[Fixture provenance](../tests/fixtures/README.md)
 
 ## Mandatory checks
 
@@ -193,8 +197,7 @@ Native tests assert the 37-byte RAM trace and the entire exported image; sixteen
 compiled-Wasm cases at `/` and `/msx-rust/` require the same CPU success and exact
 image. The movement/readiness fixtures now explicitly release D8 with D0. No
 production status/timing helper supplies expected bytes, and no proprietary
-inputs, BIOS bypasses or new dependencies are used. Provenance is recorded in
-`firmware/ROM-LICENSE.txt`.
+inputs, BIOS bypasses or new dependencies are used. [Fixture provenance](../tests/fixtures/README.md)
 
 Baseline sensitivity: before changing the controller, three of the first eight
 new native tests failed: busy cancellation returned 00h instead of LOST DATA
@@ -1165,20 +1168,30 @@ MSX_TEST_BIOS=target/validation/cbios_main_msx1.rom npm test
 
 ## Manual browser smoke flow
 
-1. Build/serve using the README commands. Confirm the visible blue display says
+1. [Build and serve the player locally](../README.md#run-locally). Confirm the blue display says
    `WEAVE BASIC 0.1` and `READY`. Click the display before typing.
 2. Type `10 FOR I=1 TO 5 : PRINT I : NEXT I`, Enter, `LIST`, Enter, `RUN`, Enter.
    Confirm visible lines 1–5. Replace line 10 with `10 PRINT 42` and run again.
    Enter `10` alone and `LIST` to verify deletion. Exercise arrow/Home/End editing.
-3. Click **Graphics demo** and confirm a yellow curve appears. Press Enter to return.
-   Optionally run the numbered graphics example from README.
-4. Click **Enable audio**; type `BEEP` and listen for a steady tone. Type `SOUND 8,0`
-   and confirm silence. Audio should remain silent before user activation.
-5. Expand **ROMs & advanced system options**, download `test-cartridge.rom`, then
-   choose it with **Open ROM**. Confirm title and yellow sprite. Click the display and hold Space: hear the tone, then release to silence. Check that focus
-   loss releases held keys. Reset should boot the cartridge again; Eject returns to BASIC.
-6. Optionally select your lawfully obtained 32 KiB system ROM, then a compatible
-   plain cartridge. Files must stay local. **Built-in BASIC** unloads both inputs.
+3. Type `SCREEN 2:FOR X=0 TO 255:PSET X,INT(96+60*SIN(X/20)),10:NEXT X` and press
+   Enter. Confirm a yellow curve appears, then press Enter again to return to text.
+4. Use the **speaker button** to start sound if needed. Focus the display, type
+   `BEEP` and listen for a steady tone. Type `SOUND 8,0` and confirm silence.
+   Sound should stay silent before a user gesture activates browser audio.
+5. Generate the [original test fixtures](../tests/fixtures/README.md) locally.
+
+   ```sh
+   cargo run --locked --quiet -p msx-core --example fixtures -- target/browser-fixtures
+   ```
+
+   Select **MSX1** under **Machine**, then use **Insert cartridge** to open
+   `target/browser-fixtures/test-cartridge.rom`. Confirm the cartridge title and
+   yellow sprite. Focus the display and hold Space to hear the tone, then release
+   it to silence. Check that focus loss releases held keys. **Reset** should boot
+   the cartridge again. **Eject** returns to BASIC with automatic firmware.
+6. Optionally select a lawfully obtained 32 KiB MSX1 system ROM under
+   **Settings → System firmware**, then insert a compatible plain cartridge.
+   Files stay local. **Use Weave BASIC** unloads both ROMs.
 7. Pause, confirm video execution stops, and Resume again. Reload to verify the
    original BASIC prompt returns without retaining user ROM data.
 
