@@ -245,6 +245,27 @@ for (const mode of ['native', 'fallback']) {
     await expect(playback).toHaveText('Running ·');
     await expect(playback).toBeInViewport({ ratio: 1 });
   });
+
+  test(`${mode} portrait fullscreen shows the full blocked-audio retry prompt`, async ({ page }) => {
+    await observePlayback(page);
+    if (mode === 'fallback') await page.addInitScript(() => { Element.prototype.requestFullscreen = undefined; });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+    const speaker = page.getByRole('button', { name: 'Start sound' });
+    await expect(speaker).toBeEnabled();
+    await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Exit fullscreen' })).toBeVisible();
+    if (mode === 'native') expect(await page.evaluate(() => document.fullscreenElement?.id)).toBe('emulator');
+    else await expect(page.locator('#emulator')).toHaveClass(/focus-view/);
+
+    await page.evaluate(() => { window.playback.blockSound = true; });
+    await speaker.press('Enter');
+    expect(await page.evaluate(() => window.playback.resumes)).toBe(1);
+    const prompt = page.locator('#audio-state');
+    await expect(prompt).toHaveText('Sound is waiting for the browser. Use the speaker or volume to try again.');
+    await expect(prompt).toBeInViewport({ ratio: 1 });
+    expect(await page.locator('.machine-state').evaluate(bar => bar.scrollHeight - bar.clientHeight)).toBe(0);
+  });
 }
 
 test('speaker shows audio initialization failure and retries while playback stays paused', async ({ page }) => {
