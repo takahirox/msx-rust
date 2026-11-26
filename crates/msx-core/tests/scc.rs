@@ -232,9 +232,6 @@ fn failed_imports_preserve_wave_ram_oscillators_mapper_and_psg_transactionally()
         }
         assert!(m.load_bios(&[0; 32]).is_err());
         assert!(m.load_msx2_firmware(&[0; 32], &[0; 32]).is_err());
-        assert!(m
-            .load_cartridge_for_model_owned(vec![0; 32], Mapper::KonamiScc, Model::Msx2)
-            .is_err());
         for address in 0x9800..0x9880 {
             assert_eq!(m.hardware.read(address), control.hardware.read(address));
         }

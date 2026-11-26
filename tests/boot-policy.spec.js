@@ -20,7 +20,6 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await expect(page.locator('#model')).toHaveValue('1');
       if(model==='0') await page.locator('#model').selectOption(model);
       await expect(page.locator('#status')).toContainText('Weave BASIC');
-      await expect(page.locator('#example')).toBeEnabled();
       await enter(page,'10 INPUT N$'); await enter(page,'20 PRINT N$;42'); await enter(page,'RUN');
       await expect(page.locator('#transcript')).toContainText('? ');
       await enter(page,'ORBIT'); await expect(page.locator('#transcript')).toContainText('ORBIT42\nREADY');
@@ -56,11 +55,10 @@ for(const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await expect(page.locator('#transcript')).toContainText('73\nREADY');
       }
       // Open ROM is the real file picker, with an independently authored BIOS service fixture.
-      const fixture=model==='0'?'dist/cbios-msx1-test-cartridge.rom':'dist/cbios-test-cartridge.rom';
-      const chooser=page.waitForEvent('filechooser'); await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#open-rom').click();
+      const fixture=model==='0'?'target/browser-fixtures/cbios-msx1-test-cartridge.rom':'target/browser-fixtures/cbios-test-cartridge.rom';
+      const chooser=page.waitForEvent('filechooser'); await (await mediaControl(page, 'insert-cartridge')).click();
       await (await chooser).setFiles(fixture); await pattern(page);
       await expect(page.locator('#status')).toContainText(`MSX${Number(model)+1} C-BIOS`);
-      await expect(page.locator('#example')).toBeDisabled();
       await expect(page.locator('#transcript')).toHaveText('');
       await page.locator('#screen').focus(); await page.keyboard.down('Space');
       await expect.poll(()=>pixel(page,8,16)).toEqual([255,255,255]);
@@ -107,9 +105,9 @@ for (const model of ['0', '1']) {
     await expect(page.locator('#transcript')).toContainText('READY');
     if (model === '0') await page.locator('#model').selectOption(model);
     await enter(page, '10 PRINT "PROGRAM KEPT"');
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
-    await page.locator('#tape').setInputFiles('dist/cassette-test.cas');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
+    await page.locator('#tape').setInputFiles('target/browser-fixtures/cassette-test.cas');
     await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
     const bios = await settingsControl(page, 'bios');
     await bios.focus();
@@ -134,7 +132,7 @@ for (const model of ['0', '1']) {
     });
     await expect(page.locator('#status')).toContainText('Import canceled');
     await expect(page.locator('#firmware')).toHaveValue('auto');
-    await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+    await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
     await enter(page, 'RUN');
     await expect(page.locator('#transcript')).toContainText('PROGRAM KEPT\nREADY');
@@ -153,16 +151,16 @@ test('a deferred paired firmware import cannot replace BASIC after Eject or acce
   });
   await page.goto('/'); await expect(page.locator('#transcript')).toContainText('READY');
   await page.locator('#model').selectOption('1');
-  await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom'); await pattern(page);
+  await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom'); await pattern(page);
   await page.locator('#settings').click();
   await page.locator('#bios').setInputFiles('dist/cbios_main_msx2.rom');
   await page.locator('#subrom').setInputFiles('dist/cbios_sub.rom');
   await page.evaluate(()=>{window.deferMain=true;});
   await (await settingsControl(page, 'apply-firmware')).click();
   await expect.poll(()=>page.evaluate(()=>typeof window.finishMain)).toBe('function');
-  await expect(page.locator('#open-rom')).toBeDisabled();
+  await expect(page.locator('#insert-cartridge')).toBeDisabled();
   // Even a synthetic second file-change event cannot commit a concurrent upload.
-  await page.locator('#cartridge').setInputFiles('dist/msx2-test-cartridge.rom');
+  await page.locator('#cartridge').setInputFiles('target/browser-fixtures/msx2-test-cartridge.rom');
   await expect.poll(()=>pixel(page,1,16)).toEqual([0,0,0]);
   await (await mediaControl(page, 'eject')).click();
   await page.evaluate(()=>window.finishMain());
@@ -170,5 +168,4 @@ test('a deferred paired firmware import cannot replace BASIC after Eject or acce
   await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
   await expect(page.locator('#firmware')).toHaveValue('auto');
   await expect(page.locator('#transcript')).toContainText('64\nREADY');
-  await expect(page.locator('#example')).toBeEnabled();
 });

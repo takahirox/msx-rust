@@ -111,7 +111,7 @@ Four compiled-Wasm cases load generated local firmware through existing file
 controls, read the same bytes from actual Canvas pixels on both models at `/`
 and `/msx-rust/`, clear the Canvas and verify output again after Reset. No new
 Wasm debug ABI, proprietary firmware, game data or external test corpus is used.
-Fixture provenance is recorded in `firmware/ROM-LICENSE.txt`.
+[Fixture provenance](../tests/fixtures/README.md)
 
 ## Mandatory checks
 
@@ -193,8 +193,7 @@ Native tests assert the 37-byte RAM trace and the entire exported image; sixteen
 compiled-Wasm cases at `/` and `/msx-rust/` require the same CPU success and exact
 image. The movement/readiness fixtures now explicitly release D8 with D0. No
 production status/timing helper supplies expected bytes, and no proprietary
-inputs, BIOS bypasses or new dependencies are used. Provenance is recorded in
-`firmware/ROM-LICENSE.txt`.
+inputs, BIOS bypasses or new dependencies are used. [Fixture provenance](../tests/fixtures/README.md)
 
 Baseline sensitivity: before changing the controller, three of the first eight
 new native tests failed: busy cancellation returned 00h instead of LOST DATA
@@ -1172,7 +1171,7 @@ MSX_TEST_BIOS=target/validation/cbios_main_msx1.rom npm test
    Enter `10` alone and `LIST` to verify deletion. Exercise arrow/Home/End editing.
 3. Click **Graphics demo** and confirm a yellow curve appears. Press Enter to return.
    Optionally run the numbered graphics example from README.
-4. Click **Enable audio**; type `BEEP` and listen for a steady tone. Type `SOUND 8,0`
+4. Click the **speaker button** to start sound, then type `BEEP` and listen for a steady tone. Type `SOUND 8,0`
    and confirm silence. Audio should remain silent before user activation.
 5. Expand **ROMs & advanced system options**, download `test-cartridge.rom`, then
    choose it with **Open ROM**. Confirm title and yellow sprite. Click the display and hold Space: hear the tone, then release to silence. Check that focus

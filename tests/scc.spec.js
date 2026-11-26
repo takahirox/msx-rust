@@ -1,4 +1,4 @@
-import { mediaControl, settingsControl } from './fixtures/player-controls.js';
+import { startSound, mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 
 // Observe the real compiled Wasm and scheduled native Web Audio buffers. No
@@ -155,11 +155,10 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await page.locator('#model').selectOption(model);
         await page.locator('#advanced-panel').evaluate(el => { el.showPopover(); });
         await (await settingsControl(page, 'mapper')).selectOption(mapper);
-        await page.locator('#cartridge').setInputFiles('dist/scc-test-cartridge.rom');
+        await page.locator('#cartridge').setInputFiles('target/browser-fixtures/scc-test-cartridge.rom');
         await expect(page.locator('#status')).toContainText(mapper === '0' ? 'Auto: Konami SCC' : '(Konami SCC)');
         await expect.poll(() => page.evaluate(() => window.sccWasm.msx_firmware())).toBe(1);
-        await page.locator('#audio').click();
-        await expect(page.locator('#audio')).toHaveText('Mute audio');
+        await startSound(page);
         // Actual Z80 boot completes when Space produces the independently known DAC levels.
         await page.locator('#screen').focus();
         await page.keyboard.down('Space');
@@ -207,17 +206,17 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
         await page.locator('#screen').focus();
         await page.keyboard.down('Space');
         await square(page);
-        await page.locator('#audio').click();
-        await expect.poll(() => page.evaluate(() => window.sccClock.state)).toBe('suspended');
+        await page.getByRole('button', { name: 'Mute', exact: true }).click();
+        await expect(page.locator('#mute')).toHaveAttribute('aria-pressed', 'true');
         const count = await page.evaluate(() => window.sccScheduled);
         await page.waitForTimeout(100);
         expect(await page.evaluate(() => window.sccScheduled)).toBe(count);
         await page.keyboard.up('Space');
-        await page.locator('#audio').click();
+        await page.getByRole('button', { name: 'Unmute', exact: true }).click();
         await silence(page);
         await page.evaluate(() => window.sccClock.suspend());
-        await expect(page.locator('#audio')).toHaveText('Resume audio');
-        await page.locator('#audio').click();
+        await expect(page.locator('#mute')).toHaveAccessibleName('Start sound');
+        await startSound(page);
         await page.locator('#screen').focus();
         await page.keyboard.down('Space');
         await square(page);

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 // Independent Canvas expectations use the repository's original font, rather
 // than examining probe opcodes or any emulator-private state.
-const disk = await readFile('dist/weave-disk-demo.dsk');
+const disk = await readFile('target/browser-fixtures/weave-test.dsk');
 const glyphs = [...'FH PASS'].map(ch => [...disk.subarray(2048 + ch.charCodeAt(0)*8, 2056 + ch.charCodeAt(0)*8)]);
 async function passed(page) {
   await expect.poll(() => page.locator('#screen').evaluate((canvas, glyphs) => {
@@ -24,8 +24,8 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
     const chooser = page.waitForEvent('filechooser');
-    await page.locator('#insert-cartridge').click(); await page.locator('#open-rom').click();
-    await (await chooser).setFiles('dist/fh-test-cartridge.rom');
+    await page.locator('#insert-cartridge').click();
+    await (await chooser).setFiles('target/browser-fixtures/fh-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await passed(page);
     await page.locator('#screen').evaluate(canvas => canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height));

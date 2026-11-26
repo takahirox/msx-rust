@@ -105,28 +105,6 @@ fn cartridge_reservation_failure_preserves_active_scc_and_psg() {
 }
 
 #[test]
-fn demo_model_display_allocation_failure_preserves_running_basic() {
-    for fail_size in [512 * 424 * 4, 131072] {
-        let mut m = Machine::default();
-        m.frame();
-        m.basic.submit("10 PRINT 73").unwrap();
-        let rom = firmware::msx2_cartridge();
-        let pc = m.cpu.pc;
-        let pixels = m.hardware.vdp.pixels.clone();
-        FAIL_SIZE.with(|s| s.set(fail_size));
-        let result = m.load_cartridge_for_model_owned(rom, Mapper::Plain, Model::Msx2);
-        FAIL_SIZE.with(|s| s.set(0));
-        assert!(result.unwrap_err().contains("memory"));
-        assert_eq!(m.hardware.model, Model::Msx1);
-        assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
-        assert_eq!(m.boot_policy, BootPolicy::Automatic);
-        assert_eq!(m.cpu.pc, pc);
-        assert_eq!(m.hardware.vdp.pixels, pixels);
-        assert!(m.basic.program.contains_key(&10));
-    }
-}
-
-#[test]
 fn sram_reservation_failure_preserves_unsaved_cartridge_and_reset_does_not_allocate() {
     for kind in [
         Mapper::Ascii8Sram2,
@@ -146,7 +124,7 @@ fn sram_reservation_failure_preserves_unsaved_cartridge_and_reset_does_not_alloc
         m.cpu.pc = 0x4321;
         let incoming = firmware::mapper_test_cartridge(kind);
         FAIL_SIZE.with(|s| s.set(kind.sram_size()));
-        let result = m.load_cartridge_for_model_owned(incoming, kind, Model::Msx2);
+        let result = m.load_cartridge_owned(incoming, kind);
         FAIL_SIZE.with(|s| s.set(0));
         assert!(result.unwrap_err().contains("memory"));
         assert_eq!(m.hardware.model, Model::Msx1);
@@ -170,7 +148,7 @@ fn disk_mount_boot_and_reset_commit_without_allocating() {
     for model in [Model::Msx1, Model::Msx2] {
         let mut m = Machine::default();
         m.set_model(model);
-        let staged = firmware::demo_disk();
+        let staged = firmware::test_disk();
         let rom = m.hardware.disk_rom.as_ptr();
         DENY.with(|s| s.set(true));
         m.mount_disk(staged, true).unwrap();

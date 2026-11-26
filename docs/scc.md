@@ -115,12 +115,11 @@ The original MIT-licensed generator in
 [`scc_fixture.rs`](../crates/msx-core/src/firmware/scc_fixture.rs) builds
 `scc-test-cartridge.rom`. The 64 KiB MegaROM executes Z80 memory/I/O instructions,
 provides enough evidence for existing Auto inference, and programs four distinct
-square/saw/triangle/pulse waves with five different periods and volumes. It ships
-through the existing asset generator and static distribution inventory, with
-provenance in `firmware/ROM-LICENSE.txt`. It contains no commercial melodies,
+square/saw/triangle/pulse waves with five different periods and volumes. `npm test` writes this fixture under
+`target/browser-fixtures/`. [Fixture provenance](../tests/fixtures/README.md) It contains no commercial melodies,
 recorded samples, proprietary firmware or third-party game bytes.
 
-Open it with Konami SCC or Auto on either model. Enable audio and focus the display:
+Open it with Konami SCC or Auto on either model. Use the speaker button to start browser sound, then focus the display:
 Space plays voice 1 (about 440.397 Hz); Up plays all five SCC voices; Left plays
 PSG (about 588.741 Hz); Right hides the register overlay; Down maps BIOS into
 page 2. Combine Right/Down to hide both; programmed sound continues. Combine Left

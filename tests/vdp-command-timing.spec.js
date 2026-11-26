@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
-const disk = await readFile('dist/weave-disk-demo.dsk');
+const disk = await readFile('target/browser-fixtures/weave-test.dsk');
 const glyphs = [...'CMD PASS'].map(ch => [...disk.subarray(2048 + ch.charCodeAt(0)*8, 2056 + ch.charCodeAt(0)*8)]);
 async function passed(page) {
   await expect.poll(() => page.locator('#screen').evaluate((canvas, glyphs) => {
@@ -21,7 +21,7 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(site);
     await expect(page.locator('#transcript')).toContainText('READY');
-    await page.locator('#cartridge').setInputFiles('dist/command-timing-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/command-timing-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('C-BIOS');
     await passed(page);
     await page.locator('#screen').evaluate(canvas => canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height));

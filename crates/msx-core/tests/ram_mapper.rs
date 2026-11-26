@@ -269,7 +269,7 @@ fn reset_is_zero_before_execution_and_original_loaders_initialize_through_z80() 
         match firmware {
             Firmware::Diagnostic => m.use_diagnostic().unwrap(),
             Firmware::Disk => {
-                m.mount_disk(firmware::demo_disk(), true).unwrap();
+                m.mount_disk(firmware::test_disk(), true).unwrap();
                 m.boot_disk().unwrap();
             }
             Firmware::Cbios => {
@@ -370,7 +370,7 @@ fn failed_imports_preserve_nondefault_selectors_ram_firmware_disk_and_unsaved_sr
     .unwrap();
     m.load_msx2_firmware(&firmware::msx2_bios(), &firmware::msx2_subrom())
         .unwrap();
-    m.mount_disk(firmware::demo_disk(), false).unwrap();
+    m.mount_disk(firmware::test_disk(), false).unwrap();
     m.hardware.output(0xa8, 0xd4);
     m.hardware.write(0xffff, 0xff);
     m.hardware.write(0x7000, 0x20);

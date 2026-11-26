@@ -1,4 +1,4 @@
-import { settingsControl } from './fixtures/player-controls.js';
+import { startSound, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -90,10 +90,13 @@ for (const site of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       expect(result.repeats.length).toBeGreaterThanOrEqual(8);
       expect(result.intervals.every(n => n === interval || n === interval + 1)).toBe(true);
 
-      // Also measure the actual buffers scheduled to the native audio destination.
-      await page.evaluate(() => { window.envelopeManual = false; });
-      await page.locator('#audio').click();
-      await expect(page.locator('#audio')).toHaveText('Mute audio');
+      // Measure fresh Web Audio buffers after the manual probe. A media gesture
+      // may already have started audio before the probe reset the chip phase.
+      await page.evaluate(() => {
+        window.envelopeAudio.length = 0;
+        window.envelopeManual = false;
+      });
+      await startSound(page);
       await expect.poll(() => page.evaluate(() => window.envelopeAudio.reduce((n, b) => n + b.data.length, 0))).toBeGreaterThan(14000);
       const scheduled = await page.evaluate(() => {
         // The existing latency cap may omit buffers during catch-up. Measure only

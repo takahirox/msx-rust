@@ -8,5 +8,4 @@ cp web/index.html web/style.css web/app.js web/display.js web/saves.js LICENSE f
 cp target/wasm32-unknown-unknown/release/msx_wasm.wasm dist/
 cp firmware/cbios/*.rom firmware/cbios/CBIOS-LICENSE.txt firmware/cbios/CBIOS-PROVENANCE.txt dist/
 cp third-party/emu2413-LICENSE.txt dist/
-cp -R demos dist/demos
 cargo run --locked --quiet -p msx-core --example assets -- dist

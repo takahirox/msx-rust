@@ -1,9 +1,9 @@
-import { mediaControl, settingsControl } from './fixtures/player-controls.js';
+import { startSound, mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 const sites=['/','http://127.0.0.1:41874/msx-rust/'];
 const file=(name,buffer)=>({name,buffer,mimeType:'application/octet-stream'});
-const firmware=await readFile('dist/fm-pac-diagnostic-firmware.rom');
+const firmware=await readFile('target/browser-fixtures/fm-pac-diagnostic-firmware.rom');
 async function hex(name,size,fill=0) {
   const bytes=Buffer.alloc(size,fill);
   for(const line of (await readFile(`tests/fixtures/${name}.hex`,'utf8')).split('\n')) {
@@ -68,16 +68,20 @@ const pattern=Array.from({length:8190},(_,i)=>(i*71+Math.floor(i/257))&255);
 for(const site of sites) {
   for(const model of [0,1]) test(`FM-PAC Z80 banks/SRAM, independent pitch, scheduled PCM and lifecycle MSX${model+1} ${site}`,async({page})=>{
     await boot(page,site);await page.locator('#model').selectOption(String(model));await install(page);
-    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page,model);
-    await page.getByRole('button',{name:'Enable audio',exact:true}).click();
-    await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({rate,pcm})=>rate===44100 && pcm.some(v=>Math.abs(v)>0.015) && pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
-    const scheduled=await page.evaluate(()=>window.musicScheduled.find(({rate,pcm})=>rate===44100 && pcm.some(v=>Math.abs(v)>0.015)));
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/fm-pac-test-cartridge.rom');await green(page,model);
+    await startSound(page);
+    // Media gestures can activate audio before cartridge boot. Skip the first
+    // partial tone buffer and sample sustained PCM from the native graph.
+    const sounding = () => page.evaluate(() => window.musicScheduled.filter(({rate,pcm}) =>
+      rate === 44100 && pcm.some(v => Math.abs(v) > 0.015) && pcm.every(v => Number.isFinite(v) && Math.abs(v) <= 1)));
+    await expect.poll(async () => (await sounding()).length).toBeGreaterThan(2);
+    const scheduled = (await sounding()).at(-1);
     expectSine(scheduled.pcm,4); // Independent pitch/gain on actual scheduled AudioBuffer.
     await page.evaluate(()=>window.manualMusic=true);
     const pcm=await page.evaluate(()=>{const w=window.musicWasm,pcm=[];for(let i=0;i<8;i++){w.msx_frame();pcm.push(...new Float32Array(w.memory.buffer,w.msx_audio(),w.msx_audio_len()));}return pcm;});expectSine(pcm);
-    await page.getByRole('button',{name:'Mute audio',exact:true}).click();
+    await page.getByRole('button',{name:'Mute',exact:true}).click();
     await page.locator('#reset').click();const muted=await advance(page,300);
-    await page.getByRole('button',{name:'Enable audio',exact:true}).click();
+    await page.getByRole('button', { name: 'Unmute', exact: true }).click();
     await page.locator('#reset').click();expect(await advance(page,300)).toEqual(muted);expect(muted.some(v=>Math.abs(v)>0.01)).toBe(true);
     await page.evaluate(()=>window.manualMusic=false);await page.locator('#pause').click();await page.waitForTimeout(50);
     const paused=await advance(page,0);await page.waitForTimeout(100);expect(await advance(page,0)).toEqual(paused);
@@ -87,14 +91,14 @@ for(const site of sites) {
     expect((await advance(page,300)).every(v=>v===0)).toBe(true);
   });
   test(`FM-PAC separate shared save roundtrip/reload, exact validation, conflicts and recovery ${site}`,async({page})=>{
-    await boot(page,site);await (await settingsControl(page, 'mapper')).selectOption('6');await page.locator('#cartridge').setInputFiles('dist/mapper-6.rom');
+    await boot(page,site);await (await settingsControl(page, 'mapper')).selectOption('6');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/mapper-6.rom');
     await expect(page.locator('#cartridge-status')).toContainText('mapper-6.rom');
     await install(page);
     await page.evaluate(pattern=>{const w=window.musicWasm;new Uint8Array(w.memory.buffer,w.msx_fm_pac_sram(),8190).set(pattern);new Uint8Array(w.memory.buffer,w.msx_sram(),w.msx_sram_len()).fill(0x79);},pattern);
     const container=await backup(page);expect(container.size).toBe(8190);expect(container.mapper).toBe('original-fm-pac');
     expect([...Buffer.from(container.data,'base64')]).toEqual(pattern);
     await page.locator('#reset').click();expect(await saved(page)).toEqual(pattern);
-    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');expect(await saved(page)).toEqual(pattern);
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');expect(await saved(page)).toEqual(pattern);
     await page.locator('#model').selectOption('0');expect(await saved(page)).toEqual(pattern);
     await (await settingsControl(page, 'builtin')).click();expect(await saved(page)).toEqual(pattern);
     // Exact checksum/version/firmware/profile/length validation before mutation.
@@ -137,7 +141,7 @@ for(const site of sites) {
       await page.locator('#pac-rom').setInputFiles(file(name,bytes));await expect(page.locator('#status')).toContainText('FM-PAC import failed');expect(await saved(page)).toEqual(pattern);
     }
     await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await settingsControl(page, 'cancel-pac-rom-import')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
-    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
+    await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');await expect(page.locator('#emulator')).toHaveAttribute('aria-busy','false');
     await page.locator('#pac-rom').setInputFiles(file('deferred.rom',firmware));await (await mediaControl(page, 'eject')).click();await page.evaluate(()=>window.finishMusic());expect(await saved(page)).toEqual(pattern);
     await page.evaluate(()=>{const key=Object.keys(localStorage).find(k=>k.startsWith('msx-rust:fm-pac:v1:'));localStorage[key]='corrupted';});
     await page.reload();await expect(page.locator('#transcript')).toContainText('READY');await page.locator('#settings').click();await install(page);
@@ -161,7 +165,7 @@ for(const site of sites) {
     await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
     const downloading=page.waitForEvent('download');await (await mediaControl(page, 'export-disk')).click();const exported=await readFile(await(await downloading).path());
     const expected=Buffer.from(disk);expected.fill(0x6c,8*512,9*512);expect(exported).toEqual(expected);
-    await page.getByRole('button',{name:'Enable audio',exact:true}).click();await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({pcm})=>pcm.some(v=>Math.abs(v)>0.05)&&pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
+    await startSound(page);await expect.poll(()=>page.evaluate(()=>window.musicScheduled.some(({pcm})=>pcm.some(v=>Math.abs(v)>0.05)&&pcm.every(v=>Number.isFinite(v)&&Math.abs(v)<=1)))).toBe(true);
     expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_fm_pac_profile(),w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_firmware()];})).toEqual([1,1,1,3]);
     await (await settingsControl(page, 'remove-pac-rom')).click();expect(await page.evaluate(()=>{const w=window.musicWasm;return [w.msx_sound_cartridge_profile(),w.msx_disk_profile(),w.msx_disk_len()];})).toEqual([1,1,368640]);
   });
@@ -191,7 +195,7 @@ for(const site of sites) test(`FM-PAC real Wasm allocation failure preserves ins
     };
   },bounded.toString('base64'));
   await boot(page,site);await install(page);
-  await (await settingsControl(page, 'firmware')).selectOption('diagnostic');await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('dist/fm-pac-test-cartridge.rom');await green(page);
+  await (await settingsControl(page, 'firmware')).selectOption('diagnostic');await (await settingsControl(page, 'mapper')).selectOption('1');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/fm-pac-test-cartridge.rom');await green(page);
   await page.evaluate(()=>window.failMusicAllocation=true);
   await page.locator('#pac-rom').setInputFiles(file('replacement.rom',firmware));await expect(page.locator('#status')).toContainText('FM-PAC import failed');
   expect(await page.evaluate(()=>window.musicReservation)).toBe(0);

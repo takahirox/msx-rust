@@ -1,7 +1,6 @@
 # Browser deployment
 
-The target project site is <https://takahirox.github.io/msx-rust/>.
-This is a target URL, not a verified working deployment.
+The project site is <https://takahirox.github.io/msx-rust/>.
 
 ## Application integration and reproducible build
 
@@ -33,41 +32,19 @@ system libraries. GitHub's Ubuntu runner provides rustup and Python 3; `rustup s
 installs the toolchain specified by the repository before the build runs.
 
 The build script compiles `msx-wasm` in release mode with `--locked`, recreates
-`dist/`, copies only the web entry files and license notices, then generates the
-original firmware, cartridge, disk and CAS fixtures from Rust source. It also
-copies only the three pinned C-BIOS 0.29a ROMs and their separate license/provenance records from `firmware/cbios/`.
-It also copies the checked-in `demos/` directory without network access.
-The complete deployable inventory is **46 files**:
+`dist/` and assembles the Pages artifact. It contains 18 files.
 
-- `index.html`, `style.css`, `app.js`, `display.js`, `saves.js`
-- `msx_wasm.wasm`
-- `weave-boot.rom`, `test-cartridge.rom`
-- `fm-pac-diagnostic-firmware.rom`, `fm-pac-test-cartridge.rom` (original MIT external accessory diagnostics; [provenance](fm-pac.md#behavioral-references-and-provenance))
-- `music-diagnostic-firmware.rom`, `music-test-cartridge.rom`, `emu2413-LICENSE.txt` (original diagnostics and MIT synthesis adaptation; [provenance](msx-music.md#synthesis-and-adaptation-audit))
-- `cassette-test-cartridge.rom`, `cassette-test.cas` (original Z80 loader and synthetic CAS; [provenance](cassette.md#references-and-original-fixtures))
-- `weave-disk.rom`, `weave-disk-demo.dsk`
-- `fh-test-cartridge.rom` (original MIT horizontal interrupt diagnostic)
-- `command-timing-test-cartridge.rom` (original MIT phased LMMV/LMMM diagnostic; [profile and provenance](msx2.md#autonomous-lmmvlmmm-timing-issue-77))
-- `scc-test-cartridge.rom`, `joystick-test-cartridge.rom`, `ram-mapper-test-cartridge.rom`
-- `mapper-6.rom`, `mapper-7.rom`, `mapper-8.rom`, `mapper-9.rom`, `mapper-10.rom`
-- `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `msx2-test-cartridge.rom`
-- `cbios-test-cartridge.rom`, `cbios-msx1-test-cartridge.rom`
+- `index.html`, `style.css`, `app.js`, `display.js`, `saves.js`, `msx_wasm.wasm`
+- `weave-boot.rom`, `weave-msx2-boot.rom`, `msx2-diagnostic-sub.rom`, `weave-disk.rom`
 - `cbios_main_msx1.rom`, `cbios_main_msx2.rom`, `cbios_sub.rom`
-- `LICENSE`, `ROM-LICENSE.txt`, `CBIOS-LICENSE.txt`, `CBIOS-PROVENANCE.txt`
-- `demos/manifest.json`, `demos/PROVENANCE.txt`, `demos/plustakermsx.rom`, `demos/yokosht.rom`
-- `demos/PLUSTAKER-LICENSE.txt`, `demos/YOKO-LICENSE.txt`, `demos/Z88DK-LICENSE.txt`
+- `LICENSE`, `ROM-LICENSE.txt`, `CBIOS-LICENSE.txt`, `CBIOS-PROVENANCE.txt`, `emu2413-LICENSE.txt`
 
-The [asset provenance inventory](../firmware/ROM-LICENSE.txt) identifies the original
-MIT-licensed firmware, glyphs and cartridges, and separately BSD-2-Clause C-BIOS. No
-proprietary BIOS/BASIC or commercial games are shipped. The two third-party
-MSX1 demo games retain their own MIT licenses and z88dk runtime notice; see the
-[per-binary and asset redistribution audit](../demos/PROVENANCE.txt) and
-[pinned manifest](../demos/manifest.json). No npm packages are shipped.
-The YM2413 synthesis adaptation retains its upstream MIT notice in
-`emu2413-LICENSE.txt`; this must accompany redistributed native/Wasm binaries.
-The three unmodified official release binaries are also embedded in the core/Wasm, so automatic cartridge boot in either model needs no firmware network
-request or SourceForge access. All assets can be served locally without external
-network access; browser tests never download firmware at runtime.
+Firmware is also embedded in Wasm. Normal boot and local file imports require
+only the app's HTML, JS, CSS and Wasm requests. ROM, DSK and CAS media come from
+the user. `npm test` generates local-only test media under
+`target/browser-fixtures/`; Chromium imports them as files from disk while the
+HTTP servers serve the same Pages artifact at both roots.
+[Runtime asset inventory](../firmware/ROM-LICENSE.txt) · [Test fixture inventory](../tests/fixtures/README.md)
 
 [CBIOS-PROVENANCE.txt](../firmware/cbios/CBIOS-PROVENANCE.txt) records the original
 SourceForge release/archive URLs, version 0.29a, archive size and SHA-256, all three
@@ -77,15 +54,11 @@ License section from that release's `doc/cbios.txt`, with all copyright holders,
 redistribution conditions and disclaimer. Its binary redistribution condition requires
 these notices in accompanying materials; retain both records with the site and
 Wasm/ROM redistributions. C-BIOS remains separate from the repository's MIT license.
-No C-BIOS logo, BASIC, music or disk ROM is needed or distributed. The app links the notices
-and downloadable independent service-test cartridge under advanced options.
-`scripts/check-dist.mjs` rejects missing, empty or unexpected output files and checks
-Wasm exports, ROM headers/sizes, exact pinned C-BIOS SHA-256 hashes, unchanged
-license/provenance records, relative HTML links and the relative display-module
-import. It also validates the exact demo inventory, ROM hashes/sizes and
-byte-identical license/provenance files, plus
-required source attribution. Missing, extra or modified assets fail the check.
-Only `dist/` is uploaded by the Pages workflow.
+The Settings panel links both C-BIOS notices. The YM2413 synthesis adaptation
+retains its upstream MIT notice in `emu2413-LICENSE.txt`, which accompanies native
+and Wasm distributions. `scripts/check-dist.mjs` validates the exact file list,
+Wasm imports and required exports, firmware headers and sizes, pinned C-BIOS
+SHA-256 hashes, notice bytes and relative HTML links.
 
 All module, stylesheet and Wasm URLs are relative; there is no client-side router.
 Browser tests start two isolated Python static servers: the ordinary local site
@@ -102,7 +75,7 @@ boots the diagnostic cartridge and checks 512-wide Canvas output. See the
 the earlier deployment integration. Issue #15 additionally requires post-merge
 verification of the actual published C-BIOS path, static firmware/notices and
 service cartridge, with deployment run and observed results recorded; this remains
-pending until performed on the deployed build.
+pending in the historical record. The service-test cartridge is now a locally generated fixture.
 
 ## Pre-merge validation
 
@@ -176,21 +149,11 @@ catalogs without losing the previous program or model; a delayed fetch cannot
 replace a newer cartridge after Eject. Requests stay within the static site's
 own root and no storage/upload/analytics path is used.
 
-Inspected screenshots retained in this commit:
-[plustaker](demo-evidence/plustaker.png), [YOKO](demo-evidence/yoko.png),
-[MSX2 SCREEN 8](demo-evidence/msx2.png), and
-[320px Pages-prefix layout](demo-evidence/mobile.png).
-Both games show running scenes after input; the diagnostic shows the emulated
-color ramp, sprite and command output. The suite also verifies SCREEN 7 output
-and restoration through Reset. Full captures remain in `test-results/demo-*.png`
-and the CI `browser-evidence` artifact when the workflow runs.
-
-Official game ROMs were compared byte-for-byte with the pinned upstream Git
-objects. Each retained upstream license was checked for complete copyright,
-permission and disclaimer text. Whitespace normalization is recorded in the
-[redistribution audit](../demos/PROVENANCE.txt); game ROMs are unmodified.
-Live deployment and its Actions run/commit have not been verified in this node;
-Issue #21's required post-merge checks remain pending below.
+The screenshots and binary redistribution audit remain available in the
+[pre-removal revision](https://github.com/takahirox/msx-rust/tree/ca1e8d0b60d142fcbfae8c07014454aee3d18ca0/docs/demo-evidence)
+and [its provenance record](https://github.com/takahirox/msx-rust/blob/ca1e8d0b60d142fcbfae8c07014454aee3d18ca0/demos/PROVENANCE.txt).
+The original live check was recorded as pending. Issue #87 retires the sample
+catalog and replaces the deployed sample workflow with local media imports.
 
 ## One-time repository owner setup
 
@@ -231,12 +194,19 @@ the Pages publishing source, environment rules and deployment job logs. The
 
 Follow the current [merge and follow-up lifecycle](development-flow.md#5-merge-and-report-any-required-follow-up): close the implemented source Issue after successful merge, then record the required deployment checks. Historical pending results below remain unverified; closure does not claim they passed. Track actual defects in linked follow-up Issues.
 
-Issue #21 additionally requires verifying Demo ROMs on the actual deployed site:
-record the Actions run and deployed commit, launch a third-party MSX1 game and
-the original MSX2 diagnostic, observe video and working input, check Reset/Eject/
-BASIC restoration, and fetch all manifest ROM/license URLs without errors. File
-live-site defects as separate follow-up Issues. This remains pending until after
-merge; local screenshots and prefix tests do not establish deployment success.
+For Issue #87, after Pages succeeds, open the published player and record the
+deployed revision, Actions run, browser and operating system. Record the following observations.
+
+- MSX2 Weave BASIC boots, and the UI and network requests contain no sample media or catalog.
+- The speaker can start sound with a gesture, mute it, and restore the previous volume.
+- Switching tabs suspends a running session, and returning resumes it. A manual Pause survives the same tab changes.
+
+Use a private original fixture if local media are needed. Record any blocked or
+unperformed checks. The pre-merge browser tests drive visibility events and frame
+timestamps deterministically while running real Wasm and Web Audio. Actual tab
+switching on the published site is part of this post-merge check.
+
+The checklist below records the original integration's historical deployment work.
 
 After this integration is reviewed and merged:
 

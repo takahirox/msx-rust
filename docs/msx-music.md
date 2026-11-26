@@ -112,11 +112,11 @@ the installed firmware, checks unconnected port reads, programs a custom sine
 through spaced OUTs, hides the ROM and halts with sound continuing. Exact success
 RAM at C100h–C105h is **01 08 57 65 FF A5** and the backdrop is green (MSX2 RGBA
 36,218,36,255). A missing fixture fails red. Both ROMs are generated from
-`crates/msx-core/src/firmware/music_fixture.rs` and included in the distribution.
+`crates/msx-core/src/firmware/music_fixture.rs` under `target/browser-fixtures/` by `npm test`.
 
 Browser reproduction: install the diagnostic firmware under MSX-MUSIC, select
 **Original diagnostic loader**, choose **Plain** mapper, then open the test
-cartridge. Enable audio. Reset repeats the test; Remove MSX-MUSIC silences it.
+cartridge as a local file. Use the speaker button to start browser sound. Reset repeats the test; Remove MSX-MUSIC silences it.
 No proprietary ROM or game is necessary.
 
 `tests/fixtures/music-disk.py` generates a separate original disk fixture by adding

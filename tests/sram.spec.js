@@ -38,7 +38,7 @@ async function sram(page) {
 async function pixel(page) {
   return page.locator('#screen').evaluate(c=>Array.from(c.getContext('2d').getImageData(0,0,1,1).data).slice(0,3));
 }
-async function open(page,id,rom=`dist/mapper-${id}.rom`) {
+async function open(page,id,rom=`target/browser-fixtures/mapper-${id}.rom`) {
   await (await settingsControl(page, 'mapper')).selectOption(String(id));
   await page.locator('#cartridge').setInputFiles(rom);
   await expect(page.locator('#status')).toContainText(`(${names[id]})`);
@@ -71,7 +71,7 @@ for (const site of sites) {
       expect(await pixel(page)).toEqual([36,36,255]);
       await increment(page);expect((await sram(page))[0]).toBe(5);
       const savedPixel=await pixel(page);expect(savedPixel).toEqual([72,109,255]);
-      const save=await backup(page),bytes=await readFile(`dist/mapper-${id}.rom`);
+      const save=await backup(page),bytes=await readFile(`target/browser-fixtures/mapper-${id}.rom`);
       expect(save.rom).toBe(createHash('sha256').update(bytes).digest('hex'));
       expect(save.mapper).toBe(id);expect(save.size).toBe(id%2===0?2048:8192);
       const key=`msx-rust:sram:v1:${save.rom}:${id}`;
@@ -95,7 +95,7 @@ for (const site of sites) {
         await expect(page.locator('#status')).toContainText('ROM import failed');expect((await sram(page))[0]).toBe(5);
       }
       await page.evaluate(()=>{window.failUpload=true;});
-      await page.locator('#cartridge').setInputFiles(`dist/mapper-${id}.rom`);
+      await page.locator('#cartridge').setInputFiles(`target/browser-fixtures/mapper-${id}.rom`);
       await expect(page.locator('#status')).toContainText('unchanged');expect((await sram(page))[0]).toBe(5);
       await page.evaluate(()=>{window.failUpload=false;});
       for(const bad of ['{', {...save,version:2},{...save,rom:'0'.repeat(64)},{...save,mapper:99},{...save,size:1},{...save,checksum:'00000000'}, {...save,data:save.data.slice(4)},'x'.repeat(17000)]) {
@@ -143,16 +143,16 @@ for (const site of sites) {
     const invalid=Buffer.alloc(512*1024);invalid.set([65,66]);
     await page.locator('#cartridge').setInputFiles(file('wrong-layout.rom',invalid));
     await expect(page.locator('#status')).toContainText('exactly 384 KiB');expect(await pixel(page)).toEqual([218,218,36]);
-    await (await settingsControl(page, 'mapper')).selectOption('0');await page.locator('#cartridge').setInputFiles('dist/mapper-10.rom');
+    await (await settingsControl(page, 'mapper')).selectOption('0');await page.locator('#cartridge').setInputFiles('target/browser-fixtures/mapper-10.rom');
     await expect(page.locator('#status')).toContainText('manual R-Type');expect(await pixel(page)).toEqual([218,218,36]);
   });
-  test(`SRAM survives demo, firmware and model transitions; stale save reads are ignored at ${site}`,async({page})=>{
+  test(`SRAM survives local replacement, firmware and model transitions; stale save reads are ignored at ${site}`,async({page})=>{
     test.setTimeout(60000);
-    await start(page,site);await open(page,7);await boot(page);await increment(page);
+    await start(page,site,'0');await open(page,7);await boot(page);await increment(page);
     const saved=await backup(page);
     // Disk priority parks the cartridge and its SRAM; Reset and failed imports
     // cannot corrupt it, and Eject disk resumes the same C-BIOS cartridge.
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await (await mediaControl(page, 'boot-disk')).click(); await advance(page,100);
     expect(await backup(page)).toEqual(saved);
     await page.locator('#reset').click(); await advance(page,100);
@@ -161,10 +161,10 @@ for (const site of sites) {
     await expect(page.locator('#status')).toContainText('previous disk unchanged');
     expect(await backup(page)).toEqual(saved);
     await (await mediaControl(page, 'eject-disk')).click(); await boot(page,5);
-    // Replacement saves outgoing data before the demo's declared-model change.
-    await expect(page.locator('#demo-plustaker')).toBeEnabled();
-    await (await mediaControl(page, 'insert-cartridge')).click(); await page.locator('#demo-plustaker').click();
-    await expect(page.locator('#status')).toContainText('plustaker (Plain)');
+    // Replacement saves outgoing data before installing the new local ROM.
+    await (await settingsControl(page, 'mapper')).selectOption('1');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-msx1-test-cartridge.rom');
+    await expect(page.locator('#status')).toContainText('cbios-msx1-test-cartridge.rom (Plain)');
     await expect(page.locator('#export-save')).toBeDisabled();
     await open(page,7);await boot(page,5);
     await (await settingsControl(page, 'firmware')).selectOption('cbios');await expect(page.locator('#export-save')).toBeDisabled();

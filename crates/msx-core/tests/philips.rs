@@ -222,7 +222,7 @@ fn transactional_installation_lifecycle_and_firmware_coexistence() {
         });
         assert!(m.has_philips_disk_rom());
         m.remove_philips_disk_rom();
-        m.mount_disk(firmware::demo_disk(), true).unwrap();
+        m.mount_disk(firmware::test_disk(), true).unwrap();
         m.boot_disk().unwrap();
         assert!(m.install_philips_disk_rom(rom()).is_err());
         assert_eq!(m.hardware.firmware, Firmware::Disk);

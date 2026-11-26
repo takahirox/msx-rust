@@ -1,11 +1,11 @@
 import { mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
-const demo = await readFile('dist/weave-disk-demo.dsk');
+const fixtureDisk = await readFile('target/browser-fixtures/weave-test.dsk');
 const sites = ['http://127.0.0.1:41873/', 'http://127.0.0.1:41874/msx-rust/'];
 // Observe the real framebuffer glyphs, independently of status/transcript strings.
 async function textOnScreen(page, text, row) {
-  const glyphs = [...text].map(ch => [...demo.subarray(2048 + ch.charCodeAt(0)*8, 2056 + ch.charCodeAt(0)*8)]);
+  const glyphs = [...text].map(ch => [...fixtureDisk.subarray(2048 + ch.charCodeAt(0)*8, 2056 + ch.charCodeAt(0)*8)]);
   await expect.poll(() => page.locator('#screen').evaluate((canvas, {glyphs,row}) => {
     const pixels = canvas.getContext('2d').getImageData(0,row*8,glyphs.length*8,8).data;
     return glyphs.every((glyph,col) => glyph.every((bits,y) => Array.from({length:8},(_,x) => {
@@ -26,10 +26,10 @@ async function space(page) {
 }
 test('only Drive A can cancel a pending disk import with a cassette mounted', async ({ page }) => {
   await page.addInitScript(() => {
-    const read = Response.prototype.arrayBuffer;
-    Response.prototype.arrayBuffer = async function () {
+    const read = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = async function () {
       const bytes = await read.call(this);
-      if (!this.url.endsWith('/weave-disk-demo.dsk')) return bytes;
+      if (this.name !== 'weave-test.dsk') return bytes;
       return new Promise(resolve => {
         window.finishDiskRead = async () => {
           resolve(bytes);
@@ -41,7 +41,7 @@ test('only Drive A can cancel a pending disk import with a cassette mounted', as
   });
   await page.goto('/');
   await expect(page.locator('#transcript')).toContainText('READY');
-  await page.locator('#tape').setInputFiles('dist/cassette-test.cas');
+  await page.locator('#tape').setInputFiles('target/browser-fixtures/cassette-test.cas');
   await expect(page.locator('#tape-status')).toContainText('cassette-test.cas');
   await page.locator('#screen').focus();
   await page.keyboard.type('10 PRINT 73');
@@ -61,7 +61,9 @@ test('only Drive A can cancel a pending disk import with a cassette mounted', as
     const expected = mounted ? 'original.dsk · 360 KiB' : 'Empty';
     await expect(diskStatus).toContainText(expected);
     await insert.press('Enter');
-    await page.getByRole('button', { name: 'Weave disk demo', exact: true }).press('Enter');
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('#open-dsk').press('Enter');
+    await (await chooser).setFiles('target/browser-fixtures/weave-test.dsk');
     await expect.poll(() => page.evaluate(() => typeof window.finishDiskRead)).toBe('function');
     await expect(page.locator('#disk-picker')).toBeHidden();
     await expect(cancel).toHaveCount(1);
@@ -110,13 +112,17 @@ test('the disk picker shows and applies protection for the incoming disk', async
   const insert = page.getByRole('button', { name: 'Insert disk', exact: true });
   const picker = page.getByRole('region', { name: 'Insert disk', exact: true });
   const mountReadOnly = picker.getByRole('checkbox', { name: 'Mount as read-only', exact: true });
-  const demoButton = picker.getByRole('button', { name: 'Weave disk demo', exact: true });
+  const mountFixture = async () => {
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('#open-dsk').click();
+    await (await chooser).setFiles('target/browser-fixtures/weave-test.dsk');
+  };
   const mountedReadOnly = page.getByRole('checkbox', { name: 'Read-only', exact: true });
   const diskStatus = page.locator('#disk-status');
 
   await insert.click();
-  await demoButton.click();
-  await expect(diskStatus).toContainText('weave-disk-demo.dsk · 720 KiB · read-only');
+  await mountFixture();
+  await expect(diskStatus).toContainText('weave-test.dsk · 720 KiB · read-only');
   await mountedReadOnly.uncheck();
   await expect(diskStatus).toContainText('writable');
   await page.getByRole('button', { name: 'Eject disk', exact: true }).click();
@@ -136,8 +142,8 @@ test('the disk picker shows and applies protection for the incoming disk', async
   await insert.click();
   await mountReadOnly.uncheck();
   await expect(mountedReadOnly).toBeChecked();
-  await demoButton.click();
-  await expect(diskStatus).toContainText('weave-disk-demo.dsk · 720 KiB · writable');
+  await mountFixture();
+  await expect(diskStatus).toContainText('weave-test.dsk · 720 KiB · writable');
   await expect(mountedReadOnly).not.toBeChecked();
   await insert.click();
   await expect(mountReadOnly).toBeChecked();
@@ -153,7 +159,7 @@ for (const site of sites) {
       if (model==='0') await page.locator('#model').selectOption('0');
       await (await mediaControl(page, 'insert-disk')).click();
       const picker=page.waitForEvent('filechooser'); await page.locator('#open-dsk').click();
-      await (await picker).setFiles('dist/weave-disk-demo.dsk');
+      await (await picker).setFiles('target/browser-fixtures/weave-test.dsk');
       await expect(page.locator('#disk-status')).toContainText('720 KiB · read-only');
       await expect(page.locator('#transcript')).toContainText('READY');
       await (await mediaControl(page, 'boot-disk')).click();
@@ -162,18 +168,18 @@ for (const site of sites) {
       await textOnScreen(page,'Z80 LOADED FROM DRIVE A',7);
       await expect(page.locator('#transcript')).toHaveText('');
       await space(page); await textOnScreen(page,'WRITE PROTECTED',16);
-      expect(await exportDisk(page)).toEqual(demo);
+      expect(await exportDisk(page)).toEqual(fixtureDisk);
       await (await mediaControl(page, 'disk-protected')).uncheck();
       await space(page); await textOnScreen(page,'SAVED',16);
       await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
       await page.screenshot({path:`test-results/disk-msx${Number(model)+1}-${site.includes('41874')?'pages':'root'}.png`});
       // Modified media cannot be discarded by Eject or a replacement upload.
       await (await mediaControl(page, 'eject-disk')).click(); await expect(page.locator('#status')).toContainText('Export modified DSK before ejecting');
-      await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+      await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
       await expect(page.locator('#status')).toContainText('before replacing');
       await page.locator('#reset').click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
       await expect(page.locator('#disk-status')).toContainText('unsaved modifications');
-      const expected=Buffer.from(demo); expected[9216]=1;
+      const expected=Buffer.from(fixtureDisk); expected[9216]=1;
       expect(await exportDisk(page)).toEqual(expected);
       await (await mediaControl(page, 'eject-disk')).click(); await expect(page.locator('#transcript')).toContainText('READY');
       await expect(page.locator('#disk-status')).toHaveText('Empty');
@@ -192,15 +198,15 @@ for (const site of sites) {
       };
     });
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await page.locator('#screen').focus(); await page.keyboard.type('10 PRINT 73'); await page.keyboard.press('Enter');
-    for (const [name,buffer] of [['bad.dsk',Buffer.alloc(17)],['short.dsk',demo.subarray(0,-1)],['empty.dsk',Buffer.alloc(0)],['bad.fdi',demo]]) {
+    for (const [name,buffer] of [['bad.dsk',Buffer.alloc(17)],['short.dsk',fixtureDisk.subarray(0,-1)],['empty.dsk',Buffer.alloc(0)],['bad.fdi',fixtureDisk]]) {
       await page.locator('#disk').setInputFiles({name,mimeType:'application/octet-stream',buffer});
       await expect(page.locator('#status')).toContainText('Session and previous disk unchanged');
-      await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+      await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
     }
     await page.evaluate(()=>window.failDiskUpload=true);
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await expect(page.locator('#status')).toContainText('Session and previous disk unchanged');
     await page.evaluate(()=>window.failDiskUpload=false);
     const raw=await page.evaluate(()=>{
@@ -223,7 +229,7 @@ for (const site of sites) {
     await expect(page.locator('#firmware')).toHaveValue('local');
     await (await settingsControl(page, 'builtin')).click(); await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
     // A cartridge deliberately takes priority, retaining mounted media and normal C-BIOS policy.
-    await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('MSX2 C-BIOS'); await expect(page.locator('#disk-status')).toContainText('720 KiB');
     await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
     await (await settingsControl(page, 'builtin')).click(); await expect(page.locator('#transcript')).toContainText('READY');
@@ -245,17 +251,17 @@ for (const site of sites) {
       };
     });
     await page.goto(site); await expect(page.locator('#transcript')).toContainText('READY');
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await page.evaluate(()=>window.deferDisk=true);
-    await page.locator('#disk').setInputFiles({name:'deferred.dsk',mimeType:'application/octet-stream',buffer:demo});
+    await page.locator('#disk').setInputFiles({name:'deferred.dsk',mimeType:'application/octet-stream',buffer:fixtureDisk});
     await expect.poll(()=>page.evaluate(()=>typeof window.finishDisk)).toBe('function');
-    await expect(page.locator('#open-rom')).toBeDisabled();
-    await page.locator('#cartridge').setInputFiles('dist/cbios-test-cartridge.rom');
+    await expect(page.locator('#insert-cartridge')).toBeDisabled();
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-test-cartridge.rom');
     await (await mediaControl(page, 'eject-disk')).click(); await page.evaluate(()=>window.finishDisk());
     await expect(page.locator('#disk-status')).toHaveText('Empty');
     await expect(page.locator('#transcript')).toContainText('READY');
     await expect(page.locator('#firmware')).toHaveValue('auto');
-    await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+    await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
     await (await mediaControl(page, 'boot-disk')).click(); await textOnScreen(page,'WEAVE DISK BOOT',4);
   });
 }

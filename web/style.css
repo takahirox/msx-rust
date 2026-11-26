@@ -94,14 +94,15 @@ label { font-size: 13px; }
 .control-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 #focus-screen { min-inline-size: 134px; color: var(--accent); }
 #pause { min-inline-size: 70px; }
-#audio { min-inline-size: 110px; }
+#mute { display: inline-grid; place-items: center; }
+#mute .mute-mark, #mute[aria-pressed="true"] .sound-waves { display: none; }
+#mute[aria-pressed="true"] .mute-mark { display: inline; }
+#audio-state:empty { display: none; }
 .volume { display: flex; align-items: center; gap: 4px; min-height: 44px; padding-inline: 2px; }
 #volume { width: 55px; margin: 0; }
 .machine-state { display: flex; flex-wrap: wrap; gap: 3px 12px; color: var(--muted); font-size: 12px; padding: 4px 1px; }
 .machine-state > span, .slot-status { min-width: 0; overflow-wrap: anywhere; }
 .error, #status[data-kind="error"], #disk-status[data-warning="true"] { color: #8e331a; }
-.starters { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 14px; margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--border); }
-.starters h2 { font-size: 13px; }
 
 .machine-media { background: var(--paper); border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
 .machine-choice, .media-slot { padding: 13px 15px; }
@@ -169,23 +170,16 @@ label { font-size: 13px; }
 #settings-message { margin: 8px 0; }
 .settings-section button { margin-block: 4px; }
 .sound-option + .sound-option { margin-top: 12px; }
-.notes, .demo-details { margin: 5px 0; }
-.notes summary, .demo-details summary { padding: 8px 2px; color: var(--accent); }
-.notes summary:hover, .demo-details summary:hover { text-decoration: underline; }
+.notes { margin: 5px 0; }
+.notes summary { padding: 8px 2px; color: var(--accent); }
+.notes summary:hover:hover { text-decoration: underline; }
 .license { font-size: 12px; color: var(--muted); }
 code, kbd, pre { font-family: ui-monospace, monospace; }
 kbd { border: 1px solid var(--border); border-radius: 3px; padding: 1px 3px; }
 pre { overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 6px; background: #eef2ed; padding: 10px; font-size: 12px; }
 #transcript { max-height: 320px; overflow: auto; }
-.picker-local, .demo-choice button { width: 100%; text-align: start; }
+.picker-local { width: 100%; text-align: start; }
 .picker-local { margin: 3px 0; }
-.media-picker h4 { margin-top: 10px; }
-.demo-choice { padding: 6px 0 2px; }
-.demo-choice button { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.demo-model { color: var(--muted); font-weight: 450; font-size: 12px; }
-.demo-details { font-size: 12px; }
-.demo-details summary { padding-block: 4px; }
-#demo-message:empty { display: none; }
 
 .computer:is(:fullscreen, .focus-view) {
   --accent: #a1d5b8;
@@ -207,7 +201,7 @@ body.focus-view-active { overflow: hidden; }
 .computer:is(:fullscreen, .focus-view) :is(button, select) { color: #eff3ef; background: #26332e; border-color: #5b7167; }
 .computer:is(:fullscreen, .focus-view) button:hover:enabled { background: #32483e; }
 .computer:is(:fullscreen, .focus-view) :focus-visible { outline-color: #a1d5b8; }
-.computer:is(:fullscreen, .focus-view) :is(.starters, .scale, #status:not([data-kind="error"])) { display: none; }
+.computer:is(:fullscreen, .focus-view) :is(.scale, #status:not([data-kind="error"])) { display: none; }
 /* Reserve a line so renderer fallback cannot resize the display and retry. */
 .computer:is(:fullscreen, .focus-view) .machine-state { display: block; flex: none; height: 24px; overflow: auto; text-align: center; color: #c8dbd2; }
 .computer:is(:fullscreen, .focus-view) #status[data-kind="error"] { color: #ffbfaa; }
@@ -227,5 +221,4 @@ body.focus-view-active { overflow: hidden; }
   .app-header nav :is(button, a) { padding-inline: 7px; }
   .screen-frame { padding: 9px; }
   .toolbar { gap: 6px; }
-  .starters button { padding-inline: 8px; }
 }

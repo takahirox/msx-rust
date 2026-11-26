@@ -125,7 +125,7 @@ fn z80_disk_boot_and_write_on_both_models() {
         m.set_model(model);
         m.frame();
         assert!(m.boot_disk().is_err());
-        let disk = firmware::demo_disk();
+        let disk = firmware::test_disk();
         m.mount_disk(disk.clone(), false).unwrap();
         assert_eq!(m.hardware.firmware, Firmware::WeaveBasic);
         m.boot_disk().unwrap();
@@ -174,7 +174,7 @@ fn slots_failures_overrides_and_parked_sram() {
     let mut m = Machine::default();
     m.set_model(Model::Msx2);
     m.frame();
-    m.mount_disk(firmware::demo_disk(), true).unwrap();
+    m.mount_disk(firmware::test_disk(), true).unwrap();
     m.use_cbios().unwrap();
     let bios = m.hardware.bios.clone();
     assert!(m.boot_disk().is_err());
@@ -526,7 +526,7 @@ fn firmware_buffer_bounds_preserve_stack_and_report_completed_sectors() {
     ] {
         let mut m = Machine::default();
         m.set_model(Model::Msx2);
-        let image = firmware::demo_disk();
+        let image = firmware::test_disk();
         m.mount_disk(image.clone(), true).unwrap();
         m.boot_disk().unwrap();
         // Call the real driver from a small independent RAM program, without

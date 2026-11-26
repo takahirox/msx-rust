@@ -1,3 +1,4 @@
+import { startSound } from './fixtures/player-controls.js';
 import { test, expect } from '@playwright/test';
 import { displayPreferenceKey } from '../web/display.js';
 import { installInterlaceProbe } from './fixtures/interlace.js';
@@ -109,8 +110,7 @@ test('default CRT softens and modulates the visible MSX2 image, with exact Clean
 
   await paste(page, 'COLOR 15,0:SCREEN 8:LINE (0,0)-(127,105),255,BF:LINE (128,0)-(255,105),28,BF:LINE (0,106)-(127,211),224,BF\n');
   await expect.poll(async () => (await sample(page, [corners[2]]))[0][1]).toBeGreaterThan(215);
-  await page.locator('#audio').click();
-  await expect(page.locator('#audio-state')).toHaveText('Audio on');
+  await startSound(page);
   await page.locator('#pause').click();
   const paused = await page.evaluate(() => window.displayCalls);
   const points = [...corners, ...edge, ...chroma, ...rows];
@@ -209,7 +209,8 @@ test('512-wide and woven interlaced output retain geometry in fullscreen while p
   // different colors in its two fields.
   await page.evaluate(() => { window.manualAnimation = true; });
   await installInterlaceProbe(page);
-  await expect(page.locator('#status')).toContainText('user BIOS');
+  await expect(page.locator('#status')).toHaveText(/Paused · MSX2 · user BIOS/);
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await page.waitForFunction(() => typeof window.advanceDisplay === 'function');
   await page.evaluate(() => {
     window.advanceDisplay(0);
@@ -246,27 +247,28 @@ test('512-wide and woven interlaced output retain geometry in fullscreen while p
   await expect(screen(page)).toBeFocused();
 });
 
-test('the Pages subpath presents an MSX1 demo with CRT and forwards joystick input', async ({ page }) => {
+test('the Pages subpath presents a local MSX1 cartridge with CRT and forwards joystick input', async ({ page }) => {
   await watchWasm(page);
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await boot(page, 'http://127.0.0.1:41874/msx-rust/');
   await expect(crt(page)).toBeVisible();
-  await page.locator('#insert-cartridge').click(); await page.locator('#demo-plustaker').click();
+  await page.locator('#model').selectOption('0');
+  await page.locator('#cartridge').setInputFiles('target/browser-fixtures/cbios-msx1-test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('MSX1 C-BIOS');
-  await expect(page.locator('#status')).toContainText('plustaker');
-  await expect(page.locator('#model')).toHaveValue('0');
+  await expect(page.locator('#cartridge-status')).toContainText('cbios-msx1-test-cartridge.rom');
   await expect(crt(page)).toBeVisible();
-  // The running game's bottom HUD contains white glyphs on black.
+  // The BIOS probe makes its second tile in the third row white while Space
+  // is held. Sample the composited CRT image near the center of that tile.
   const { width } = await surface(page).boundingBox();
-  const hud = Array.from({ length: 31 * 12 }, (_, i) =>
-    [165 + i % 31 * 10, 420 + Math.floor(i / 31) * 5].map(value => Math.floor(value * width / 640)));
-  await expect.poll(async () => {
-    const pixels = await sample(page, hud);
-    return pixels.filter(rgb => rgb.every(channel => channel > 200) && new Set(rgb).size > 1).length;
-  }).toBeGreaterThan(6);
+  const tile = [[12, 20].map(value => Math.round(value * width / 256))];
+  const tileBrightness = async () => Math.min(...(await sample(page, tile))[0]);
   await screen(page).click();
   await expect(screen(page)).toBeFocused();
+  await page.keyboard.down('Space');
+  await expect.poll(tileBrightness).toBeGreaterThan(150);
+  await page.keyboard.up('Space');
+  await expect.poll(tileBrightness).toBeLessThan(20);
   await page.keyboard.down('ArrowUp');
   expect(await page.evaluate(() => window.displayCalls.sticks)).toEqual([62, 63]);
   await page.keyboard.up('ArrowUp');
@@ -376,8 +378,7 @@ test('paused fullscreen allocation failure stays Clean until resized smaller', a
   await boot(page);
   await paste(page, 'COLOR 15,15:CLS\n');
   await expect.poll(async () => (await sample(page, chroma))[0].every(channel => channel > 215)).toBe(true);
-  await page.locator('#audio').click();
-  await expect(page.locator('#audio-state')).toHaveText('Audio on');
+  await startSound(page);
   await page.locator('#pause').click();
   const paused = await page.evaluate(() => window.displayCalls);
   const normalWidth = await crt(page).evaluate(canvas => canvas.width);

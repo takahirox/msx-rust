@@ -18,7 +18,7 @@ status distinguishes end-of-tape from the independent motor latch. Reset retains
 bytes, rate and position and reapplies the existing PPI reset latch C=00h, so the
 motor becomes enabled. Firmware, cartridge and model transitions use that same
 reset policy; they neither eject nor rewind. Use Rewind followed by Reset to
-restart the bundled diagnostic. Tape-only controls preserve pause, CPU, firmware,
+restart the locally generated cassette test fixture. Tape-only controls preserve pause, CPU, firmware,
 cartridge banks/SRAM, disk/interface state, BASIC and audio state.
 
 C-BIOS has no original MSX BASIC; Weave BASIC does not implement cassette commands.
@@ -106,8 +106,8 @@ We use standard rates instead of upstream's accelerated 3744-baud policy. No
 upstream code or ROM bytes were copied and no upstream runtime comparison was run.
 
 `crates/msx-core/src/firmware/cassette_fixture.rs` independently authors the MIT
-Z80 cartridge and CAS generated as `dist/cassette-test-cartridge.rom` and
-`dist/cassette-test.cas` by the existing assets example/build script. They contain
+Z80 cartridge and CAS generated as `cassette-test-cartridge.rom` and
+`cassette-test.cas` under `target/browser-fixtures/` by `npm test`. They contain
 only original instructions and synthetic data. The cartridge boots under unmodified
 bundled C-BIOS on either model, then directly uses PSG/PPI/VDP ports. It measures
 high pulses to calibrate the decoder, counts both leaders, decodes a 16-byte

@@ -160,8 +160,7 @@ performed. No required post-merge verification.
 
 Device decoding, Z80 fixtures, synthetic data and test expectations were authored
 independently under MIT. Existing synthesis attribution, tables and full upstream
-notice are retained unchanged; [asset inventory](../firmware/ROM-LICENSE.txt) and
-[deployment inventory](deployment.md) include the two new original ROM assets.
+notice are retained unchanged; [test fixture inventory](../tests/fixtures/README.md) records the two original ROM fixtures.
 
 ## Local execution record (2026-10-24)
 

@@ -2,6 +2,10 @@
   "name": "msx-rust-browser-tests",
   "private": true,
   "type": "module",
-  "scripts": {"test": "playwright test", "test:browser": "playwright test"},
+  "scripts": {
+    "pretest": "cargo run --locked --quiet -p msx-core --example fixtures -- target/browser-fixtures",
+    "test": "playwright test",
+    "test:browser": "npm test --"
+  },
   "devDependencies": {"@playwright/test": "1.64.1"}
 }

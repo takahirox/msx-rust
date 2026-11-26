@@ -1,4 +1,4 @@
-import { mediaControl, settingsControl } from './fixtures/player-controls.js';
+import { startSound, mediaControl, settingsControl } from './fixtures/player-controls.js';
 import { test, expect } from './fixtures/clean-display.js';
 import { readFile } from 'node:fs/promises';
 
@@ -82,7 +82,6 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
       await expect(target.locator('#model')).toHaveValue('1');
       await expect(target.locator('#firmware')).toHaveValue('auto');
       await expect(target.locator('#eject')).toBeDisabled();
-      await expect(target.locator('#example')).toBeEnabled();
       await expect(target.locator('#transcript')).toContainText('READY');
       const first = await target.evaluate(() => window.firstFrame);
       expect(first).toMatchObject({ model: 1, selected: '1', firmware: 0, policy: 0 });
@@ -94,8 +93,6 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     };
     await page.goto(path);
     await startup(page);
-    await page.locator('#example').click();
-    await expect.poll(() => visibleDigits(page)).toEqual([1, 2, 3, 4, 5]);
     // SCREEN 8 and the last scanline exercise real V9938 bitmap VRAM and Canvas.
     await enter(page, 'SCREEN 8:LINE (4,4)-(120,211),28,BF');
     await expect(page.locator('#screen')).toHaveAttribute('width', '256');
@@ -159,7 +156,7 @@ test('boots, edits, lists and runs a BASIC program with visible output', async (
 });
 test('graphics uses the VDP and Escape interrupts an infinite BASIC program', async ({ page }) => {
   await boot(page, '/', '0');
-  await page.getByRole('button', { name: 'Graphics demo' }).click();
+  await enter(page, 'SCREEN 2:FOR X=0 TO 255:PSET X,INT(96+60*SIN(X/20)),10:NEXT X');
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(200);
   await page.screenshot({ path: 'test-results/graphics.png', fullPage: true });
   await page.keyboard.press('Escape');
@@ -207,19 +204,14 @@ test('Web Audio plays a PSG tone and fresh buffers settle to silence after mutin
     };
   });
   await boot(page);
-  await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
-  await expect(page.locator('#audio')).toHaveText('Mute audio');
-  await page.getByRole('button', { name: 'Sound demo', exact: true }).click();
-  await expect(page.locator('#tone')).toHaveText('Stop tone');
-  await expect(page.locator('#screen')).toBeFocused();
-  await expect(page.locator('#transcript')).toContainText('>BEEP');
+  await startSound(page);
+  await enter(page, 'BEEP');
   await expect.poll(() => page.evaluate(() => window.audioEvidence.maximum)).toBeGreaterThan(0.05);
   await expect.poll(() => page.evaluate(() => window.audioEvidence.zeroCrossings)).toBeGreaterThan(10);
   const evidence = await page.evaluate(() => window.audioEvidence);
   expect(evidence.state).toBe('running');
   expect(evidence.connections).toBeGreaterThan(0);
-  await page.getByRole('button', { name: 'Stop tone', exact: true }).click();
-  await expect(page.locator('#tone')).toHaveText('Sound demo');
+  await enter(page, 'SOUND 8,0');
   // Bound settling to 500 ms: the app queues at most 150 ms of playback,
   // and the PSG DC filter gets 250 ms to decay, plus frame/command margin.
   const settledAfter = await page.evaluate(() => window.audioClock.currentTime + 0.5);
@@ -233,15 +225,7 @@ test('Web Audio plays a PSG tone and fresh buffers settle to silence after mutin
   const muted = await completedFreshBuffers();
   expect(muted.every(buffer => Number.isFinite(buffer.maximum) && buffer.maximum < 0.0001)).toBe(true);
   expect(await page.evaluate(() => window.audioClock.state)).toBe('running');
-  await page.getByRole('button', { name: 'Mute audio', exact: true }).click();
-  await expect(page.locator('#audio-state')).toContainText('Audio off');
-  await expect.poll(() => page.evaluate(() => window.audioClock.state)).toBe('suspended');
-  await page.getByRole('button', { name: 'Enable audio', exact: true }).click();
-  await expect(page.locator('#audio')).toHaveText('Mute audio');
-  await page.evaluate(() => window.audioClock.suspend());
-  await expect(page.locator('#audio')).toHaveText('Resume audio');
-  await page.getByRole('button', { name: 'Resume audio', exact: true }).click();
-  await expect(page.locator('#audio-state')).toHaveText('Audio on');
+
 });
 test('file picker boots original cartridge, handles bad ROMs, ejects and loads local system ROM', async ({ page }) => {
   const errors = await boot(page, '/', '0');
@@ -249,11 +233,8 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   page.on('request', request => requests.push({ method: request.method(), url: request.url() }));
   const chooser = page.waitForEvent('filechooser');
   await (await mediaControl(page, 'insert-cartridge')).click();
-  await page.locator('#open-rom').click();
-  await (await chooser).setFiles('dist/test-cartridge.rom');
+  await (await chooser).setFiles('target/browser-fixtures/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('test-cartridge.rom');
-  await expect(page.locator('#example')).toBeDisabled();
-  await expect(page.locator('#starters')).toBeHidden();
   await expect(page.locator('#eject')).toBeEnabled();
   await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeGreaterThan(20);
   await page.screenshot({ path: 'test-results/cartridge.png', fullPage: true });
@@ -262,7 +243,6 @@ test('file picker boots original cartridge, handles bad ROMs, ejects and loads l
   await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await (await mediaControl(page, 'eject')).click();
   await expect(page.locator('#transcript')).toContainText('READY');
-  await expect(page.locator('#example')).toBeEnabled();
   await expect(page.locator('#screen')).toBeFocused();
   // Authored fixture fills the screen with VDP backdrop color A, then HALTs.
   // Its OUT F1 is deliberately ignored: native services must be disabled.
@@ -285,16 +265,16 @@ test('deployment assets are complete and Wasm has no imports', async ({ page }) 
   const module = await WebAssembly.compile(bytes);
   expect(WebAssembly.Module.imports(module)).toEqual([]);
   expect(WebAssembly.Module.exports(module).some(e => e.name === 'msx_frame')).toBe(true);
-  for (const name of ['app.js', 'style.css', 'test-cartridge.rom', 'weave-boot.rom']) expect((await page.request.get(`/${name}`)).ok()).toBe(true);
+  for (const name of ['app.js', 'style.css', 'weave-boot.rom']) expect((await page.request.get(`/${name}`)).ok()).toBe(true);
+  expect((await page.request.get('/test-cartridge.rom')).status()).toBe(404);
 });
 
-// Opt-in external BIOS integration. Curated licensed games are tested separately;
-// this optional path never downloads user firmware.
+// Opt-in external BIOS integration using a local firmware file.
 if (process.env.MSX_TEST_BIOS) {
   test('locally supplied C-BIOS boots the authored cartridge in the browser', async ({ page }) => {
     const errors = await boot(page, '/', '0');
     await page.locator('#bios').setInputFiles(process.env.MSX_TEST_BIOS);
-    await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');
     await expect.poll(async () => (await colors(page))['212,193,84'] || 0, { timeout: 20000 }).toBeGreaterThan(20);
     await page.screenshot({ path: 'test-results/cbios-cartridge.png', fullPage: true });
     expect(errors).toEqual([]);
@@ -424,7 +404,7 @@ for (const [size, mapper] of [[64, '2'], [128, '3'], [256, '4'], [512, '5'], [10
     await expect(page.locator('#cartridge-status')).toContainText(`authored-128-${replacementMapper}.rom`);
     await backdrop(page, '212,193,84');
     await (await settingsControl(page, 'mapper')).selectOption('0');
-    await page.locator('#cartridge').setInputFiles('dist/test-cartridge.rom');
+    await page.locator('#cartridge').setInputFiles('target/browser-fixtures/test-cartridge.rom');
     await expect(page.locator('#status')).toContainText('test-cartridge.rom');
     await expect.poll(async () => (await colors(page))['212,193,84'] || 0).toBeLessThan(256 * 192);
     await (await mediaControl(page, 'eject')).click();
@@ -645,17 +625,15 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   }
   // A first ROM import can be canceled from the empty cartridge slot.
   await enter(page, '20 PRINT 64');
-  await page.locator('#disk').setInputFiles('dist/weave-disk-demo.dsk');
+  await page.locator('#disk').setInputFiles('target/browser-fixtures/weave-test.dsk');
   const insert = await mediaControl(page, 'insert-cartridge');
-  await insert.press('Enter');
   await page.evaluate(() => { window.deferFileRead = true; });
   const chooser = page.waitForEvent('filechooser');
-  await page.locator('#open-rom').press('Enter');
+  await insert.press('Enter');
   await (await chooser).setFiles(megaRom(64, '2'));
   await expect.poll(() => page.evaluate(() => typeof window.finishFileRead)).toBe('function');
   await expect(page.locator('#cartridge')).toHaveValue('');
   const cancel = page.getByRole('button', { name: 'Cancel import', exact: true });
-  await expect(page.locator('#cartridge-picker')).toBeHidden();
   await expect(cancel).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(insert).toBeFocused();
@@ -663,7 +641,7 @@ test('resource failures and canceled asynchronous reads preserve the active cart
   await page.evaluate(() => window.finishFileRead());
   await expect(page.locator('#status')).toContainText('Import canceled');
   await expect(page.locator('#cartridge-status')).toHaveText('Empty');
-  await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+  await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
   await enter(page, 'RUN');
   await expect(page.locator('#transcript')).toContainText('86\n64\nREADY');
 
@@ -814,7 +792,7 @@ test('switching firmware in phone Settings returns focus to the unobstructed dis
   await expect(screen).toBeInViewport({ ratio: 1 });
 });
 
-test('focus is visible, Tab leaves the display, and samples resume paused BASIC', async ({ page }) => {
+test('focus is visible, Tab leaves the display, and Reset restarts paused BASIC', async ({ page }) => {
   await boot(page);
   await expect(page.locator('#focus-screen')).toHaveText('Keyboard active');
   await page.keyboard.press('Tab');
@@ -826,13 +804,10 @@ test('focus is visible, Tab leaves the display, and samples resume paused BASIC'
   await expect(page.locator('#screen')).toBeFocused();
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(page.locator('#screen')).toBeFocused();
-  await page.getByRole('button', { name: 'BASIC example', exact: true }).click();
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
   await expect(page.locator('#status')).toHaveText('Running · MSX2 · Weave BASIC');
   await expect(page.locator('#screen')).toBeFocused();
-  await expect(page.locator('#transcript')).toContainText('1\n2\n3\n4\n5\nREADY');
-  await page.getByRole('button', { name: 'Reset', exact: true }).click();
-  await expect(page.locator('#screen')).toBeFocused();
-  await expect(page.locator('#transcript')).not.toContainText('>RUN');
+  await expect(page.locator('#transcript')).toContainText('READY');
 });
 
 for (const mode of ['native', 'unavailable', 'rejected']) {
@@ -874,7 +849,6 @@ for (const mode of ['native', 'unavailable', 'rejected']) {
       await page.locator('#fullscreen').click();
       await page.keyboard.press('Escape');
       await expect(page.locator('#emulator')).not.toHaveClass(/focus-view/);
-      await expect(page.locator('#example')).toBeEnabled();
       expect(await page.locator('#help-panel').evaluate(el => el.inert)).toBe(false);
     }
   });
@@ -887,7 +861,7 @@ test('loading disables commands and shows progress before Wasm is ready', async 
   await page.goto('/');
   await expect(page.locator('#status')).toHaveText('Loading WebAssembly…');
   await expect(page.locator('#model')).toHaveValue('1');
-  for (const id of ['pause', 'open-rom', 'audio', 'example', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
+  for (const id of ['pause', 'insert-cartridge', 'mute', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
   await expect(page.locator('#fullscreen')).toBeEnabled();
   // Simulate a browser restoring a stale form selection while Wasm downloads.
   await page.locator('#model').evaluate(select => { select.value = '0'; });
@@ -904,7 +878,7 @@ for (const failure of ['http', 'invalid-wasm']) {
     await expect(page.locator('#status')).toContainText('Unable to start:');
     await expect(page.locator('#status')).toContainText('Reload to retry');
     await expect(page.locator('#status')).toHaveAttribute('data-kind', 'error');
-    for (const id of ['pause', 'open-rom', 'audio', 'example', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
+    for (const id of ['pause', 'insert-cartridge', 'mute', 'bios']) await expect(page.locator(`#${id}`)).toBeDisabled();
     await expect(page.locator('#emulator')).toHaveAttribute('aria-busy', 'false');
   });
 }
@@ -914,23 +888,12 @@ test('unrecognized ROMs keep the selected machine and explain how to recover', a
   await page.locator('#cartridge').setInputFiles({ name: 'large.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(49153) });
   await expect(page.locator('#status')).toContainText('Select its documented mapper');
   await expect(page.locator('#eject')).toBeDisabled();
-  await expect(page.locator('#example')).toBeEnabled();
   await page.locator('#settings').click();
-  await page.locator('#bios').setInputFiles('dist/test-cartridge.rom');
+  await page.locator('#bios').setInputFiles('target/browser-fixtures/test-cartridge.rom');
   await expect(page.locator('#status')).toContainText('32 KiB');
   await expect(page.locator('#status')).toContainText('Selected ROMs are unchanged');
-  await expect(page.locator('#example')).toBeEnabled();
   await (await settingsControl(page, 'builtin')).click();
   await expect(page.locator('#status')).toHaveText('Running · Weave BASIC');
-});
-
-test('audio unlock failures are visible and retryable', async ({ page }) => {
-  await page.addInitScript(() => { window.AudioContext = class { constructor() { throw new Error('Audio is unavailable'); } }; });
-  await boot(page);
-  await page.locator('#tone').click();
-  await expect(page.locator('#status')).toContainText('Audio: Audio is unavailable');
-  await expect(page.locator('#audio')).toBeEnabled();
-  await expect(page.locator('#tone')).toHaveText('Sound demo');
 });
 
 for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
@@ -938,7 +901,7 @@ for (const path of ['/', 'http://127.0.0.1:41874/msx-rust/']) {
     const errors = await boot(page, path, '0');
     const load = async name => {
       await enter(page, 'NEW');
-      const source = await readFile(`examples/basic/${name}.bas`, 'utf8');
+      const source = await readFile(`tests/fixtures/basic/${name}.bas`, 'utf8');
       for (const line of source.trim().split('\n')) await enter(page, line);
       await enter(page, 'RUN');
     };

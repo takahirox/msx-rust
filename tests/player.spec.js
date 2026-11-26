@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { startSound } from './fixtures/player-controls.js';
 import { readFile } from 'node:fs/promises';
 
 test.use({ launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } });
@@ -66,44 +67,33 @@ test('sound cartridge changes keep keyboard focus in phone Settings', async ({ p
   await expect(settings).toBeFocused();
 });
 
-test('keyboard dismissal, demo and local ROM share the Pages cartridge picker', async ({ page }) => {
+test('the Pages player dismisses disk settings with Escape and opens local ROMs directly', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await boot(page, 'http://127.0.0.1:41874/msx-rust/');
   await expect(page.locator('#crt-screen')).toBeVisible();
   await page.screenshot({ path: 'test-results/player-desktop-crt.png' });
   const screenBounds = await display(page).boundingBox();
-  const cartridge = page.getByRole('button', { name: 'Insert cartridge', exact: true });
-  const insert = picker(page, 'cartridge');
-  await cartridge.focus();
-  await page.keyboard.press('Enter');
+  const disk = page.getByRole('button', { name: 'Insert disk', exact: true });
+  const insert = picker(page, 'disk');
+  await disk.press('Enter');
   await expect(insert).toBeVisible();
   await page.keyboard.press('Tab');
-  await expect(insert.getByRole('button', { name: 'Close cartridge picker' })).toBeFocused();
-  await page.screenshot({ path: 'test-results/player-cartridge-picker.png' });
+  await expect(insert.getByRole('button', { name: 'Close disk picker' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(insert).toBeHidden();
-  await expect(cartridge).toBeFocused();
+  await expect(disk).toBeFocused();
   await expect(page.locator('#transcript')).not.toContainText('BREAK');
 
-  await cartridge.click();
-  await chooseFile(page, insert.getByRole('button', { name: 'Open local ROM…' }), []);
-  await expect(insert).toBeVisible();
+  const cartridge = page.getByRole('button', { name: 'Insert cartridge', exact: true });
+  await chooseFile(page, cartridge, []);
   await expect(status(page)).toHaveText('Running · MSX2 · Weave BASIC');
-  await insert.getByRole('button', { name: 'plustaker MSX1' }).click();
-  await expect(status(page)).toContainText('MSX1 C-BIOS');
-  await expect(page.locator('#cartridge-status')).toHaveText('plustaker (Plain)');
-  await expect(page.getByRole('region', { name: 'BASIC starters' })).toBeHidden();
-  await expect(display(page)).toBeFocused();
-
-  await cartridge.click();
   const filename = `local-${'long-name-'.repeat(18)}.rom`;
-  await chooseFile(page, insert.getByRole('button', { name: 'Open local ROM…' }), {
-    name: filename, mimeType: 'application/octet-stream', buffer: await readFile('dist/cbios-msx1-test-cartridge.rom'),
+  await chooseFile(page, cartridge, {
+    name: filename, mimeType: 'application/octet-stream', buffer: await readFile('target/browser-fixtures/cbios-test-cartridge.rom'),
   });
   await expect(page.locator('#cartridge-status')).toContainText(filename);
   await expect(display(page)).toBeFocused();
-  await cartridge.click();
-  await chooseFile(page, insert.getByRole('button', { name: 'Open local ROM…' }), {
+  await chooseFile(page, cartridge, {
     name: 'invalid.rom', mimeType: 'application/octet-stream', buffer: Buffer.alloc(17),
   });
   await expect(status(page)).toContainText('Selected ROMs are unchanged');
@@ -116,10 +106,9 @@ test('keyboard dismissal, demo and local ROM share the Pages cartridge picker', 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Use Weave BASIC' }).click();
   await expect(page.getByRole('region', { name: 'Settings' })).toBeHidden();
-  await expect(status(page)).toHaveText('Running · Weave BASIC');
+  await expect(status(page)).toHaveText('Running · MSX2 · Weave BASIC');
   await expect(page.locator('#cartridge-status')).toHaveText('Empty');
-  await page.getByRole('button', { name: 'BASIC example' }).click();
-  await expect(page.locator('#transcript')).toContainText('1\n2\n3\n4\n5\nREADY');
+  await expect(page.locator('#transcript')).toContainText('READY');
 });
 
 test('a canceled import can retry the same file while its original read is pending', async ({ page }) => {
@@ -133,8 +122,8 @@ test('a canceled import can retry the same file while its original read is pendi
   });
   await boot(page);
   const cases = [
-    ['insert-cartridge', 'open-rom', 'cartridge', 'cartridge-status', 'cbios-test-cartridge.rom'],
-    ['insert-disk', 'open-dsk', 'disk', 'disk-status', 'weave-disk-demo.dsk'],
+    ['insert-cartridge', 'insert-cartridge', 'cartridge', 'cartridge-status', 'cbios-test-cartridge.rom'],
+    ['insert-disk', 'open-dsk', 'disk', 'disk-status', 'weave-test.dsk'],
     ['insert-cassette', 'open-cas', 'cassette', 'tape-status', 'cassette-test.cas'],
     ['settings', 'open-disk-rom', 'disk-rom', 'disk-profile-status', 'weave-disk.rom'],
     ['settings', 'open-music-rom', 'music-rom', 'music-status', 'music-diagnostic-firmware.rom'],
@@ -149,7 +138,8 @@ test('a canceled import can retry the same file while its original read is pendi
         const openFile = page.locator(`#${open}`);
         if (!await openFile.isVisible()) await page.locator(`#${trigger}`).click();
         // A repeated filesystem path exercises Chromium's native same-file behavior.
-        await chooseFile(page, openFile, `dist/${filename}`);
+        const directory = filename === 'weave-disk.rom' ? 'dist' : 'target/browser-fixtures';
+        await chooseFile(page, openFile, `${directory}/${filename}`);
       };
       await selectFile();
       const pendingReads = () => page.evaluate(() => window.pendingFileReads.length);
@@ -198,9 +188,11 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
   });
   await boot(page);
   const volume = page.getByRole('slider', { name: 'Volume' });
-  await volume.fill('35');
   expect(await page.evaluate(() => window.playerAudio.length)).toBe(0);
-  await page.getByRole('button', { name: 'Sound demo' }).click();
+  await volume.fill('35');
+  await startSound(page);
+  await page.keyboard.type('BEEP');
+  await page.keyboard.press('Enter');
   await expect(page.locator('#transcript')).toContainText('>BEEP');
   await expect.poll(() => page.evaluate(() => window.playerAudio[0].routed)).toBe(true);
   expect(await page.evaluate(() => window.playerAudio[0].output.gain.value)).toBeCloseTo(0.35);
@@ -210,9 +202,10 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
   await expect.poll(() => page.evaluate(() => window.playerAudio[0].output.gain.value)).toBeCloseTo(0.36, 3);
 
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
-  await page.getByRole('button', { name: 'Mute audio' }).click();
-  await expect.poll(() => page.evaluate(() => window.playerAudio[0].context.state)).toBe('suspended');
-  await page.getByRole('button', { name: 'Enable audio' }).click();
+  await page.getByRole('button', { name: 'Mute', exact: true }).click();
+  await expect(volume).toHaveValue('0');
+  await page.getByRole('button', { name: 'Unmute', exact: true }).click();
+  await expect(volume).toHaveValue('36');
   expect(await page.evaluate(() => window.playerAudio.length)).toBe(1);
   await page.getByRole('combobox', { name: 'Display scale' }).selectOption('1');
   expect((await display(page).boundingBox()).width).toBe(256);
@@ -234,16 +227,16 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
   await expect(page.getByRole('region', { name: 'Help' })).toBeHidden();
 
   await page.getByRole('button', { name: 'Insert disk', exact: true }).click();
-  await picker(page, 'disk').getByRole('button', { name: 'Weave disk demo' }).click();
+  await chooseFile(page, page.locator('#open-dsk'), 'target/browser-fixtures/weave-test.dsk');
   await expect(status(page)).toContainText('Choose Boot disk');
-  await expect(page.locator('#disk-status')).toContainText('weave-disk-demo.dsk');
+  await expect(page.locator('#disk-status')).toContainText('weave-test.dsk');
   await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
   await expect(page.locator('#transcript')).toContainText('>BEEP');
 
   await page.getByRole('button', { name: 'Insert cassette', exact: true }).click();
   const tape = picker(page, 'cassette');
   await tape.getByLabel('CAS rate').selectOption('2400');
-  await chooseFile(page, tape.getByRole('button', { name: 'Open local CAS…' }), 'dist/cassette-test.cas');
+  await chooseFile(page, tape.getByRole('button', { name: 'Open local CAS…' }), 'target/browser-fixtures/cassette-test.cas');
   await expect(page.locator('#tape-status')).toContainText('cassette-test.cas · 2400 baud · paused');
   await page.getByRole('button', { name: 'Rewind tape' }).click();
   await page.getByRole('button', { name: 'Eject tape' }).click();
@@ -251,10 +244,16 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
   await expect(page.getByRole('button', { name: 'Insert cassette', exact: true })).toBeFocused();
   await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
 
+  await page.getByRole('combobox', { name: 'Display', exact: true }).selectOption('clean');
   await page.getByRole('button', { name: 'Boot disk' }).click();
-  await expect(status(page)).toContainText('Weave disk firmware');
+  await expect(status(page)).toContainText('Running · MSX2 · Weave disk firmware');
+  // Wait for the boot program's first white glyph on the native framebuffer.
+  await expect.poll(() => display(page).evaluate(canvas =>
+    [...canvas.getContext('2d').getImageData(0, 32, 1, 1).data]
+  )).toEqual([255, 255, 255, 255]);
   await page.getByLabel('Read-only', { exact: true }).uncheck();
   await display(page).focus();
+  await expect(display(page)).toBeFocused();
   await page.keyboard.down('Space');
   await expect(page.locator('#disk-status')).toContainText('unsaved modifications — export to keep');
   await page.keyboard.up('Space');
@@ -264,7 +263,7 @@ test('mobile media, scale and browser output gain preserve the paused machine', 
   await expect(page.locator('#disk-status')).toHaveAttribute('data-warning', 'true');
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export DSK' }).click();
-  expect((await download).suggestedFilename()).toBe('weave-disk-demo-modified.dsk');
+  expect((await download).suggestedFilename()).toBe('weave-test-modified.dsk');
   await page.getByRole('button', { name: 'Eject disk' }).click();
   await expect(page.locator('#disk-status')).toHaveText('Empty');
 });
